@@ -1,0 +1,8 @@
+[package]
+name = "rwkv-agent"
+version = "0.1.0"
+edition = "2024"
+description = "RWKV is an RNN with great LLM performance and parallelizable like a Transformer"
+license = "Apache-2.0"
+
+[dependencies]
