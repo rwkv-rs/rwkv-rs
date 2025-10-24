@@ -1,0 +1,16 @@
+[package]
+name = "rwkv-config"
+description = "Shared configuration schemas, builders, and OnceCell registries for rwkv-rs"
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+once_cell = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+rwkv-derive = { path = "../rwkv-derive" }

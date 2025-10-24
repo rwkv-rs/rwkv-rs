@@ -1,5 +1,24 @@
-max_width = 100
+edition = "2024"
 
-# uncomment and run `cargo +nightly fmt --all` to find and fix lines that are too long (and therefore break autoformatting)
-# error_on_line_overflow = true
-# format_strings = true
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+
+newline_style = "Unix"
+wrap_comments = true
+format_code_in_doc_comments = true
+reorder_imports = true
+
+group_imports = "StdExternalCrate"
+imports_granularity = "Crate"
+
+blank_lines_lower_bound = 0
+blank_lines_upper_bound = 1
+merge_derives = true
+
+unstable_features = true
+
+control_brace_style = "AlwaysSameLine"
+match_block_trailing_comma = true
+
+trailing_comma = "Vertical"
