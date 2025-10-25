@@ -1,0 +1,22 @@
+[package]
+name = "paired-dna-mmap-dataset-converter"
+authors = ["Cai-z-us <caizus@rwkvos.com>"]
+description = "Example: convert paired DNA sequence datasets into rwkv-data mmap bin/idx format"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+bio = { workspace = true }
+csv = { workspace = true }
+bytemuck = { workspace = true }
+indicatif = { workspace = true }
+
+rwkv-data = { path = "../../crates/rwkv-data" }
+rwkv-derive = { path = "../../crates/rwkv-derive" }

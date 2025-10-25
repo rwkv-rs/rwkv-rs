@@ -1,0 +1,9 @@
+[submodule "dependencies/burn"]
+	path = dependencies/burn
+	url = https://github.com/rwkv-rs/burn
+[submodule "dependencies/cubecl"]
+	path = dependencies/cubecl
+	url = https://github.com/rwkv-rs/cubecl
+[submodule "dependencies/wandb-rs"]
+	path = dependencies/wandb-rs
+	url = https://github.com/rwkv-rs/wandb-rs

@@ -1,0 +1,16 @@
+[package]
+name = "rwkv-g1-0point1b-pth2mpk-converter"
+authors = ["Cai-z-us <caizus@rwkvos.com>"]
+description = "Example: convert the RWKV-G1 0.1B checkpoint from PyTorch .pth into Burn MPK format"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+burn = { workspace = true }
+rwkv-export = { path = "../../crates/rwkv-export" }
+rwkv-lm = { path = "../../crates/rwkv-lm" }

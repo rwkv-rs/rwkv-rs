@@ -1,0 +1,19 @@
+[package]
+name = "text-data-clean-pipeline"
+authors = ["Cai-z-us <caizus@rwkvos.com>"]
+description = "Example: build a multi-step rwkv-data Processor pipeline to clean raw text datasets"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rwkv-data = { path = "../../crates/rwkv-data" }
+
+walkdir = { workspace = true }
+serde = { workspace = true }
+parquet = { workspace = true }
+tokio = { workspace = true }
