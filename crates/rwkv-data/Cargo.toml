@@ -6,3 +6,43 @@ description = "RWKV is an RNN with great LLM performance and parallelizable like
 license = "Apache-2.0"
 
 [dependencies]
+# === Async Runtime ===
+tokio = { workspace = true }
+rayon = { workspace = true }
+futures = { workspace = true }
+
+# === Data Structures ===
+once_cell = { workspace = true }
+dashmap = { workspace = true }
+xxhash-rust = { workspace = true }
+
+# === File Processing ===
+bytemuck = { workspace = true }
+memmap2 = { workspace = true }
+
+# === Serialization ===
+serde = { workspace = true }
+sonic-rs = { workspace = true }
+csv-async = { workspace = true }
+parquet = { workspace = true }
+
+# === Database ===
+redb = { workspace = true }
+
+# === Utilities ===
+primes = { workspace = true }
+regex = { workspace = true }
+unescape = { workspace = true }
+indicatif = { workspace = true }
+unicode-segmentation = { workspace = true }
+unicode-script = { workspace = true }
+unicode-normalization = { workspace = true }
+zstd = { workspace = true }
+
+burn = { workspace = true }
+
+# === Local Dependencies ===
+rwkv-derive = { path = "../rwkv-derive" }
+
+[dev-dependencies]
+tempfile = "3.0"

@@ -6,3 +6,8 @@ description = "RWKV is an RNN with great LLM performance and parallelizable like
 license = "Apache-2.0"
 
 [dependencies]
+burn = { workspace = true }
+burn-store = { workspace = true }
+
+rwkv-data = { path = "../../crates/rwkv-data" }
+rwkv-lm = { path = "../../crates/rwkv-lm" }

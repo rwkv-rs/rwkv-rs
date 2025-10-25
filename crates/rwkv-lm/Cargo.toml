@@ -5,4 +5,28 @@ edition = "2024"
 description = "RWKV is an RNN with great LLM performance and parallelizable like a Transformer"
 license = "Apache-2.0"
 
+[features]
+default = ["fusion"]
+fusion = []
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc-bytes-total = ["dep:hotpath", "hotpath/hotpath-alloc-bytes-total"]
+hotpath-alloc-count-total = ["dep:hotpath", "hotpath/hotpath-alloc-count-total"]
+hotpath-off = ["dep:hotpath", "hotpath/hotpath-off"]
+
 [dependencies]
+# === Deep Learning Core ===
+burn = { workspace = true }
+burn-fusion = { workspace = true }
+burn-cubecl = { workspace = true }
+burn-ir = { workspace = true }
+ndarray = { workspace = true }
+ndarray-npy = { workspace = true }
+
+serde = { workspace = true }
+
+itertools = { workspace = true }
+
+# === Local Dependencies ===
+rwkv-config = {path = "../rwkv-config"}
+rwkv-data = { path = "../rwkv-data" }
+hotpath = { workspace = true, optional = true }
