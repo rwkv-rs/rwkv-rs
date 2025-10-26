@@ -2,7 +2,7 @@
 name = "rwkv-lm"
 version = "0.1.0"
 edition = "2024"
-description = "RWKV is an RNN with great LLM performance and parallelizable like a Transformer"
+description = "Core RWKV language model layers, custom WKV kernels, and Burn module implementations"
 license = "Apache-2.0"
 
 [features]

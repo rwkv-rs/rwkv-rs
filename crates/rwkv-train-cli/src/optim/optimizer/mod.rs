@@ -1,18 +1,12 @@
 mod grouping;
 mod splitter;
 
-use burn::{
-    config::Config,
-    module::{AutodiffModule, ParamId},
-    record::{PrecisionSettings, Record},
-    tensor::backend::AutodiffBackend,
-};
+use burn::{config::Config, module::AutodiffModule, tensor::backend::AutodiffBackend};
 use burn_optim::{
     AdamW, AdamWConfig, GradientsParams, LearningRate, Optimizer, adaptor::OptimizerAdaptor,
-    grad_clipping::GradientClippingConfig, record::AdaptorRecord,
+    grad_clipping::GradientClippingConfig,
 };
 use grouping::{ParamGrouperVisitor, ParamGroups};
-use hashbrown::HashMap;
 use splitter::split_grads;
 
 #[derive(Config, Debug)]
@@ -79,9 +73,11 @@ impl<B, M> Optimizer<M, B> for GroupedOptimizer<B, M>
 where
     B: AutodiffBackend,
     M: AutodiffModule<B>,
-    GroupedOptimizerRecord<B>: Record<B>,
 {
-    type Record = GroupedOptimizerRecord<B>;
+    type Record = (
+        <OptimizerAdaptor<AdamW, M, B> as Optimizer<M, B>>::Record,
+        <OptimizerAdaptor<AdamW, M, B> as Optimizer<M, B>>::Record,
+    );
 
     fn step(&mut self, lr: LearningRate, module: M, grads: GradientsParams) -> M {
         // Split gradients into three groups using a single model visit
@@ -94,58 +90,18 @@ where
             .optim_no_wd
             .step(lr * self.high_lr_scale, module, high_lr_grads);
         let module = self.optim_with_wd.step(lr, module, with_wd_grads);
-        let module = self.optim_no_wd.step(lr, module, no_wd_grads);
-
-        module
+        self.optim_no_wd.step(lr, module, no_wd_grads)
     }
 
     fn to_record(&self) -> Self::Record {
-        GroupedOptimizerRecord {
-            optim_with_wd: self.optim_with_wd.to_record(),
-            optim_no_wd: self.optim_no_wd.to_record(),
-        }
+        (self.optim_with_wd.to_record(), self.optim_no_wd.to_record())
     }
 
     fn load_record(mut self, record: Self::Record) -> Self {
-        self.optim_with_wd = self.optim_with_wd.load_record(record.optim_with_wd);
-
-        self.optim_no_wd = self.optim_no_wd.load_record(record.optim_no_wd);
+        let (optim_with_wd, optim_no_wd) = record;
+        self.optim_with_wd = self.optim_with_wd.load_record(optim_with_wd);
+        self.optim_no_wd = self.optim_no_wd.load_record(optim_no_wd);
 
         self
-    }
-}
-
-pub struct GroupedOptimizerRecord<B: AutodiffBackend> {
-    optim_with_wd: HashMap<ParamId, AdaptorRecord<AdamW, B>>,
-    optim_no_wd: HashMap<ParamId, AdaptorRecord<AdamW, B>>,
-}
-
-impl<B: AutodiffBackend> Clone for GroupedOptimizerRecord<B> {
-    fn clone(&self) -> Self {
-        Self {
-            optim_with_wd: self.optim_with_wd.clone(),
-            optim_no_wd: self.optim_no_wd.clone(),
-        }
-    }
-}
-
-impl<B: AutodiffBackend> Record<B> for GroupedOptimizerRecord<B> {
-    type Item<S: PrecisionSettings> = (
-        HashMap<String, <AdaptorRecord<AdamW, B> as Record<B>>::Item<S>>,
-        HashMap<String, <AdaptorRecord<AdamW, B> as Record<B>>::Item<S>>,
-    );
-
-    fn into_item<S: PrecisionSettings>(self) -> Self::Item<S> {
-        (
-            Record::<B>::into_item::<S>(self.optim_with_wd),
-            Record::<B>::into_item::<S>(self.optim_no_wd),
-        )
-    }
-
-    fn from_item<S: PrecisionSettings>(item: Self::Item<S>, device: &B::Device) -> Self {
-        Self {
-            optim_with_wd: Record::<B>::from_item::<S>(item.0, device),
-            optim_no_wd: Record::<B>::from_item::<S>(item.1, device),
-        }
     }
 }

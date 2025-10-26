@@ -14,7 +14,6 @@ use crate::{
 };
 
 #[derive(Config, Debug)]
-
 pub struct AutoRegressiveModelConfig {
     num_cells: usize,
     vocabulary_size: usize,

@@ -2,7 +2,9 @@
 name = "rwkv-infer"
 version = "0.1.0"
 edition = "2024"
-description = "RWKV is an RNN with great LLM performance and parallelizable like a Transformer"
+description = "Work-in-progress inference runtime hooking RWKV language models to Tokio/Tch backends"
 license = "Apache-2.0"
 
 [dependencies]
+tokio = { workspace = true }
+tch = { workspace = true }

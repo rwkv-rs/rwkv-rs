@@ -2,7 +2,7 @@
 name = "rwkv-trace"
 version = "0.1.0"
 edition = "2024"
-description = "RWKV is an RNN with great LLM performance and parallelizable like a Transformer"
+description = "Forthcoming tracing and telemetry utilities for RWKV model execution and training"
 license = "Apache-2.0"
 
 [dependencies]

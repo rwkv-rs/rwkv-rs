@@ -2,7 +2,7 @@
 name = "rwkv-train-cli"
 version = "0.1.0"
 edition = "2024"
-description = "RWKV is an RNN with great LLM performance and parallelizable like a Transformer"
+description = "Distributed training CLI orchestrating data pipelines, Burn trainers, and logging tools"
 license = "Apache-2.0"
 
 [features]

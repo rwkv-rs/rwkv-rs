@@ -5,7 +5,6 @@ use burn::{
 };
 
 #[derive(Config, Debug)]
-
 pub struct StateAdapterModelConfig {
     num_cells: usize,
     embedded_dim: usize,

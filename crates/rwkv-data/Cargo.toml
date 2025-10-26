@@ -2,7 +2,7 @@
 name = "rwkv-data"
 version = "0.1.0"
 edition = "2024"
-description = "RWKV is an RNN with great LLM performance and parallelizable like a Transformer"
+description = "Memory-mapped dataset readers, tokenizers, and samplers for RWKV training pipelines"
 license = "Apache-2.0"
 
 [dependencies]
