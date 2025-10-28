@@ -121,7 +121,8 @@ mod tests {
     #[test]
 
     fn test_preln() {
-        let model = get_global_model();
+        let device = &get_test_device::<TestBackend>();
+        let model = get_test_model(device);
 
         let mut preln_outputs = vec![];
 
@@ -130,23 +131,25 @@ mod tests {
         let mut module_names = vec![];
 
         for &cell_id in &[0, 1, 11] {
-            let mut input = load_expected_f32::<3>(format!("block_{}_input", cell_id).as_str());
+            let mut input = load_expected_f32::<TestBackend, 3>(
+                format!("block_{}_input", cell_id).as_str(),
+                device,
+            );
 
             let cell = model.cells[cell_id].clone();
-
             if cell_id == 0 {
                 input = model.layer_norm_for_first_cell.forward(input);
             }
 
             let preln_output = cell.pre_layer_norm_for_time_mix.forward(input);
 
-            let expected_preln_output =
-                load_expected_f32::<3>(format!("block_{}_att_input", cell_id).as_str());
+            let expected_preln_output = load_expected_f32::<TestBackend, 3>(
+                format!("block_{}_att_input", cell_id).as_str(),
+                device,
+            );
 
             preln_outputs.push(preln_output);
-
             expected_preln_outputs.push(expected_preln_output);
-
             module_names.push(format!("cell_{}_preln", cell_id));
         }
 
@@ -160,35 +163,33 @@ mod tests {
     }
 
     #[test]
-
     fn test_channel_mix() {
-        let model = get_global_model();
-
-        let device = get_global_device();
+        let device = &get_test_device::<TestBackend>();
+        let model = get_test_model(device);
 
         let mut channel_mix_outputs = vec![];
-
         let mut expected_channel_mix_outputs = vec![];
-
         let mut module_names = vec![];
 
         for &cell_id in &[0, 1, 11] {
-            let input = load_expected_f32::<3>(format!("block_{}_ffn_input_x", cell_id).as_str());
-
+            let input = load_expected_f32::<TestBackend, 3>(
+                format!("block_{}_ffn_input_x", cell_id).as_str(),
+                device,
+            );
             let cell = model.cells[cell_id].clone();
 
             let (channel_mix_output_x, _) = cell.channel_mixer.forward(
                 input.clone(),
-                Tensor::<TestAutodiffBackend, 2>::zeros([1, TEST_EMBEDDED_DIM], &device),
+                Tensor::<TestBackend, 2>::zeros([1, TEST_EMBEDDED_DIM], &device),
             );
 
-            let expected_channel_mix_output_x =
-                load_expected_f32::<3>(format!("block_{}_ffn_output_x", cell_id).as_str());
+            let expected_channel_mix_output_x = load_expected_f32::<TestBackend, 3>(
+                format!("block_{}_ffn_output_x", cell_id).as_str(),
+                device,
+            );
 
             channel_mix_outputs.push(channel_mix_output_x);
-
             expected_channel_mix_outputs.push(expected_channel_mix_output_x);
-
             module_names.push(format!("cell_{}_channel_mix", cell_id));
         }
 

@@ -106,30 +106,31 @@ mod tests {
     use crate::utils::test_tools::*;
 
     #[test]
-
     fn test_channel_mix() {
-        let model = get_global_model();
-
-        let device = get_global_device();
+        let device = &get_test_device::<TestBackend>();
+        let model = get_test_model(device);
 
         let mut channel_mix_outputs = vec![];
-
         let mut expected_channel_mix_outputs = vec![];
-
         let mut module_names = vec![];
 
         for &cell_id in &[0, 1, 11] {
-            let input = load_expected_f32::<3>(format!("block_{}_ffn_input_x", cell_id).as_str());
+            let input = load_expected_f32::<TestBackend, 3>(
+                format!("block_{}_ffn_input_x", cell_id).as_str(),
+                device,
+            );
 
             let cell = model.cells[cell_id].clone();
 
             let (channel_mix_output_x, _) = cell.channel_mixer.forward(
                 input.clone(),
-                Tensor::<TestAutodiffBackend, 2>::zeros([1, TEST_EMBEDDED_DIM], &device),
+                Tensor::<TestBackend, 2>::zeros([1, TEST_EMBEDDED_DIM], device),
             );
 
-            let expected_channel_mix_output_x =
-                load_expected_f32::<3>(format!("block_{}_ffn_output_x", cell_id).as_str());
+            let expected_channel_mix_output_x = load_expected_f32::<TestBackend, 3>(
+                format!("block_{}_ffn_output_x", cell_id).as_str(),
+                device,
+            );
 
             channel_mix_outputs.push(channel_mix_output_x);
 

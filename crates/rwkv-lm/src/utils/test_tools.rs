@@ -3,9 +3,13 @@ use std::fs::File;
 use burn::{
     backend::{Autodiff, Cuda, cuda::CudaDevice},
     module::Module,
-    prelude::{Backend, Shape, TensorData},
+    prelude::{Backend, DeviceOps, Shape, TensorData},
     record::{FullPrecisionSettings, NamedMpkFileRecorder, Recorder},
-    tensor::{Float, Int, Tensor, cast::ToElement},
+    tensor::{
+        Float, Int, Tensor,
+        backend::{AutodiffBackend, DeviceId},
+        cast::ToElement,
+    },
 };
 use itertools::izip;
 use ndarray::ArrayD;
@@ -13,46 +17,32 @@ use ndarray_npy::ReadNpyExt;
 
 use crate::auto_regressive_model::{AutoRegressiveModel, AutoRegressiveModelConfig};
 
-/// 全局后端类型定义
-
 pub type TestBackend = Cuda<f32, i32>;
-
 pub type TestAutodiffBackend = Autodiff<TestBackend>;
 
 pub const MIN_PASS_RATE: f64 = 0.99;
-
 pub const RELATIVE_ERROR: f64 = 0.01;
-
 pub const TEST_BATCH_SIZE: usize = 1;
-
 pub const TEST_CONTEXT_LENGTH: usize = 128;
-
 pub const TEST_EMBEDDED_DIM: usize = 768;
-
 pub const TEST_NUM_HEADS: usize = 12;
-
 pub const TEST_HEAD_SIZE: usize = 64;
 
-/// 获取全局设备
-
-pub fn get_global_device() -> CudaDevice {
-    CudaDevice::default()
+pub fn get_test_device<B: Backend>() -> B::Device {
+    let device = B::Device::from_id(DeviceId::new(0, 0));
+    B::seed(&device, 42);
+    device
 }
 
-/// 获取全局模型（每次创建新实例，避免Sync问题）
-
-pub fn get_global_model() -> AutoRegressiveModel<TestAutodiffBackend> {
-    let device = get_global_device();
-
+pub fn get_test_model<B: Backend>(device: &B::Device) -> AutoRegressiveModel<B> {
     let record = NamedMpkFileRecorder::<FullPrecisionSettings>::new()
         .load(
-            "../../weights/rwkv7-g1-0.1b-20250307-ctx4096.mpk".into(),
-            &device,
+            "../../../weights/rwkv7-g1-0.1b-20250307-ctx4096.mpk".into(),
+            device,
         )
         .expect("Failed to load weights for unit tests");
-
     AutoRegressiveModelConfig::new(12, 65536, 768, 12, 64)
-        .init::<TestAutodiffBackend, u16>(&device)
+        .init::<B, u16>(&device)
         .load_record(record)
 }
 
@@ -98,14 +88,11 @@ pub fn assert_closeness_multi<B: Backend, const D: usize>(
     max_relative_error: f64,
 ) {
     let mut pass_rate_vec = vec![];
-
     let mut is_pass_vec = vec![];
 
     for (actual, expected) in izip!(actual_vec, expected_vec) {
         let pass_rate = get_pass_rate(&actual, &expected, max_relative_error);
-
         pass_rate_vec.push(pass_rate);
-
         is_pass_vec.push(pass_rate >= min_pass_rate);
     }
 
@@ -141,40 +128,31 @@ fn get_pass_rate<B: Backend, const D: usize>(
     max_relative_error: f64,
 ) -> f64 {
     let absolute_tolerance = 1e-5;
-
     let absolute_error = actual.clone().sub(expected.clone()).abs();
-
     let expected_abs = expected.clone().abs();
-
     let tolerance = expected_abs * max_relative_error + absolute_tolerance;
-
     let pass_mask = absolute_error.lower_equal(tolerance);
-
     let pass_count = pass_mask.float().sum().into_scalar().to_f64();
-
     let total_elements = actual.shape().num_elements() as f64;
-
     pass_count / total_elements
 }
 
-pub fn load_expected_f32<const D: usize>(file_name: &str) -> Tensor<TestAutodiffBackend, D, Float> {
-    let file = File::open(format!("../../data/variable_tracking/{}.npy", file_name)).unwrap();
-
+pub fn load_expected_f32<B: Backend, const D: usize>(
+    file_name: &str,
+    device: &B::Device,
+) -> Tensor<B, D, Float> {
+    let file = File::open(format!("../../../data/variable_tracking/{}.npy", file_name)).unwrap();
     let array: ArrayD<f32> = ArrayD::<f32>::read_npy(file).unwrap();
-
-    let device = get_global_device();
-
-    array_npy2burn_f32::<TestAutodiffBackend, D>(&array, &device)
+    array_npy2burn_f32(&array, device)
 }
 
-pub fn load_expected_i64<const D: usize>(file_name: &str) -> Tensor<TestAutodiffBackend, D, Int> {
-    let file = File::open(format!("../../data/variable_tracking/{}.npy", file_name)).unwrap();
-
+pub fn load_expected_i64<B: Backend, const D: usize>(
+    file_name: &str,
+    device: &B::Device,
+) -> Tensor<B, D, Int> {
+    let file = File::open(format!("../../../data/variable_tracking/{}.npy", file_name)).unwrap();
     let array: ArrayD<i64> = ArrayD::<i64>::read_npy(file).unwrap();
-
-    let device = get_global_device();
-
-    array_npy2burn_i64::<TestAutodiffBackend, D>(&array, &device)
+    array_npy2burn_i64(&array, device)
 }
 
 pub fn array_npy2burn_f32<B: Backend, const D: usize>(
@@ -182,27 +160,19 @@ pub fn array_npy2burn_f32<B: Backend, const D: usize>(
     device: &B::Device,
 ) -> Tensor<B, D, Float> {
     let shape = array.shape().to_vec();
-
     let data: Vec<f32> = array.iter().cloned().collect();
-
     let burn_tensor =
         Tensor::<B, 1, Float>::from_data(TensorData::new(data, [shape.iter().product()]), device);
-
     burn_tensor.reshape(Shape::from(shape))
 }
-
-/// Convert a NumPy array containing integer data to a Burn tensor
 
 pub fn array_npy2burn_i64<B: Backend, const D: usize>(
     array: &ArrayD<i64>,
     device: &B::Device,
 ) -> Tensor<B, D, Int> {
     let shape = array.shape().to_vec();
-
     let data: Vec<i64> = array.iter().cloned().collect();
-
     let burn_tensor =
         Tensor::<B, 1, Int>::from_data(TensorData::new(data, [shape.iter().product()]), device);
-
     burn_tensor.reshape(Shape::from(shape))
 }

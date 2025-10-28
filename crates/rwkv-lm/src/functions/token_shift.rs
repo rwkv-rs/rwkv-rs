@@ -20,22 +20,19 @@ mod tests {
     use crate::utils::test_tools::*;
 
     #[test]
-
     fn test_time_shift() {
-        let model = get_global_model();
+        let device = &get_test_device::<TestBackend>();
 
-        let device = get_global_device();
+        let time_shift_input_x =
+            load_expected_f32::<TestBackend, 3>("block_0_att_time_shift_input_x", device);
 
-        let time_shift_input_x = load_expected_f32::<3>("block_0_att_time_shift_input_x");
-
-        let [batch_size, _sequence_length, channel_dim] = time_shift_input_x.dims();
-
-        let time_shift_input_state: Tensor<TestAutodiffBackend, 2> =
-            Tensor::zeros([batch_size, channel_dim], &device);
+        let time_shift_input_state: Tensor<TestBackend, 2> =
+            Tensor::zeros([TEST_BATCH_SIZE, TEST_CONTEXT_LENGTH], device);
 
         let shifted_x = token_shift(time_shift_input_x, time_shift_input_state);
 
-        let expected_time_shift_output = load_expected_f32::<3>("block_0_att_time_shift_output_x");
+        let expected_time_shift_output =
+            load_expected_f32::<TestBackend, 3>("block_0_att_time_shift_output_x", device);
 
         assert_closeness(
             &shifted_x,

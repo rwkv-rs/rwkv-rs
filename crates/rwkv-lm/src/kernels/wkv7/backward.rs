@@ -289,40 +289,45 @@ impl<B: Wkv7Backend, C: CheckpointStrategy> Wkv7Backend for Autodiff<B, C> {
     }
 }
 
-/// Implement Wkv7AutodiffBackend for any Autodiff-decorated backend that
-/// implements Wkv7Backend
 
 impl<B: Wkv7Backend, C: CheckpointStrategy> Wkv7AutodiffBackend for Autodiff<B, C> {}
 
 #[cfg(test)]
-
 mod tests {
-
-    use burn::tensor::Tensor;
+    use burn::tensor::{Tensor, TensorPrimitive};
 
     use super::*;
     use crate::utils::test_tools::*;
 
     #[test]
-
     fn test_wkv7_backward() {
-        let weight_decay = load_expected_f32::<4>("wkv7_kernel_backward_saved_w");
+        let device = &get_test_device::<TestAutodiffBackend>();
+        let weight_decay =
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_saved_w", device);
 
-        let receptance = load_expected_f32::<4>("wkv7_kernel_backward_saved_q");
+        let receptance =
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_saved_q", device);
 
-        let key = load_expected_f32::<4>("wkv7_kernel_backward_saved_k");
+        let key =
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_saved_k", device);
 
-        let value = load_expected_f32::<4>("wkv7_kernel_backward_saved_v");
+        let value =
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_saved_v", device);
 
-        let removal = load_expected_f32::<4>("wkv7_kernel_backward_saved_z");
+        let removal =
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_saved_z", device);
 
-        let replacement = load_expected_f32::<4>("wkv7_kernel_backward_saved_b");
+        let replacement =
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_saved_b", device);
 
-        let state = load_expected_f32::<5>("wkv7_kernel_backward_saved_s");
+        let state =
+            load_expected_f32::<TestAutodiffBackend, 5>("wkv7_kernel_backward_saved_s", device);
 
-        let removal_state = load_expected_f32::<4>("wkv7_kernel_backward_saved_sa");
+        let removal_state =
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_saved_sa", device);
 
-        let output_grad = load_expected_f32::<4>("wkv7_kernel_backward_input_dy");
+        let output_grad =
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_input_dy", device);
 
         let chunk_len = 16;
 
@@ -347,57 +352,27 @@ mod tests {
             chunk_len,
         );
 
-        let weight_decay_grad_tensor = Tensor::<TestAutodiffBackend, 4>::from_primitive(
-            burn::tensor::TensorPrimitive::Float(weight_decay_grad),
-        );
-
-        let receptance_grad_tensor = Tensor::<TestAutodiffBackend, 4>::from_primitive(
-            burn::tensor::TensorPrimitive::Float(receptance_grad),
-        );
-
-        let key_grad_tensor = Tensor::<TestAutodiffBackend, 4>::from_primitive(
-            burn::tensor::TensorPrimitive::Float(key_grad),
-        );
-
-        let value_grad_tensor = Tensor::<TestAutodiffBackend, 4>::from_primitive(
-            burn::tensor::TensorPrimitive::Float(value_grad),
-        );
-
-        let removal_grad_tensor = Tensor::<TestAutodiffBackend, 4>::from_primitive(
-            burn::tensor::TensorPrimitive::Float(removal_grad),
-        );
-
-        let replacement_grad_tensor = Tensor::<TestAutodiffBackend, 4>::from_primitive(
-            burn::tensor::TensorPrimitive::Float(replacement_grad),
-        );
-
-        // 加载期望结果 - 注意变量映射关系
-        let expected_weight_decay_grad = load_expected_f32::<4>("wkv7_kernel_backward_dw");
-
-        let expected_receptance_grad = load_expected_f32::<4>("wkv7_kernel_backward_dq");
-
-        let expected_key_grad = load_expected_f32::<4>("wkv7_kernel_backward_dk");
-
-        let expected_value_grad = load_expected_f32::<4>("wkv7_kernel_backward_dv");
-
-        let expected_removal_grad = load_expected_f32::<4>("wkv7_kernel_backward_dz"); // CUDA 的 dz 对应 removal
-        let expected_replacement_grad = load_expected_f32::<4>("wkv7_kernel_backward_db"); // CUDA 的 da 对应 replacement
-        let actual_vec = vec![
-            weight_decay_grad_tensor,
-            receptance_grad_tensor,
-            key_grad_tensor,
-            value_grad_tensor,
-            removal_grad_tensor,
-            replacement_grad_tensor,
-        ];
+        let actual_vec: Vec<Tensor<TestAutodiffBackend, 4>> = vec![
+            weight_decay_grad,
+            receptance_grad,
+            key_grad,
+            value_grad,
+            removal_grad,
+            replacement_grad,
+        ]
+        .iter()
+        .map(|x| {
+            Tensor::<TestAutodiffBackend, 4>::from_primitive(TensorPrimitive::Float(x.clone()))
+        })
+        .collect();
 
         let expected_vec = vec![
-            expected_weight_decay_grad,
-            expected_receptance_grad,
-            expected_key_grad,
-            expected_value_grad,
-            expected_removal_grad,
-            expected_replacement_grad,
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_dw", device),
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_dq", device),
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_dk", device),
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_dv", device),
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_dz", device),
+            load_expected_f32::<TestAutodiffBackend, 4>("wkv7_kernel_backward_db", device),
         ];
 
         let module_names = vec![

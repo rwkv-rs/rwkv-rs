@@ -733,56 +733,56 @@ mod tests {
     use crate::{kernels::wkv7::wkv7_forward, utils::test_tools::*};
 
     #[test]
-
     fn test_wkv7_kernel() {
-        let receptance = load_expected_f32::<3>("block_0_att_wkv7_kernel_input_r");
+        let device = &get_test_device::<TestBackend>();
+        let receptance =
+            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_r", device);
+        let weight_decay =
+            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_w", device);
+        let replacement_key =
+            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_k", device);
+        let value = load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_v", device);
+        let removal_key_normalized =
+            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_z", device);
+        let replacement =
+            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_b", device);
 
-        let weight_decay = load_expected_f32::<3>("block_0_att_wkv7_kernel_input_w");
-
-        let replacement_key = load_expected_f32::<3>("block_0_att_wkv7_kernel_input_k");
-
-        let value = load_expected_f32::<3>("block_0_att_wkv7_kernel_input_v");
-
-        let removal_key_normalized = load_expected_f32::<3>("block_0_att_wkv7_kernel_input_z");
-
-        let replacement = load_expected_f32::<3>("block_0_att_wkv7_kernel_input_b");
-
-        let wkv_receptance_input: Tensor<TestAutodiffBackend, 4> = receptance.reshape([
+        let wkv_receptance_input: Tensor<TestBackend, 4> = receptance.reshape([
             TEST_BATCH_SIZE,
             TEST_CONTEXT_LENGTH,
             TEST_NUM_HEADS,
             TEST_HEAD_SIZE,
         ]);
 
-        let wkv_weight_decay_input: Tensor<TestAutodiffBackend, 4> = weight_decay.reshape([
+        let wkv_weight_decay_input: Tensor<TestBackend, 4> = weight_decay.reshape([
             TEST_BATCH_SIZE,
             TEST_CONTEXT_LENGTH,
             TEST_NUM_HEADS,
             TEST_HEAD_SIZE,
         ]);
 
-        let wkv_key_input: Tensor<TestAutodiffBackend, 4> = replacement_key.reshape([
+        let wkv_key_input: Tensor<TestBackend, 4> = replacement_key.reshape([
             TEST_BATCH_SIZE,
             TEST_CONTEXT_LENGTH,
             TEST_NUM_HEADS,
             TEST_HEAD_SIZE,
         ]);
 
-        let wkv_value_input: Tensor<TestAutodiffBackend, 4> = value.reshape([
+        let wkv_value_input: Tensor<TestBackend, 4> = value.reshape([
             TEST_BATCH_SIZE,
             TEST_CONTEXT_LENGTH,
             TEST_NUM_HEADS,
             TEST_HEAD_SIZE,
         ]);
 
-        let wkv_removal_input: Tensor<TestAutodiffBackend, 4> = removal_key_normalized.reshape([
+        let wkv_removal_input: Tensor<TestBackend, 4> = removal_key_normalized.reshape([
             TEST_BATCH_SIZE,
             TEST_CONTEXT_LENGTH,
             TEST_NUM_HEADS,
             TEST_HEAD_SIZE,
         ]);
 
-        let wkv_replacement_input: Tensor<TestAutodiffBackend, 4> = replacement.reshape([
+        let wkv_replacement_input: Tensor<TestBackend, 4> = replacement.reshape([
             TEST_BATCH_SIZE,
             TEST_CONTEXT_LENGTH,
             TEST_NUM_HEADS,
@@ -806,7 +806,8 @@ mod tests {
             TEST_EMBEDDED_DIM,
         ]);
 
-        let expected_output = load_expected_f32::<3>("block_0_att_wkv7_kernel_output_x");
+        let expected_output =
+            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_output_x", device);
 
         assert_closeness(
             &output,

@@ -499,20 +499,15 @@ mod tests {
     #[test]
 
     fn test_weight_prepare() {
-        let model = get_global_model();
+        let device = &get_test_device::<TestBackend>();
+        let model = get_test_model(device);
 
-        let device = get_global_device();
+        let x = load_expected_f32::<TestBackend, 3>("block_0_att_weight_prepare_input_x", device);
 
-        let x = load_expected_f32::<3>("block_0_att_weight_prepare_input_x");
+        let v_first: Tensor<TestBackend, 3> =
+            Tensor::zeros([TEST_BATCH_SIZE, TEST_CONTEXT_LENGTH, TEST_EMBEDDED_DIM], device);
 
-        let [batch_size, sequence_length, embedded_dim] = x.dims();
-
-        let v_first: Tensor<TestAutodiffBackend, 3> =
-            Tensor::zeros([batch_size, sequence_length, embedded_dim], &device);
-
-        let x_state: Tensor<TestAutodiffBackend, 2> =
-            Tensor::zeros([batch_size, embedded_dim], &device);
-
+        let x_state: Tensor<TestBackend, 2> = Tensor::zeros([TEST_BATCH_SIZE, TEST_EMBEDDED_DIM], device);
         let time_mixer = &model.cells[0].time_mixer;
 
         let (
@@ -526,21 +521,6 @@ mod tests {
             replacement,
         ) = time_mixer.weight_prepare(x, v_first, x_state, &device);
 
-        let expected_v_first = load_expected_f32::<3>("block_0_att_output_v_first");
-
-        let expected_receptance = load_expected_f32::<3>("block_0_att_wkv7_kernel_input_r");
-
-        let expected_weight_decay = load_expected_f32::<3>("block_0_att_wkv7_kernel_input_w");
-
-        let expected_replacement_key = load_expected_f32::<3>("block_0_att_wkv7_kernel_input_k");
-
-        let expected_value = load_expected_f32::<3>("block_0_att_wkv7_kernel_input_v");
-
-        let expected_removal_key_normalized =
-            load_expected_f32::<3>("block_0_att_wkv7_kernel_input_z");
-
-        let expected_replacement = load_expected_f32::<3>("block_0_att_wkv7_kernel_input_b");
-
         let actual_vec = vec![
             v_first,
             receptance,
@@ -552,13 +532,13 @@ mod tests {
         ];
 
         let expected_vec = vec![
-            expected_v_first,
-            expected_receptance,
-            expected_weight_decay,
-            expected_replacement_key,
-            expected_value,
-            expected_removal_key_normalized,
-            expected_replacement,
+            load_expected_f32::<TestBackend, 3>("block_0_att_output_v_first", device),
+            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_r", device),
+            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_w", device),
+            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_k", device),
+            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_v", device),
+            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_z", device),
+            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_b", device),
         ];
 
         let module_names = vec![
@@ -581,22 +561,18 @@ mod tests {
     }
 
     #[test]
-
     fn test_time_mix() {
-        let model = get_global_model();
+        let device = &get_test_device::<TestBackend>();
+        let model = get_test_model(device);
 
-        let device = get_global_device();
-
-        let expected_v_first = load_expected_f32::<3>("block_0_att_output_v_first");
+        let expected_v_first = load_expected_f32::<TestBackend, 3>("block_0_att_output_v_first", device);
 
         let mut time_mix_outputs = vec![];
-
         let mut expected_time_mix_outputs = vec![];
-
         let mut module_names = vec![];
 
         for &cell_id in &[0, 1, 11] {
-            let input = load_expected_f32::<3>(format!("block_{}_att_input", cell_id).as_str());
+            let input = load_expected_f32::<TestBackend, 3>(format!("block_{}_att_input", cell_id).as_str(), device);
 
             let cell = model.cells[cell_id].clone();
 
@@ -607,8 +583,8 @@ mod tests {
                 } else {
                     expected_v_first.clone()
                 },
-                Tensor::<TestAutodiffBackend, 2>::zeros([1, TEST_EMBEDDED_DIM], &device),
-                Tensor::<TestAutodiffBackend, 4, Float>::zeros(
+                Tensor::<TestBackend, 2>::zeros([1, TEST_EMBEDDED_DIM], &device),
+                Tensor::<TestBackend, 4, Float>::zeros(
                     [1, TEST_NUM_HEADS, TEST_HEAD_SIZE, TEST_HEAD_SIZE],
                     &device,
                 ),
@@ -616,12 +592,10 @@ mod tests {
             );
 
             let expected_time_mix_output_x =
-                load_expected_f32::<3>(format!("block_{}_att_output_x", cell_id).as_str());
+                load_expected_f32::<TestBackend, 3>(format!("block_{}_att_output_x", cell_id).as_str(), device);
 
             time_mix_outputs.push(time_mix_output_x);
-
             expected_time_mix_outputs.push(expected_time_mix_output_x);
-
             module_names.push(format!("cell_{}_time_mix", cell_id));
         }
 
