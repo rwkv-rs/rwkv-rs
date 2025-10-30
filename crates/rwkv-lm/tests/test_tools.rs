@@ -14,8 +14,7 @@ use burn::{
 use itertools::izip;
 use ndarray::ArrayD;
 use ndarray_npy::ReadNpyExt;
-
-use crate::auto_regressive_model::{AutoRegressiveModel, AutoRegressiveModelConfig};
+use rwkv_lm::auto_regressive_model::{AutoRegressiveModel, AutoRegressiveModelConfig};
 
 pub type TestBackend = Cuda<f32, i32>;
 pub type TestAutodiffBackend = Autodiff<TestBackend>;
@@ -46,13 +45,13 @@ pub fn get_test_model<B: Backend>(device: &B::Device) -> AutoRegressiveModel<B> 
         .load_record(record)
 }
 
-pub fn assert_closeness<B: Backend, const D: usize>(
+pub fn check_closeness<B: Backend, const D: usize>(
     actual: &Tensor<B, D>,
     expected: &Tensor<B, D>,
     module_name: &str,
     min_pass_rate: f64,
     max_relative_error: f64,
-) {
+) -> bool {
     assert_eq!(
         actual.shape().dims,
         expected.shape().dims,
@@ -63,30 +62,32 @@ pub fn assert_closeness<B: Backend, const D: usize>(
     );
 
     let pass_rate = get_pass_rate(actual, expected, max_relative_error);
-
-    assert!(
-        pass_rate >= min_pass_rate,
-        "🚨 UNIT TEST FAILURE: Layer '{}' precision check failed!\n\
-         📋 Required: {:.1}% pass rate within {:.1}% relative error\n\
-         📋 Actual:   {:.1}% pass rate\n\
-         📋 Gap:      {:.1}% below threshold",
-        module_name,
-        min_pass_rate * 100.0,
-        max_relative_error * 100.0,
-        pass_rate * 100.0,
-        (min_pass_rate - pass_rate) * 100.0
-    );
-
-    println!("  ✅ [PASS] Unit test passed for {}\n", module_name);
+    let is_pass = pass_rate > min_pass_rate;
+    if  !is_pass {
+        eprintln!(
+            "🚨 UNIT TEST FAILURE: Layer '{}' precision check failed!\n\
+             📋 Required: {:.1}% pass rate within {:.1}% relative error\n\
+             📋 Actual:   {:.1}% pass rate\n\
+             📋 Gap:      {:.1}% below threshold",
+            module_name,
+            min_pass_rate * 100.0,
+            max_relative_error * 100.0,
+            pass_rate * 100.0,
+            (min_pass_rate - pass_rate) * 100.0
+        );
+    } else {
+        println!("  ✅ [PASS] Unit test passed for {}\n", module_name);
+    }
+    is_pass
 }
 
-pub fn assert_closeness_multi<B: Backend, const D: usize>(
+pub fn check_closeness_multi<B: Backend, const D: usize>(
     actual_vec: Vec<Tensor<B, D>>,
     expected_vec: Vec<Tensor<B, D>>,
     module_name_vec: Vec<String>,
     min_pass_rate: f64,
     max_relative_error: f64,
-) {
+) -> bool {
     let mut pass_rate_vec = vec![];
     let mut is_pass_vec = vec![];
 
@@ -116,10 +117,7 @@ pub fn assert_closeness_multi<B: Backend, const D: usize>(
         }
     }
 
-    assert!(
-        is_pass_vec.iter().all(|&is_pass| is_pass),
-        "UNIT TEST FAILURE!"
-    );
+    is_pass_vec.iter().all(|&x| x)
 }
 
 fn get_pass_rate<B: Backend, const D: usize>(

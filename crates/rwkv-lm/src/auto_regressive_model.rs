@@ -54,7 +54,6 @@ impl AutoRegressiveModelConfig {
 }
 
 #[derive(Module, Debug)]
-
 pub struct AutoRegressiveModel<B: Backend> {
     pub embed: EmbModule<B>,
     pub layer_norm_for_first_cell: LayerNorm<B>,

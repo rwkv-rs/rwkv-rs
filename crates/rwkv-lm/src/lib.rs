@@ -6,4 +6,3 @@ pub mod layers;
 pub mod modules;
 pub mod sequence_embedding_model;
 pub mod state_adapter_model;
-mod utils;

@@ -20,7 +20,6 @@ use crate::{
 };
 
 #[derive(Config, Debug)]
-
 pub struct TimeMixerConfig {
     num_cells: usize,
     embedded_dim: usize,
@@ -246,9 +245,7 @@ impl<B: Backend> TimeMixer<B> {
         );
 
         uniform_init(&mut self.projection_key.weight, -key_bound, key_bound);
-
         uniform_init(&mut self.projection_value.weight, -value_bound, value_bound);
-
         zeros_init(&mut self.projection_output.weight);
 
         self.param_weight_decay_lora
@@ -265,9 +262,7 @@ impl<B: Backend> TimeMixer<B> {
         }
 
         constant_init(&mut self.param_key_removal, 0.71);
-
         constant_init(&mut self.param_key_replacement, 1.02);
-
         constant_init(&mut self.param_receptance_key_bonus, -0.04);
 
         if let Some(ref mut gamma) = self.group_norm.gamma {
@@ -379,7 +374,7 @@ impl<B: Backend> TimeMixer<B> {
         (out, v_first, x_state_out, final_state)
     }
 
-    fn weight_prepare(
+    pub fn weight_prepare(
         &self,
         x: Tensor<B, 3>,
         v_first: Tensor<B, 3>,
@@ -489,122 +484,3 @@ impl<B: Backend> TimeMixer<B> {
     }
 }
 
-#[cfg(test)]
-
-mod tests {
-
-    use super::*;
-    use crate::utils::test_tools::*;
-
-    #[test]
-
-    fn test_weight_prepare() {
-        let device = &get_test_device::<TestBackend>();
-        let model = get_test_model(device);
-
-        let x = load_expected_f32::<TestBackend, 3>("block_0_att_weight_prepare_input_x", device);
-
-        let v_first: Tensor<TestBackend, 3> =
-            Tensor::zeros([TEST_BATCH_SIZE, TEST_CONTEXT_LENGTH, TEST_EMBEDDED_DIM], device);
-
-        let x_state: Tensor<TestBackend, 2> = Tensor::zeros([TEST_BATCH_SIZE, TEST_EMBEDDED_DIM], device);
-        let time_mixer = &model.cells[0].time_mixer;
-
-        let (
-            _time_shifted_diff,
-            v_first,
-            receptance,
-            weight_decay,
-            replacement_key,
-            value,
-            removal_key_normalized,
-            replacement,
-        ) = time_mixer.weight_prepare(x, v_first, x_state, &device);
-
-        let actual_vec = vec![
-            v_first,
-            receptance,
-            weight_decay,
-            replacement_key,
-            value,
-            removal_key_normalized,
-            replacement,
-        ];
-
-        let expected_vec = vec![
-            load_expected_f32::<TestBackend, 3>("block_0_att_output_v_first", device),
-            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_r", device),
-            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_w", device),
-            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_k", device),
-            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_v", device),
-            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_z", device),
-            load_expected_f32::<TestBackend, 3>("block_0_att_wkv7_kernel_input_b", device),
-        ];
-
-        let module_names = vec![
-            "weight_prepare_v_first".to_string(),
-            "weight_prepare_r".to_string(),
-            "weight_prepare_w".to_string(),
-            "weight_prepare_k".to_string(),
-            "weight_prepare_v".to_string(),
-            "weight_prepare_z".to_string(),
-            "weight_prepare_b".to_string(),
-        ];
-
-        assert_closeness_multi(
-            actual_vec,
-            expected_vec,
-            module_names,
-            MIN_PASS_RATE,
-            RELATIVE_ERROR,
-        );
-    }
-
-    #[test]
-    fn test_time_mix() {
-        let device = &get_test_device::<TestBackend>();
-        let model = get_test_model(device);
-
-        let expected_v_first = load_expected_f32::<TestBackend, 3>("block_0_att_output_v_first", device);
-
-        let mut time_mix_outputs = vec![];
-        let mut expected_time_mix_outputs = vec![];
-        let mut module_names = vec![];
-
-        for &cell_id in &[0, 1, 11] {
-            let input = load_expected_f32::<TestBackend, 3>(format!("block_{}_att_input", cell_id).as_str(), device);
-
-            let cell = model.cells[cell_id].clone();
-
-            let (time_mix_output_x, _v_first, ..) = cell.time_mixer.forward(
-                input.clone(),
-                if cell_id == 0 {
-                    Tensor::zeros_like(&input)
-                } else {
-                    expected_v_first.clone()
-                },
-                Tensor::<TestBackend, 2>::zeros([1, TEST_EMBEDDED_DIM], &device),
-                Tensor::<TestBackend, 4, Float>::zeros(
-                    [1, TEST_NUM_HEADS, TEST_HEAD_SIZE, TEST_HEAD_SIZE],
-                    &device,
-                ),
-                &device,
-            );
-
-            let expected_time_mix_output_x =
-                load_expected_f32::<TestBackend, 3>(format!("block_{}_att_output_x", cell_id).as_str(), device);
-
-            time_mix_outputs.push(time_mix_output_x);
-            expected_time_mix_outputs.push(expected_time_mix_output_x);
-            module_names.push(format!("cell_{}_time_mix", cell_id));
-        }
-
-        assert_closeness_multi(
-            time_mix_outputs,
-            expected_time_mix_outputs,
-            module_names,
-            MIN_PASS_RATE,
-            RELATIVE_ERROR,
-        );
-    }
-}

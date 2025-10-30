@@ -73,37 +73,3 @@ impl<B: Backend> TokensOptions<B> {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    use crate::utils::test_tools::*;
-
-    #[test]
-    fn test_embed() {
-        let device = &get_test_device::<TestBackend>();
-        let model = get_test_model(device);
-
-        let input = load_expected_i64::<TestBackend, 2>("input", device);
-
-        let input_options = TokensOptions::SingleUnitIntTokens(input);
-
-        let embed_output = model.embed.forward(input_options);
-
-        // let embed_weight = model.embed.weight().to_data().to_vec::<f32>().unwrap();
-        // let len = embed_weight.len().min(50);
-        // println!("embed_weight: {:?}", &embed_weight[0..len]);
-        // println!("embed_output: {:?}",
-        // embed_output.to_data().to_vec::<f32>().unwrap());
-        let expected_embed_output = load_expected_f32::<TestBackend, 3>("emb_output", device);
-
-        assert_closeness(
-            &embed_output,
-            &expected_embed_output,
-            "model.embed",
-            MIN_PASS_RATE,
-            RELATIVE_ERROR,
-        );
-    }
-}
