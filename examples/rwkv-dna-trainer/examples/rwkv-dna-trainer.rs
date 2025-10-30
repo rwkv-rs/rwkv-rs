@@ -34,10 +34,10 @@ impl Trainer for MyTrainer {
     type TokenUnit = u8;
 
     fn get_data_loaders<B: RwkvTrainBackend>(
-        mut train_cfg_builder: &mut FinalTrainConfigBuilder,
-        devices: &Vec<B::Device>,
+        train_cfg_builder: &mut FinalTrainConfigBuilder,
+        devices: &[B::Device],
     ) -> Vec<Arc<dyn DataLoader<B, Self::Batch<B>>>> {
-        get_sliding_data_loaders::<B, Self::TokenUnit>(&mut train_cfg_builder, devices)
+        get_sliding_data_loaders::<B, Self::TokenUnit>(train_cfg_builder, devices)
     }
 
     fn get_model<B: RwkvTrainBackend>(main_device: &B::Device) -> Self::Model<B> {

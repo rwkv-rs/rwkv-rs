@@ -1,4 +1,4 @@
-use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::{Receiver, SyncSender};
 
 use burn::{
     collective,
@@ -9,12 +9,8 @@ use burn::{
 use burn_optim::GradientsParams;
 
 pub struct GradSyncer {
-    sender: SyncSender<Message>,
-}
-
-pub struct Message {
-    callback: SyncSender<Option<GradientsParams>>,
-    grads: GradientsParams,
+    sender: SyncSender<GradientsParams>,
+    receiver: Receiver<Option<GradientsParams>>,
 }
 
 impl GradSyncer {
@@ -23,50 +19,34 @@ impl GradSyncer {
         device: Device<B>,
         id: PeerId,
     ) -> Self {
-        let (sender, receiver) = std::sync::mpsc::sync_channel::<Message>(8);
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<GradientsParams>(1);
+        let (result_sender, result_receiver) =
+            std::sync::mpsc::sync_channel::<Option<GradientsParams>>(1);
 
         std::thread::spawn(move || {
             println!("[{id}] Register collective operation {config:?}");
 
             collective::register::<B::InnerBackend>(id, device, config).unwrap();
 
-            let num_stages = 4;
-
-            let mut buffers: Vec<GradientsParams> = Vec::new();
-
-            while let Ok(msg) = receiver.recv() {
-                let grads = msg
-                    .grads
+            while let Ok(grads) = receiver.recv() {
+                let grads = grads
                     .all_reduce::<B::InnerBackend>(id, ReduceOperation::Mean)
                     .unwrap();
 
-                buffers.push(grads);
-
-                let result = if buffers.len() >= num_stages {
-                    Some(buffers.remove(0))
-                } else {
-                    None
-                };
-
-                msg.callback.send(result).unwrap();
+                result_sender.send(Some(grads)).unwrap();
             }
 
             collective::finish_collective::<B::InnerBackend>(id).unwrap();
         });
 
-        Self { sender }
+        Self {
+            sender,
+            receiver: result_receiver,
+        }
     }
 
     pub fn sync(&self, grads: GradientsParams) -> Option<GradientsParams> {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-
-        let msg = Message {
-            callback: sender,
-            grads,
-        };
-
-        self.sender.send(msg).unwrap();
-
-        receiver.recv().unwrap()
+        self.sender.send(grads).unwrap();
+        self.receiver.recv().unwrap()
     }
 }

@@ -2,7 +2,6 @@
 #[cfg(feature = "hotpath")]
 use std::sync::Barrier;
 use std::{
-    collections::VecDeque,
     path::Path,
     sync::{Arc, atomic::Ordering, mpsc},
 };
@@ -77,12 +76,6 @@ impl<B: RwkvTrainBackend> TrainStepOutput<B> {
             learning_rate,
         }
     }
-}
-
-struct PendingStep<B: RwkvTrainBackend> {
-    output: TrainStepOutput<B>,
-    mini_epoch: usize,
-    step_index: usize,
 }
 
 #[async_trait]
@@ -195,7 +188,6 @@ pub trait Trainer {
 
                         let mut accumulation_index = 0usize;
                         let mut accumulated_grads: Option<GradientsParams> = None;
-                        let mut pending_outputs: VecDeque<PendingStep<B>> = VecDeque::new();
 
                         let mut should_stop = false;
                         let is_rank0 = device_index == 0;
@@ -234,7 +226,7 @@ pub trait Trainer {
                                         accumulation_steps,
                                     );
 
-                                    let output = Self::train_step::<B>(
+                                    let mut output = Self::train_step::<B>(
                                         &mut model,
                                         batch,
                                         &loss_fn,
@@ -262,31 +254,23 @@ pub trait Trainer {
                                             grads_current
                                         };
 
-                                        pending_outputs.push_back(PendingStep {
-                                            output,
-                                            mini_epoch: mini_epoch_index,
-                                            step_index,
-                                        });
+                                        let synced_grads = syncer.sync(total_grads);
+                                        let lr_value = output
+                                            .learning_rate
+                                            .take()
+                                            .unwrap_or_else(|| lr_scheduler.step());
 
-                                        if let Some(grads) = syncer.sync(total_grads)
-                                            && let Some(mut pending) = pending_outputs.pop_front()
-                                        {
-                                            let lr_value = pending
-                                                .output
-                                                .learning_rate
-                                                .take()
-                                                .unwrap_or_else(|| lr_scheduler.step());
-
+                                        if let Some(grads) = synced_grads {
                                             model = optimizer.step(lr_value, model, grads);
-                                            pending.output.learning_rate = Some(lr_value);
-
-                                            emit_metrics(
-                                                &metrics_sender,
-                                                pending.mini_epoch,
-                                                pending.step_index,
-                                                &pending.output,
-                                            );
                                         }
+                                        output.learning_rate = Some(lr_value);
+
+                                        emit_metrics(
+                                            &metrics_sender,
+                                            mini_epoch_index,
+                                            step_index,
+                                            &output,
+                                        );
 
                                         accumulation_index = 0;
                                     } else {
@@ -318,29 +302,6 @@ pub trait Trainer {
                             barrier_for_thread.wait();
 
                             if should_stop {
-                                break;
-                            }
-                        }
-
-                        // Flush any pending steps remaining in the pipeline.
-                        while let Some(mut pending) = pending_outputs.pop_front() {
-                            if let Some(grads) = syncer.sync(GradientsParams::new()) {
-                                let lr_value = pending
-                                    .output
-                                    .learning_rate
-                                    .take()
-                                    .unwrap_or_else(|| lr_scheduler.step());
-
-                                model = optimizer.step(lr_value, model, grads);
-                                pending.output.learning_rate = Some(lr_value);
-
-                                emit_metrics(
-                                    &metrics_sender,
-                                    pending.mini_epoch,
-                                    pending.step_index,
-                                    &pending.output,
-                                );
-                            } else {
                                 break;
                             }
                         }
@@ -417,7 +378,7 @@ pub trait Trainer {
             file_logger.log(record);
         }
 
-        renderer.on_train_end().ok();
+        renderer.on_train_end(None).ok();
 
         if !TRAIN_CFG.get().unwrap().use_tui {
             renderer.manual_close();
@@ -430,7 +391,7 @@ pub trait Trainer {
 
     fn get_data_loaders<B: RwkvTrainBackend>(
         train_cfg_builder: &mut FinalTrainConfigBuilder,
-        devices: &Vec<B::Device>,
+        devices: &[B::Device],
     ) -> Vec<Arc<dyn DataLoader<B, Self::Batch<B>>>>;
 
     fn get_model<B: RwkvTrainBackend>(main_device: &B::Device) -> Self::Model<B>;
