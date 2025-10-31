@@ -6472,7 +6472,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rwkv-g1-0point1b-pth2mpk-converter"
+name = "rwkv-g1a-0point1b-pth2mpk-converter"
 version = "0.1.0"
 dependencies = [
  "burn",
@@ -6484,7 +6484,6 @@ dependencies = [
 name = "rwkv-infer"
 version = "0.1.0"
 dependencies = [
- "tch",
  "tokio",
 ]
 
@@ -6496,10 +6495,13 @@ dependencies = [
  "burn-cubecl",
  "burn-fusion",
  "burn-ir",
+ "half",
  "hotpath",
  "itertools 0.14.0",
  "ndarray",
  "ndarray-npy",
+ "num-traits",
+ "py_literal",
  "rwkv-config",
  "rwkv-data",
  "serde",
