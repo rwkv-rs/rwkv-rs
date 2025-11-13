@@ -168,18 +168,18 @@ fn wkv7_forward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolEl
         cube_count,
         cube_dim,
         Wkv7InputsLaunch::new(
-            weight_decay.as_tensor_arg::<FE>(1),
-            receptance.as_tensor_arg::<FE>(1),
-            key.as_tensor_arg::<FE>(1),
-            value.as_tensor_arg::<FE>(1),
-            removal.as_tensor_arg::<FE>(1),
-            replacement.as_tensor_arg::<FE>(1),
-            initial_state.as_tensor_arg::<FE>(1),
+            weight_decay.as_tensor_arg(1),
+            receptance.as_tensor_arg(1),
+            key.as_tensor_arg(1),
+            value.as_tensor_arg(1),
+            removal.as_tensor_arg(1),
+            replacement.as_tensor_arg(1),
+            initial_state.as_tensor_arg(1),
         ),
         Wkv7OutputsLaunch::new(
-            states.as_tensor_arg::<FE>(1),
-            sa_out.as_tensor_arg::<FE>(1),
-            output.as_tensor_arg::<FE>(1),
+            states.as_tensor_arg(1),
+            sa_out.as_tensor_arg(1),
+            output.as_tensor_arg(1),
         ),
         config,
     );
@@ -275,24 +275,24 @@ fn wkv7_backward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolE
         cube_count,
         cube_dim,
         Wkv7BackwardInputsLaunch::new(
-            weight_decay.as_tensor_arg::<FE>(1),
-            receptance.as_tensor_arg::<FE>(1),
-            key.as_tensor_arg::<FE>(1),
-            value.as_tensor_arg::<FE>(1),
-            removal.as_tensor_arg::<FE>(1),
-            replacement.as_tensor_arg::<FE>(1),
-            state.as_tensor_arg::<FE>(1),
-            removal_state.as_tensor_arg::<FE>(1),
-            output_grad.as_tensor_arg::<FE>(1),
+            weight_decay.as_tensor_arg(1),
+            receptance.as_tensor_arg(1),
+            key.as_tensor_arg(1),
+            value.as_tensor_arg(1),
+            removal.as_tensor_arg(1),
+            replacement.as_tensor_arg(1),
+            state.as_tensor_arg(1),
+            removal_state.as_tensor_arg(1),
+            output_grad.as_tensor_arg(1),
         ),
         Wkv7BackwardOutputsLaunch::new(
-            weight_decay_grad.as_tensor_arg::<FE>(1),
-            receptance_grad.as_tensor_arg::<FE>(1),
-            key_grad.as_tensor_arg::<FE>(1),
-            value_grad.as_tensor_arg::<FE>(1),
-            removal_grad.as_tensor_arg::<FE>(1),
-            replacement_grad.as_tensor_arg::<FE>(1),
-            grad_initial_state.as_tensor_arg::<FE>(1),
+            weight_decay_grad.as_tensor_arg(1),
+            receptance_grad.as_tensor_arg(1),
+            key_grad.as_tensor_arg(1),
+            value_grad.as_tensor_arg(1),
+            removal_grad.as_tensor_arg(1),
+            replacement_grad.as_tensor_arg(1),
+            grad_initial_state.as_tensor_arg(1),
         ),
         config,
     );
@@ -383,7 +383,7 @@ mod fusion_impl {
         Fusion, FusionBackend, FusionRuntime,
         stream::{Operation, OperationStreams},
     };
-    use burn_ir::{CustomOpIr, HandleContainer, OperationIr};
+    use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};
 
     use super::*;
     use crate::kernels::wkv7::Wkv7Backend;
@@ -476,20 +476,23 @@ mod fusion_impl {
 
             streams.tensor(&replacement);
 
-            let state_out = client.tensor_uninitialized(
-                vec![batch, num_heads, num_chunks, dim, dim].into(),
-                B::FloatElem::dtype(),
-            );
-
-            let removal_state_out = client.tensor_uninitialized(
-                vec![batch, seq_len, num_heads, dim].into(),
-                B::FloatElem::dtype(),
-            );
-
-            let output_out = client.tensor_uninitialized(
-                vec![batch, seq_len, num_heads, dim].into(),
-                B::FloatElem::dtype(),
-            );
+            let output_desc = [
+                TensorIr::uninit(
+                    client.create_empty_handle(),
+                    Shape::new([batch, num_heads, num_chunks, dim, dim]),
+                    B::FloatElem::dtype(),
+                ),
+                TensorIr::uninit(
+                    client.create_empty_handle(),
+                    Shape::new([batch, seq_len, num_heads, dim]),
+                    B::FloatElem::dtype(),
+                ),
+                TensorIr::uninit(
+                    client.create_empty_handle(),
+                    Shape::new([batch, seq_len, num_heads, dim]),
+                    B::FloatElem::dtype(),
+                ),
+            ];
 
             let desc = CustomOpIr::new(
                 "wkv7_forward",
@@ -501,14 +504,10 @@ mod fusion_impl {
                     removal.into_ir(),
                     replacement.into_ir(),
                 ],
-                &[
-                    state_out.to_ir_out(),
-                    removal_state_out.to_ir_out(),
-                    output_out.to_ir_out(),
-                ],
+                &output_desc,
             );
 
-            client.register(
+            let outputs = client.register(
                 streams,
                 OperationIr::Custom(desc.clone()),
                 Wkv7ForwardOp::<B> {
@@ -516,6 +515,23 @@ mod fusion_impl {
                     chunk_len,
                     _b: core::marker::PhantomData,
                 },
+            );
+
+            let mut outputs_iter = outputs.into_iter();
+
+            let state_out = outputs_iter
+                .next()
+                .expect("wkv7_forward: missing state output tensor");
+            let removal_state_out = outputs_iter
+                .next()
+                .expect("wkv7_forward: missing removal_state output tensor");
+            let output_out = outputs_iter
+                .next()
+                .expect("wkv7_forward: missing output tensor");
+
+            assert!(
+                outputs_iter.next().is_none(),
+                "wkv7_forward produced unexpected extra outputs"
             );
 
             (state_out, removal_state_out, output_out)
@@ -658,24 +674,43 @@ mod fusion_impl {
 
             streams.tensor(&output_grad);
 
-            let grad_weight_decay =
-                client.tensor_uninitialized(shape.clone(), B::FloatElem::dtype());
-
-            let grad_receptance = client.tensor_uninitialized(shape.clone(), B::FloatElem::dtype());
-
-            let grad_key = client.tensor_uninitialized(shape.clone(), B::FloatElem::dtype());
-
-            let grad_value = client.tensor_uninitialized(shape.clone(), B::FloatElem::dtype());
-
-            let grad_removal = client.tensor_uninitialized(shape.clone(), B::FloatElem::dtype());
-
-            let grad_replacement =
-                client.tensor_uninitialized(shape.clone(), B::FloatElem::dtype());
-
-            let grad_initial_state = client.tensor_uninitialized(
-                Shape::new([shape.dims[0], shape.dims[2], shape.dims[3], shape.dims[3]]),
-                B::FloatElem::dtype(),
-            );
+            let grad_outputs = [
+                TensorIr::uninit(
+                    client.create_empty_handle(),
+                    shape.clone(),
+                    B::FloatElem::dtype(),
+                ),
+                TensorIr::uninit(
+                    client.create_empty_handle(),
+                    shape.clone(),
+                    B::FloatElem::dtype(),
+                ),
+                TensorIr::uninit(
+                    client.create_empty_handle(),
+                    shape.clone(),
+                    B::FloatElem::dtype(),
+                ),
+                TensorIr::uninit(
+                    client.create_empty_handle(),
+                    shape.clone(),
+                    B::FloatElem::dtype(),
+                ),
+                TensorIr::uninit(
+                    client.create_empty_handle(),
+                    shape.clone(),
+                    B::FloatElem::dtype(),
+                ),
+                TensorIr::uninit(
+                    client.create_empty_handle(),
+                    shape.clone(),
+                    B::FloatElem::dtype(),
+                ),
+                TensorIr::uninit(
+                    client.create_empty_handle(),
+                    Shape::new([shape.dims[0], shape.dims[2], shape.dims[3], shape.dims[3]]),
+                    B::FloatElem::dtype(),
+                ),
+            ];
 
             let desc = CustomOpIr::new(
                 "wkv7_backward",
@@ -690,18 +725,10 @@ mod fusion_impl {
                     removal_state.into_ir(),
                     output_grad.into_ir(),
                 ],
-                &[
-                    grad_weight_decay.to_ir_out(),
-                    grad_receptance.to_ir_out(),
-                    grad_key.to_ir_out(),
-                    grad_value.to_ir_out(),
-                    grad_removal.to_ir_out(),
-                    grad_replacement.to_ir_out(),
-                    grad_initial_state.to_ir_out(),
-                ],
+                &grad_outputs,
             );
 
-            client.register(
+            let outputs = client.register(
                 streams,
                 OperationIr::Custom(desc.clone()),
                 Wkv7BackwardOp::<B> {
@@ -709,6 +736,35 @@ mod fusion_impl {
                     chunk_len,
                     _b: core::marker::PhantomData,
                 },
+            );
+
+            let mut outputs_iter = outputs.into_iter();
+
+            let grad_weight_decay = outputs_iter
+                .next()
+                .expect("wkv7_backward: missing grad_weight_decay output");
+            let grad_receptance = outputs_iter
+                .next()
+                .expect("wkv7_backward: missing grad_receptance output");
+            let grad_key = outputs_iter
+                .next()
+                .expect("wkv7_backward: missing grad_key output");
+            let grad_value = outputs_iter
+                .next()
+                .expect("wkv7_backward: missing grad_value output");
+            let grad_removal = outputs_iter
+                .next()
+                .expect("wkv7_backward: missing grad_removal output");
+            let grad_replacement = outputs_iter
+                .next()
+                .expect("wkv7_backward: missing grad_replacement output");
+            let grad_initial_state = outputs_iter
+                .next()
+                .expect("wkv7_backward: missing grad_initial_state output");
+
+            assert!(
+                outputs_iter.next().is_none(),
+                "wkv7_backward produced unexpected extra outputs"
             );
 
             (

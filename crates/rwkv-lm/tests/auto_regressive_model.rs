@@ -8,6 +8,7 @@ use rwkv_lm::{
 use rwkv_lm::kernels::wkv7::Wkv7Backend;
 use test_tools::*;
 
+
 #[test]
 fn test_rwkv7_0p1b_forward() {
     let device = &get_test_device::<TestBackend>();
@@ -27,7 +28,7 @@ fn test_rwkv7_0p1b_forward() {
         RELATIVE_ERROR,
     );
 
-    if !output_pass {
+    if NEED_FULL_TEST || !output_pass {
         all_checks_passed = false;
         let embed_output = model.embed.forward(input);
         let expected_embed_output = load_expected_f32::<TestBackend, 3>("emb_output", device);
@@ -129,7 +130,7 @@ fn test_rwkv7_0p1b_forward() {
             MIN_PASS_RATE,
             RELATIVE_ERROR,
         );
-        if !time_mix_pass {
+        if NEED_FULL_TEST || !time_mix_pass {
             all_checks_passed = false;
             let time_shift_input_x =
                 load_expected_f32::<TestBackend, 3>("block_0_att_time_shift_input_x", device);

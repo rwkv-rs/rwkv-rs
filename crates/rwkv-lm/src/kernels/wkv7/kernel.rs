@@ -101,7 +101,7 @@ pub fn wkv7_backward_kernel<F: Float>(
     let num_heads = comptime![config.num_heads];
     let head_size = comptime![config.head_size];
     let chunk_length = comptime![config.chunk_length];
-    
+
     let batch_index = CUBE_POS_Y;
     let head_index = CUBE_POS_X;
     let head_dim_index = UNIT_POS;
@@ -150,12 +150,12 @@ pub fn wkv7_backward_kernel<F: Float>(
 
         let receptance_indexed = inputs.receptance[flat_index];
         shared_receptance[head_dim_index] = receptance_indexed;
-        
+
         let raw_w = inputs.weight_decay[flat_index];
         let wi_fac = F::exp(raw_w);
         let weight_decay_indexed = F::exp(-wi_fac);
         shared_weight_decay[head_dim_index] = weight_decay_indexed;
-        
+
         let key_indexed = inputs.key[flat_index];
         shared_key[head_dim_index] = key_indexed;
         let removal_indexed = inputs.removal[flat_index];

@@ -483,4 +483,3 @@ impl<B: Backend> TimeMixer<B> {
         )
     }
 }
-

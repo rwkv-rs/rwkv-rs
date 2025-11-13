@@ -1,16 +1,13 @@
 use std::fs::File;
 
 use burn::{
-    backend::{Autodiff, Cuda, cuda::CudaDevice},
+    backend::Cuda,
     module::Module,
     prelude::{Backend, DeviceOps, Shape, TensorData},
     record::{FullPrecisionSettings, NamedMpkFileRecorder, Recorder},
-    tensor::{
-        Float, Int, Tensor,
-        backend::{AutodiffBackend, DeviceId},
-        cast::ToElement,
-    },
+    tensor::{backend::DeviceId, cast::ToElement, Float, Int, Tensor},
 };
+use burn::backend::Autodiff;
 use itertools::izip;
 use ndarray::ArrayD;
 use ndarray_npy::ReadNpyExt;
@@ -18,14 +15,14 @@ use rwkv_lm::auto_regressive_model::{AutoRegressiveModel, AutoRegressiveModelCon
 
 pub type TestBackend = Cuda<f32, i32>;
 pub type TestAutodiffBackend = Autodiff<TestBackend>;
-
-pub const MIN_PASS_RATE: f64 = 0.99;
-pub const RELATIVE_ERROR: f64 = 0.01;
+pub const MIN_PASS_RATE: f64 = 0.999;
+pub const RELATIVE_ERROR: f64 = 0.005;
 pub const TEST_BATCH_SIZE: usize = 1;
 pub const TEST_CONTEXT_LENGTH: usize = 128;
 pub const TEST_EMBEDDED_DIM: usize = 768;
 pub const TEST_NUM_HEADS: usize = 12;
 pub const TEST_HEAD_SIZE: usize = 64;
+pub const NEED_FULL_TEST: bool = true;
 
 pub fn get_test_device<B: Backend>() -> B::Device {
     let device = B::Device::from_id(DeviceId::new(0, 0));
@@ -41,7 +38,7 @@ pub fn get_test_model<B: Backend>(device: &B::Device) -> AutoRegressiveModel<B> 
         )
         .expect("Failed to load weights for unit tests");
     AutoRegressiveModelConfig::new(12, 65536, 768, 12, 64)
-        .init::<B, u16>(&device)
+        .init::<B, u16>(device)
         .load_record(record)
 }
 
@@ -63,7 +60,7 @@ pub fn check_closeness<B: Backend, const D: usize>(
 
     let pass_rate = get_pass_rate(actual, expected, max_relative_error);
     let is_pass = pass_rate > min_pass_rate;
-    if  !is_pass {
+    if !is_pass {
         eprintln!(
             "🚨 UNIT TEST FAILURE: Layer '{}' precision check failed!\n\
              📋 Required: {:.1}% pass rate within {:.1}% relative error\n\
@@ -139,7 +136,7 @@ pub fn load_expected_f32<B: Backend, const D: usize>(
     file_name: &str,
     device: &B::Device,
 ) -> Tensor<B, D, Float> {
-    let file = File::open(format!("../../../data/variable_tracking/{}.npy", file_name)).unwrap();
+    let file = File::open(format!("../../../data/var_track_from_peft/{}.npy", file_name)).unwrap();
     let array: ArrayD<f32> = ArrayD::<f32>::read_npy(file).unwrap();
     array_npy2burn_f32(&array, device)
 }
@@ -148,7 +145,7 @@ pub fn load_expected_i64<B: Backend, const D: usize>(
     file_name: &str,
     device: &B::Device,
 ) -> Tensor<B, D, Int> {
-    let file = File::open(format!("../../../data/variable_tracking/{}.npy", file_name)).unwrap();
+    let file = File::open(format!("../../../data/var_track_from_peft/{}.npy", file_name)).unwrap();
     let array: ArrayD<i64> = ArrayD::<i64>::read_npy(file).unwrap();
     array_npy2burn_i64(&array, device)
 }

@@ -99,15 +99,15 @@ wandb = { path = "./dependencies/wandb-rs" }
 #burn-store = { path = "./dependencies/burn/crates/burn-store" }
 #burn-optim = { path = "./dependencies/burn/crates/burn-optim" }
 
-burn = { version = "0.19.0", features = [
+burn = { version = "0.20.0-pre.1", features = [
     "train", "autodiff", "ndarray", "cuda", "wgpu", "cubecl", "collective",
 ] }
-burn-train = { version = "0.19.0" }
-burn-fusion = { version = "0.19.0" }
-burn-cubecl = { version = "0.19.0" }
-burn-ir = { version = "0.19.0" }
-burn-store = { version = "0.19.0" }
-burn-optim = { version = "0.19.0" }
+burn-train = { version = "0.20.0-pre.1" }
+burn-fusion = { version = "0.20.0-pre.1" }
+burn-cubecl = { version = "0.20.0-pre.1" }
+burn-ir = { version = "0.20.0-pre.1" }
+burn-store = { version = "0.20.0-pre.1" }
+burn-optim = { version = "0.20.0-pre.1" }
 
 ndarray = { version = "0.16.1" }
 ndarray-npy = { version = "0.9.1" }
