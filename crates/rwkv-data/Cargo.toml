@@ -38,6 +38,7 @@ unicode-segmentation = { workspace = true }
 unicode-script = { workspace = true }
 unicode-normalization = { workspace = true }
 zstd = { workspace = true }
+log = { workspace = true }
 
 burn = { workspace = true }
 
