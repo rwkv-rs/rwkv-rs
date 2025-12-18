@@ -16,7 +16,6 @@ use burn::{
     tensor::backend::AutodiffBackend,
 };
 use rwkv_config::validated::{
-    model::FinalModelConfigBuilder,
     train::{FinalTrainConfigBuilder, MmapTokenDtypeOptions, TRAIN_CFG},
 };
 use rwkv_data::mmap::{

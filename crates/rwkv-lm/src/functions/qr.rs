@@ -14,7 +14,6 @@ use burn::prelude::{Backend, Tensor};
 /// A tuple `(Q, R)` where:
 /// * `Q` is an orthogonal matrix of shape [M, min(M, N)].
 /// * `R` is an upper triangular matrix of shape [min(M, N), N].
-
 pub fn qr<B: Backend>(a: Tensor<B, 2>) -> (Tensor<B, 2>, Tensor<B, 2>) {
     let device = a.device();
 

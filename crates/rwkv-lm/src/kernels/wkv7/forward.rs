@@ -1,12 +1,12 @@
 use burn::{
     backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement},
     cubecl,
-    tensor::{Shape, ops::FloatTensor},
+    tensor::{DType, Shape, ops::FloatTensor},
 };
 use burn_cubecl::{
     CubeElement, CubeRuntime,
     kernel::{cast, into_contiguous},
-    ops::numeric::{empty_device, zeros_device},
+    ops::numeric::{empty_device, zeros_client},
 };
 use cubecl::{CubeCount, CubeDim};
 
@@ -18,24 +18,40 @@ use crate::kernels::wkv7::{
     },
 };
 
+type Wkv7ForwardResult<R, FE, I, BT> = (
+    FloatTensor<CubeBackend<R, FE, I, BT>>,
+    FloatTensor<CubeBackend<R, FE, I, BT>>,
+    FloatTensor<CubeBackend<R, FE, I, BT>>,
+);
+
+type Wkv7BackwardResult<R, FE, I, BT> = (
+    FloatTensor<CubeBackend<R, FE, I, BT>>,
+    FloatTensor<CubeBackend<R, FE, I, BT>>,
+    FloatTensor<CubeBackend<R, FE, I, BT>>,
+    FloatTensor<CubeBackend<R, FE, I, BT>>,
+    FloatTensor<CubeBackend<R, FE, I, BT>>,
+    FloatTensor<CubeBackend<R, FE, I, BT>>,
+    FloatTensor<CubeBackend<R, FE, I, BT>>,
+);
+
 macro_rules! wkv7_with_f32_precision {
     (forward: $self:expr, $weight_decay:expr, $receptance:expr, $key:expr, $value:expr, $removal:expr, $replacement:expr, $initial_state:expr => $chunk_len:expr) => {{
         if size_of::<F>() != size_of::<f32>() {
             let result_f32 = wkv7_forward_impl::<R, f32, I, BT>(
-                cast::<R, F, f32>($weight_decay),
-                cast::<R, F, f32>($receptance),
-                cast::<R, F, f32>($key),
-                cast::<R, F, f32>($value),
-                cast::<R, F, f32>($removal),
-                cast::<R, F, f32>($replacement),
-                $initial_state.map(|s| cast::<R, F, f32>(s)),
+                cast::<R>($weight_decay, DType::F32),
+                cast::<R>($receptance, DType::F32),
+                cast::<R>($key, DType::F32),
+                cast::<R>($value, DType::F32),
+                cast::<R>($removal, DType::F32),
+                cast::<R>($replacement, DType::F32),
+                $initial_state.map(|s| cast::<R>(s, DType::F32)),
                 $chunk_len,
             );
 
             (
-                cast::<R, f32, F>(result_f32.0),
-                cast::<R, f32, F>(result_f32.1),
-                cast::<R, f32, F>(result_f32.2),
+                cast::<R>(result_f32.0, F::dtype()),
+                cast::<R>(result_f32.1, F::dtype()),
+                cast::<R>(result_f32.2, F::dtype()),
             )
         } else {
             wkv7_forward_impl::<R, F, I, BT>(
@@ -55,26 +71,26 @@ macro_rules! wkv7_with_f32_precision {
         if size_of::<F>() != size_of::<f32>() {
             // bf16 -> f32计算 -> bf16
             let result_f32 = wkv7_backward_impl::<R, f32, I, BT>(
-                cast::<R, F, f32>($weight_decay),
-                cast::<R, F, f32>($receptance),
-                cast::<R, F, f32>($key),
-                cast::<R, F, f32>($value),
-                cast::<R, F, f32>($removal),
-                cast::<R, F, f32>($replacement),
-                cast::<R, F, f32>($state),
-                cast::<R, F, f32>($removal_state),
-                cast::<R, F, f32>($output_grad),
+                cast::<R>($weight_decay, DType::F32),
+                cast::<R>($receptance, DType::F32),
+                cast::<R>($key, DType::F32),
+                cast::<R>($value, DType::F32),
+                cast::<R>($removal, DType::F32),
+                cast::<R>($replacement, DType::F32),
+                cast::<R>($state, DType::F32),
+                cast::<R>($removal_state, DType::F32),
+                cast::<R>($output_grad, DType::F32),
                 $chunk_len,
             );
 
             (
-                cast::<R, f32, F>(result_f32.0),
-                cast::<R, f32, F>(result_f32.1),
-                cast::<R, f32, F>(result_f32.2),
-                cast::<R, f32, F>(result_f32.3),
-                cast::<R, f32, F>(result_f32.4),
-                cast::<R, f32, F>(result_f32.5),
-                cast::<R, f32, F>(result_f32.6),
+                cast::<R>(result_f32.0, F::dtype()),
+                cast::<R>(result_f32.1, F::dtype()),
+                cast::<R>(result_f32.2, F::dtype()),
+                cast::<R>(result_f32.3, F::dtype()),
+                cast::<R>(result_f32.4, F::dtype()),
+                cast::<R>(result_f32.5, F::dtype()),
+                cast::<R>(result_f32.6, F::dtype()),
             )
         } else {
             wkv7_backward_impl::<R, F, I, BT>(
@@ -94,7 +110,7 @@ macro_rules! wkv7_with_f32_precision {
 }
 
 /// 通用的WKV7前向实现
-
+#[allow(clippy::too_many_arguments)]
 fn wkv7_forward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolElement>(
     weight_decay: FloatTensor<CubeBackend<R, FE, I, BT>>,
     receptance: FloatTensor<CubeBackend<R, FE, I, BT>>,
@@ -104,11 +120,7 @@ fn wkv7_forward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolEl
     replacement: FloatTensor<CubeBackend<R, FE, I, BT>>,
     initial_state: Option<FloatTensor<CubeBackend<R, FE, I, BT>>>,
     chunk_len: usize,
-) -> (
-    FloatTensor<CubeBackend<R, FE, I, BT>>,
-    FloatTensor<CubeBackend<R, FE, I, BT>>,
-    FloatTensor<CubeBackend<R, FE, I, BT>>,
-) {
+) -> Wkv7ForwardResult<R, FE, I, BT> {
     let weight_decay = into_contiguous(weight_decay);
 
     let receptance = into_contiguous(receptance);
@@ -139,7 +151,7 @@ fn wkv7_forward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolEl
 
     let sa_out = empty_device::<R, FE>(client.clone(), device.clone(), shape.clone());
 
-    let num_chunks = (seq_len + chunk_len - 1) / chunk_len;
+    let num_chunks = seq_len.div_ceil(chunk_len);
 
     let state_shape = Shape::new([batch_size, num_heads, num_chunks, dim, dim]);
 
@@ -148,7 +160,7 @@ fn wkv7_forward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolEl
     let initial_state_shape = Shape::new([batch_size, num_heads, dim, dim]);
 
     let initial_state = initial_state.map(into_contiguous).unwrap_or_else(|| {
-        zeros_device::<R, FE>(client.clone(), device.clone(), initial_state_shape.clone())
+        zeros_client::<R>(client.clone(), device.clone(), initial_state_shape.clone(), FE::dtype())
     });
 
     let config = Wkv7Config {
@@ -182,13 +194,14 @@ fn wkv7_forward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolEl
             output.as_tensor_arg(1),
         ),
         config,
-    );
+    )
+    .expect("wkv7_forward_kernel should never fail");
 
     (states, sa_out, output)
 }
 
 /// 通用的WKV7反向实现
-
+#[allow(clippy::too_many_arguments)]
 fn wkv7_backward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolElement>(
     weight_decay: FloatTensor<CubeBackend<R, FE, I, BT>>,
     receptance: FloatTensor<CubeBackend<R, FE, I, BT>>,
@@ -200,15 +213,7 @@ fn wkv7_backward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolE
     removal_state: FloatTensor<CubeBackend<R, FE, I, BT>>,
     output_grad: FloatTensor<CubeBackend<R, FE, I, BT>>,
     chunk_len: usize,
-) -> (
-    FloatTensor<CubeBackend<R, FE, I, BT>>,
-    FloatTensor<CubeBackend<R, FE, I, BT>>,
-    FloatTensor<CubeBackend<R, FE, I, BT>>,
-    FloatTensor<CubeBackend<R, FE, I, BT>>,
-    FloatTensor<CubeBackend<R, FE, I, BT>>,
-    FloatTensor<CubeBackend<R, FE, I, BT>>,
-    FloatTensor<CubeBackend<R, FE, I, BT>>,
-) {
+) -> Wkv7BackwardResult<R, FE, I, BT> {
     let weight_decay = into_contiguous(weight_decay);
 
     let receptance = into_contiguous(receptance);
@@ -295,7 +300,8 @@ fn wkv7_backward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolE
             grad_initial_state.as_tensor_arg(1),
         ),
         config,
-    );
+    )
+    .expect("wkv7_backward_kernel should never fail");
 
     (
         weight_decay_grad,
@@ -309,7 +315,6 @@ fn wkv7_backward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolE
 }
 
 /// CubeBackend implementation of Wkv7Backend
-
 impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> Wkv7Backend
     for CubeBackend<R, F, I, BT>
 where
@@ -375,7 +380,6 @@ where
 
 /// Fusion backend support - based on burn-vision implementation pattern
 #[cfg(feature = "fusion")]
-
 mod fusion_impl {
 
     use burn::tensor::{Element, Shape};
@@ -409,7 +413,7 @@ mod fusion_impl {
 
             let dim = weight_decay.shape[3];
 
-            let num_chunks = (seq_len + chunk_len - 1) / chunk_len;
+            let num_chunks = seq_len.div_ceil(chunk_len);
 
             #[derive(Clone, Debug)]
 

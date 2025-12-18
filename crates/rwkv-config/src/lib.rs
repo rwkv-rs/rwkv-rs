@@ -6,9 +6,7 @@ use std::{fs, path::Path};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub mod config_builder_helpers {
-
     /// 辅助trait：智能转换 T 或 Option<T> 到 Option<T>
-
     pub trait IntoBuilderOption<T> {
         fn into_builder_option(self) -> Option<T>;
     }
@@ -36,7 +34,6 @@ pub fn load_toml<P: AsRef<Path>, T: DeserializeOwned + 'static>(path: P) -> T {
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
-
 pub enum ModelTypeOptions {
     AutoRegressive,
     SequenceEmbedding,
@@ -44,7 +41,6 @@ pub enum ModelTypeOptions {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-
 pub enum TrainStageOptions {
     #[default]
     Pretrain,
@@ -55,7 +51,6 @@ pub enum TrainStageOptions {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-
 pub enum OptimizerOptions {
     #[default]
     AdamW,

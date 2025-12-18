@@ -1,6 +1,11 @@
-use burn::train::renderer::{
-    EvaluationName, EvaluationProgress, MetricState, MetricsRenderer, MetricsRendererEvaluation,
-    MetricsRendererTraining, TrainingProgress,
+use std::sync::Arc;
+
+use burn::train::{
+    metric::{MetricDefinition, MetricId},
+    renderer::{
+        EvaluationName, EvaluationProgress, MetricState, MetricsRenderer, MetricsRendererEvaluation,
+        MetricsRendererTraining, TrainingProgress,
+    },
 };
 use indicatif::{ProgressBar, ProgressStyle};
 
@@ -9,7 +14,6 @@ const LOSS_METRIC_NAME: &str = "Loss";
 const LEARNING_RATE_METRIC_NAME: &str = "Learning Rate";
 
 /// Progress bar renderer for training metrics
-
 pub struct BarMetricsRenderer {
     pb: ProgressBar,
     current_epoch: usize,
@@ -17,6 +21,8 @@ pub struct BarMetricsRenderer {
     train_loss: f64,
     train_lr: f64,
     valid_loss: Option<f64>,
+    metric_id_loss: MetricId,
+    metric_id_learning_rate: MetricId,
 }
 
 impl BarMetricsRenderer {
@@ -38,6 +44,8 @@ impl BarMetricsRenderer {
             train_loss: 0.0,
             train_lr: 0.0,
             valid_loss: None,
+            metric_id_loss: MetricId::new(Arc::new(LOSS_METRIC_NAME.to_string())),
+            metric_id_learning_rate: MetricId::new(Arc::new(LEARNING_RATE_METRIC_NAME.to_string())),
         }
     }
 }
@@ -45,17 +53,17 @@ impl BarMetricsRenderer {
 impl MetricsRendererTraining for BarMetricsRenderer {
     fn update_train(&mut self, state: MetricState) {
         if let MetricState::Numeric(entry, value) = state {
-            match entry.name.as_str() {
-                LOSS_METRIC_NAME => self.train_loss = value.current(),
-                LEARNING_RATE_METRIC_NAME => self.train_lr = value.current(),
-                _ => {},
+            if entry.metric_id == self.metric_id_loss {
+                self.train_loss = value.current();
+            } else if entry.metric_id == self.metric_id_learning_rate {
+                self.train_lr = value.current();
             }
         }
     }
 
     fn update_valid(&mut self, state: MetricState) {
         if let MetricState::Numeric(entry, value) = state
-            && entry.name.as_ref() == LOSS_METRIC_NAME
+            && entry.metric_id == self.metric_id_loss
         {
             self.valid_loss = Some(value.current());
         }
@@ -130,4 +138,6 @@ impl MetricsRenderer for BarMetricsRenderer {
     fn manual_close(&mut self) {
         self.pb.finish_with_message("Training completed");
     }
+
+    fn register_metric(&mut self, _definition: MetricDefinition) {}
 }

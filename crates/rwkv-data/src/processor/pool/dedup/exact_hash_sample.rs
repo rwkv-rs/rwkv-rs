@@ -1,9 +1,4 @@
-use std::{
-    borrow::Cow,
-    collections::HashSet,
-    num::NonZeroUsize,
-    sync::{Arc, Mutex},
-};
+use std::{borrow::Cow, num::NonZeroUsize, sync::Arc};
 
 use dashmap::DashSet;
 use rayon::prelude::*;

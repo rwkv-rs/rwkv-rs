@@ -74,16 +74,17 @@ where
                             let _ = writer.flush().await;
                         }
 
-                        // 默认使用csv扩展名，如果需要tsv可以根据相对路径判断
-                        let output_filename = format!("{}.csv", relative_name);
+                        let mut output_path = output_dir.join(&relative_name);
 
-                        let output_path = output_dir.join(output_filename);
+                        let delimiter = Self::get_delimiter(&output_path);
+
+                        if output_path.extension().is_none() {
+                            output_path.set_extension(Self::get_extension(delimiter));
+                        }
 
                         if let Some(parent) = output_path.parent() {
                             tokio::fs::create_dir_all(parent).await.unwrap();
                         }
-
-                        let delimiter = Self::get_delimiter(&output_path);
 
                         let file = File::create(output_path).await.unwrap();
 

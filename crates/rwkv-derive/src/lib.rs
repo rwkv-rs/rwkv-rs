@@ -71,7 +71,6 @@ use syn::{
 /// - `input`: 输入的 TokenStream，包含完整的结构体定义
 /// - 返回：生成的代码的 TokenStream
 #[proc_macro_derive(LineRef, attributes(line_ref))]
-
 pub fn derive_line_ref(input: TokenStream) -> TokenStream {
     // 第一步：解析输入的结构体定义
     let input = parse_macro_input!(input as DeriveInput); // 将TokenStream解析为DeriveInput结构体
@@ -256,7 +255,6 @@ pub fn derive_line_ref(input: TokenStream) -> TokenStream {
 /// 表示支持的 line_ref 字段类型枚举
 /// 用于标识字段应该如何进行内存映射序列化处理
 #[derive(Debug)]
-
 enum LineRefType {
     String, // 字符串类型，需要 UTF-8 编码/解码
     U128,   // 128位无符号整数，直接字节序转换
@@ -273,7 +271,6 @@ enum LineRefType {
 ///
 /// ## 错误处理
 /// 当遇到不支持的类型时会触发 panic，目前仅支持 String 和 u128
-
 fn extract_line_ref_type(ty: &Type) -> LineRefType {
     match ty {
         // 处理路径类型，如 `String`、`u128`、`std::string::String` 等
@@ -331,7 +328,6 @@ fn extract_line_ref_type(ty: &Type) -> LineRefType {
 /// - `input`: 输入的 TokenStream，包含完整的结构体定义
 /// - 返回：生成的代码的 TokenStream
 #[proc_macro_derive(ConfigBuilder, attributes(config_builder, skip_raw))]
-
 pub fn derive_config_builder(input: TokenStream) -> TokenStream {
     // 第一步：解析输入的结构体定义
     let input = parse_macro_input!(input as DeriveInput); // 将TokenStream解析为DeriveInput结构体
@@ -566,7 +562,6 @@ pub fn derive_config_builder(input: TokenStream) -> TokenStream {
 /// 表示从 `config_builder` 属性解析出的配置信息
 /// 包含原始配置类型路径和全局单元名称
 #[derive(Debug)]
-
 struct ConfigBuilderAttrs {
     raw_type: String,  // 原始配置类型的字符串路径，如 "crate::config::MyConfigRaw"
     cell_name: String, // 全局单元名称，如 "MY_CONFIG"
@@ -590,7 +585,6 @@ struct ConfigBuilderAttrs {
 /// ## 错误处理
 /// - 如果缺少 `raw` 参数，会触发 panic 并提示错误
 /// - 如果缺少 `cell` 参数，会触发 panic 并提示错误
-
 fn parse_config_builder_attrs(attrs: &[Attribute]) -> ConfigBuilderAttrs {
     // 初始化参数变量
     let mut raw_type = None; // 原始配置类型路径
@@ -631,36 +625,6 @@ fn parse_config_builder_attrs(attrs: &[Attribute]) -> ConfigBuilderAttrs {
     }
 }
 
-/// 从属性字符串中提取赋值表达式的字符串值
-/// 用于解析类似 `key = "value"` 格式的属性参数
-///
-/// ## 参数
-/// - `token_str`: 要解析的属性字符串，如 `raw = "MyType"`
-///
-/// ## 返回
-/// 返回引号内提取出的字符串值，如果格式不符合预期则返回 None
-///
-/// ## 示例
-/// ```ignore
-/// let result = extract_string_from_assignment(`raw = "MyType"`);
-/// assert_eq!(result, Some("MyType".to_string()));
-/// ```
-
-fn extract_string_from_assignment(token_str: &str) -> Option<String> {
-    // 简化版本：查找 = "value" 模式并提取引号内的值
-    if let Some(eq_pos) = token_str.find('=') {
-        let value_part = &token_str[eq_pos + 1..].trim();
-
-        // 检查是否是双引号包围的字符串值
-        if value_part.starts_with('"') && value_part.ends_with('"') {
-            // 去除首尾引号，返回内部字符串
-            return Some(value_part[1..value_part.len() - 1].to_string());
-        }
-    }
-
-    None // 不符合预期格式，返回 None
-}
-
 /// 判断类型是否为 Option<T> 类型
 /// 用于在代码生成时区别处理必填字段和可选字段
 ///
@@ -675,7 +639,6 @@ fn extract_string_from_assignment(token_str: &str) -> Option<String> {
 /// assert_eq!(is_option_type(&syn::parse_str::<Type>("Option<String>").unwrap()), true);
 /// assert_eq!(is_option_type(&syn::parse_str::<Type>("String").unwrap()), false);
 /// ```
-
 fn is_option_type(ty: &Type) -> bool {
     // 检查类型路径的最后一个片段是否为 "Option"
     if let Type::Path(type_path) = ty
@@ -705,7 +668,6 @@ fn is_option_type(ty: &Type) -> bool {
 /// let inner_type = extract_option_inner_type(&syn::parse_str::<Type>("Option<String>").unwrap());
 /// // inner_type 将是 "String" 的 TokenStream 表示
 /// ```
-
 fn extract_option_inner_type(ty: &Type) -> proc_macro2::TokenStream {
     // 解析 Option<T> 类型，提取内部类型 T
     if let Type::Path(type_path) = ty

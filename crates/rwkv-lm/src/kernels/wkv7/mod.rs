@@ -7,10 +7,21 @@ use burn::{
     tensor::{Tensor, TensorPrimitive, backend::AutodiffBackend, ops::FloatTensor},
 };
 
+pub type Wkv7ForwardOutput<B> = (FloatTensor<B>, FloatTensor<B>, FloatTensor<B>);
+
+pub type Wkv7BackwardOutput<B> = (
+    FloatTensor<B>,
+    FloatTensor<B>,
+    FloatTensor<B>,
+    FloatTensor<B>,
+    FloatTensor<B>,
+    FloatTensor<B>,
+    FloatTensor<B>,
+);
+
 /// Interface matching the CUDA kernel described in model.py L46-L68.
-
-/// WKV7 Backend trait that extends the Burn backend trait
-
+/// WKV7 backend trait that extends the Burn backend trait.
+#[allow(clippy::too_many_arguments)]
 pub trait Wkv7Backend: Backend {
     fn wkv7_forward(
         weight_decay: FloatTensor<Self>,
@@ -21,10 +32,9 @@ pub trait Wkv7Backend: Backend {
         replacement: FloatTensor<Self>,
         initial_state: Option<FloatTensor<Self>>,
         chunk_len: usize,
-    ) -> (FloatTensor<Self>, FloatTensor<Self>, FloatTensor<Self>);
+    ) -> Wkv7ForwardOutput<Self>;
 
     /// WKV7 backward operation
-
     fn wkv7_backward(
         weight_decay: FloatTensor<Self>,
         receptance: FloatTensor<Self>,
@@ -36,24 +46,15 @@ pub trait Wkv7Backend: Backend {
         removal_state: FloatTensor<Self>,
         output_grad: FloatTensor<Self>,
         chunk_len: usize,
-    ) -> (
-        FloatTensor<Self>,
-        FloatTensor<Self>,
-        FloatTensor<Self>,
-        FloatTensor<Self>,
-        FloatTensor<Self>,
-        FloatTensor<Self>,
-        FloatTensor<Self>,
-    );
+    ) -> Wkv7BackwardOutput<Self>;
 }
 
 /// Autodiff backend trait that combines WKV7 operations with autodiff
-/// capabilities
-
+/// capabilities.
 pub trait Wkv7AutodiffBackend: Wkv7Backend + AutodiffBackend {}
 
 /// High-level WKV7 forward function
-
+#[allow(clippy::too_many_arguments)]
 pub fn wkv7_forward<B: Wkv7Backend>(
     weight_decay: Tensor<B, 4>,
     receptance: Tensor<B, 4>,

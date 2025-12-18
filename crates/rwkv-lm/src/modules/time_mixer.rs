@@ -19,6 +19,17 @@ use crate::{
     layers::lora::{ActivationFn, LoRA, LoRAConfig, LoRARanks, LoRAType},
 };
 
+type TimeMixerWeightPrepareOutput<B> = (
+    Tensor<B, 3>,
+    Tensor<B, 3>,
+    Tensor<B, 3>,
+    Tensor<B, 3>,
+    Tensor<B, 3>,
+    Tensor<B, 3>,
+    Tensor<B, 3>,
+    Tensor<B, 3>,
+);
+
 #[derive(Config, Debug)]
 pub struct TimeMixerConfig {
     num_cells: usize,
@@ -304,7 +315,7 @@ impl<B: Backend> TimeMixer<B> {
             value,
             removal_key_normalized,
             replacement,
-        ) = self.weight_prepare(x.clone(), v_first.clone(), shift_embedded.clone(), &device);
+        ) = self.weight_prepare(x.clone(), v_first.clone(), shift_embedded.clone(), device);
 
         let wkv_receptance_input: Tensor<B, 4> =
             receptance.reshape([batch_size_per_device, context_length, num_heads, head_size]);
@@ -380,16 +391,7 @@ impl<B: Backend> TimeMixer<B> {
         v_first: Tensor<B, 3>,
         x_state: Tensor<B, 2>,
         _device: &B::Device,
-    ) -> (
-        Tensor<B, 3>,
-        Tensor<B, 3>,
-        Tensor<B, 3>,
-        Tensor<B, 3>,
-        Tensor<B, 3>,
-        Tensor<B, 3>,
-        Tensor<B, 3>,
-        Tensor<B, 3>,
-    ) {
+    ) -> TimeMixerWeightPrepareOutput<B> {
         // Paper equations implemented:
         // 355: x^{square}_t = lerp(x_t, x_{t-1}, mu_{square})  -- Time shifting
         // 356: a_t = sigmoid(loramlp_a(Identity, x^a_t, bias=True))  -- In-context

@@ -8,8 +8,8 @@ license = "Apache-2.0"
 [features]
 default = []
 hotpath = ["dep:hotpath", "hotpath/hotpath"]
-hotpath-alloc-bytes-total = ["hotpath", "hotpath/hotpath-alloc-bytes-total"]
-hotpath-alloc-count-total = ["hotpath", "hotpath/hotpath-alloc-count-total"]
+hotpath-alloc-bytes-total = ["hotpath", "hotpath/hotpath-alloc"]
+hotpath-alloc-count-total = ["hotpath", "hotpath/hotpath-alloc"]
 hotpath-off = ["hotpath", "hotpath/hotpath-off"]
 
 [dependencies]

@@ -80,7 +80,7 @@ impl LanguageCharScriptFilter {
 
             let adj_same = runs
                 .iter()
-                .map(|&len| if len > 1 { len - 1 } else { 0 })
+                .map(|&len| len.saturating_sub(1))
                 .sum::<usize>();
 
             let adj_ratio = if count > 1 {

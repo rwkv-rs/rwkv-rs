@@ -34,7 +34,7 @@ impl ZstdCompressionFilterStep {
 
         let ratio = compressed.len() as f64 / original_size as f64;
 
-        ratio < MIN_RATIO || ratio > MAX_RATIO
+        !(MIN_RATIO..=MAX_RATIO).contains(&ratio)
     }
 }
 

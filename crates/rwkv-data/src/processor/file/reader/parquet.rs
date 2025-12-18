@@ -3,7 +3,7 @@ use std::{
     fs::File,
     future::Future,
     marker::PhantomData,
-    path::{Path, PathBuf},
+    path::PathBuf,
     pin::Pin,
     sync::Arc,
 };

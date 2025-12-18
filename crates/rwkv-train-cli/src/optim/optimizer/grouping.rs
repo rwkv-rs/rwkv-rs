@@ -8,7 +8,6 @@ use burn::{
 
 /// A simple struct to hold the categorized parameter IDs.
 #[derive(Debug, Clone, Default)]
-
 pub struct ParamGroups {
     pub high_lr: Vec<ParamId>,
     pub with_wd: Vec<ParamId>,
@@ -50,15 +49,15 @@ impl<B: Backend> ModuleVisitor<B> for ParamGrouperVisitor<'_> {
         // Grouping logic based on parameter name and rank
         // 1. Special parameters (e.g., LoRA bias) get higher learning rate
         if name.contains("param_weight_decay_lora.bias") {
-            self.groups.high_lr.push(param.id.clone());
+            self.groups.high_lr.push(param.id);
         }
         // 2. Weight matrices (rank >= 2) get weight decay
         else if name.ends_with(".weight") && rank >= 2 {
-            self.groups.with_wd.push(param.id.clone());
+            self.groups.with_wd.push(param.id);
         }
         // 3. Everything else (biases, layer norms, etc.) without weight decay
         else {
-            self.groups.no_wd.push(param.id.clone());
+            self.groups.no_wd.push(param.id);
         }
     }
 }

@@ -81,9 +81,6 @@ impl<B: Backend> StateAdapterModel<B> {
         let embedded = Tensor::cat(embedded_of_heads, 0);
 
         let projected = self.proj_state.forward(embedded);
-
-        let normalized = self.norm_state.forward(projected);
-
-        normalized
+        self.norm_state.forward(projected)
     }
 }

@@ -38,7 +38,6 @@ use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
 /// 处理任务类型
-
 enum Task {
     /// GPT-OSS数据处理：parquet(text) -> JSONL({"text": "xxx"})
     GptOss,
@@ -49,7 +48,6 @@ enum Task {
 
 /// GptOss数据结构 - 只有text字段
 #[derive(Debug)]
-
 struct GptOssRecord {
     text: String,
 }
@@ -64,7 +62,6 @@ impl FromParquetRow for GptOssRecord {
 
 /// WildChat对话消息
 #[derive(Debug, Deserialize)]
-
 struct DialogueMessage {
     role: String,
     content: String,
@@ -72,7 +69,6 @@ struct DialogueMessage {
 
 /// WildChat数据结构
 #[derive(Debug)]
-
 struct WildChatRecord {
     conversation: Vec<DialogueMessage>,
 }
@@ -179,7 +175,6 @@ struct GptOssOutput {
 /// WildChat的对话条目 - 每个条目只包含一个字段
 #[derive(Serialize)]
 #[serde(untagged)]
-
 enum DialogueEntry {
     User {
         #[serde(rename = "😺")]
@@ -192,7 +187,6 @@ enum DialogueEntry {
 }
 
 #[tokio::main]
-
 async fn main() {
     let task = Task::WildChat;
 

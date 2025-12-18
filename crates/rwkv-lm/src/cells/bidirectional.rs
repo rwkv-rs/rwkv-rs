@@ -2,7 +2,7 @@ use burn::{
     config::Config,
     module::Module,
     nn::{Linear, LinearConfig},
-    prelude::{Backend, Float, Tensor},
+    prelude::{Backend, Tensor},
     tensor::activation::sigmoid,
 };
 
@@ -13,7 +13,6 @@ use crate::{
 };
 
 #[derive(Config, Debug)]
-
 pub struct BidirectionalCellConfig {
     num_cells: usize,
     embedded_dim: usize,
@@ -51,7 +50,6 @@ impl BidirectionalCellConfig {
 }
 
 #[derive(Module, Debug)]
-
 pub struct BidirectionalCell<B: Backend> {
     pub causal_past2future: CausalCell<B>,
     pub causal_future2past: CausalCell<B>,

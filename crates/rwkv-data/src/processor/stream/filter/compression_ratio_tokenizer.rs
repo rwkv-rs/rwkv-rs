@@ -75,7 +75,7 @@ impl TokenizerCompressionFilterStep {
 
         let ratio = token_count as f64 / char_count as f64;
 
-        ratio < MIN_RATIO || ratio > MAX_RATIO
+        !(MIN_RATIO..=MAX_RATIO).contains(&ratio)
     }
 }
 

@@ -60,7 +60,7 @@ fn top_ngram_duplicate(words: &[&str], n: usize, buffer: &mut Vec<u8>) -> usize 
             }
         }
 
-        let hash = xxh3_128(&buffer);
+        let hash = xxh3_128(buffer);
 
         let entry = counter.entry(hash).or_insert((0, total_len));
 
@@ -96,7 +96,7 @@ fn repeated_ngram_chars(words: &[&str], n: usize, buffer: &mut Vec<u8>) -> usize
             total_len += word.len();
         }
 
-        let hash = xxh3_128(&buffer);
+        let hash = xxh3_128(buffer);
 
         if !unique.insert(hash) {
             repeated_chars += total_len;
@@ -166,16 +166,16 @@ impl GopherRepetitionFilter {
         if !paragraphs.is_empty() {
             let (paragraphs_duplicates, para_char_duplicates) = find_duplicates(&paragraphs);
 
-            if let Some(threshold) = self.dup_para_frac {
-                if paragraphs_duplicates as f64 / paragraphs.len() as f64 > threshold {
-                    return true;
-                }
+            if let Some(threshold) = self.dup_para_frac
+                && paragraphs_duplicates as f64 / paragraphs.len() as f64 > threshold
+            {
+                return true;
             }
 
-            if let Some(threshold) = self.dup_para_char_frac {
-                if para_char_duplicates as f64 / text_len as f64 > threshold {
-                    return true;
-                }
+            if let Some(threshold) = self.dup_para_char_frac
+                && para_char_duplicates as f64 / text_len as f64 > threshold
+            {
+                return true;
             }
         }
 
@@ -190,16 +190,16 @@ impl GopherRepetitionFilter {
         if !lines.is_empty() {
             let (line_duplicates, line_char_duplicates) = find_duplicates(&lines);
 
-            if let Some(threshold) = self.dup_line_frac {
-                if line_duplicates as f64 / lines.len() as f64 > threshold {
-                    return true;
-                }
+            if let Some(threshold) = self.dup_line_frac
+                && line_duplicates as f64 / lines.len() as f64 > threshold
+            {
+                return true;
             }
 
-            if let Some(threshold) = self.dup_line_char_frac {
-                if line_char_duplicates as f64 / text_len as f64 > threshold {
-                    return true;
-                }
+            if let Some(threshold) = self.dup_line_char_frac
+                && line_char_duplicates as f64 / text_len as f64 > threshold
+            {
+                return true;
             }
         }
 

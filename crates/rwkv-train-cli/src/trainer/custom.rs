@@ -16,7 +16,7 @@ use burn::{
     prelude::*,
     train::{
         logger::Logger,
-        metric::{MetricEntry, NumericEntry},
+        metric::{MetricEntry, MetricId, NumericEntry, SerializedEntry},
         renderer::{MetricState, TrainingProgress},
     },
 };
@@ -314,6 +314,10 @@ pub trait Trainer {
 
         let mut global_train_step_index = 0usize;
 
+        let metric_id_loss = MetricId::new(Arc::new(METRIC_NAME_LOSS.to_string()));
+
+        let metric_id_learning_rate = MetricId::new(Arc::new(METRIC_NAME_LEARNING_RATE.to_string()));
+
         while let Ok(message) = metrics_receiver.recv() {
             global_train_step_index += 1;
 
@@ -328,10 +332,11 @@ pub trait Trainer {
                 iteration: global_train_step_index,
             };
 
+            let loss_formatted = format!("{:.5}", message.loss);
+
             let loss_entry = MetricEntry::new(
-                Arc::new(METRIC_NAME_LOSS.to_string()),
-                format!("{:.5}", message.loss),
-                format!("{:.5}", message.loss),
+                metric_id_loss.clone(),
+                SerializedEntry::new(loss_formatted.clone(), loss_formatted),
             );
 
             renderer.update_train(MetricState::Numeric(
@@ -340,10 +345,11 @@ pub trait Trainer {
             ));
 
             if let Some(lr) = message.learning_rate {
+                let lr_formatted = format!("{lr:.2e}");
+
                 let lr_entry = MetricEntry::new(
-                    Arc::new(METRIC_NAME_LEARNING_RATE.to_string()),
-                    format!("{lr:.2e}"),
-                    format!("{lr:.2e}"),
+                    metric_id_learning_rate.clone(),
+                    SerializedEntry::new(lr_formatted.clone(), lr_formatted),
                 );
 
                 renderer.update_train(MetricState::Numeric(lr_entry, NumericEntry::Value(lr)));
@@ -422,7 +428,7 @@ fn emit_metrics<B: RwkvTrainBackend>(
 ) {
     if let Some(sender) = sender {
         let loss_value = tensor_to_f64(&output.loss);
-        let lr_value = output.learning_rate.map(|lr| lr as f64);
+        let lr_value = output.learning_rate;
 
         let message = TrainMetricMessage {
             mini_epoch,

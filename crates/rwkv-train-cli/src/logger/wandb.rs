@@ -6,7 +6,6 @@ use wandb::{BackendOptions, LogData, Run, RunInfo, WandB};
 
 /// Configuration for initializing a WandB logger.
 #[derive(Debug, Clone)]
-
 pub struct WandbLoggerConfig {
     pub api_key: String,
     pub entity: Option<String>,
@@ -42,7 +41,6 @@ impl WandbLoggerConfig {
 }
 
 /// Initialize a WandB logger following Burn's async logger pattern.
-
 pub async fn init_logger(config: WandbLoggerConfig) -> AsyncLogger<LogData> {
     let wandb = WandB::new(BackendOptions::new(config.api_key));
 

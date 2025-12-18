@@ -3,11 +3,12 @@ mod splitter;
 
 use burn::{config::Config, module::AutodiffModule, tensor::backend::AutodiffBackend};
 use burn_optim::{
-    AdamW, AdamWConfig, GradientsParams, LearningRate, Optimizer, adaptor::OptimizerAdaptor,
+    AdamW, AdamWConfig, GradientsParams, LearningRate, MultiGradientsParams, Optimizer,
+    adaptor::OptimizerAdaptor,
     grad_clipping::GradientClippingConfig,
 };
 use grouping::{ParamGrouperVisitor, ParamGroups};
-use splitter::split_grads;
+use splitter::{split_grads, split_grads_multi};
 
 #[derive(Config, Debug)]
 pub struct GroupedOptimizerConfig {
@@ -91,6 +92,17 @@ where
             .step(lr * self.high_lr_scale, module, high_lr_grads);
         let module = self.optim_with_wd.step(lr, module, with_wd_grads);
         self.optim_no_wd.step(lr, module, no_wd_grads)
+    }
+
+    fn step_multi(&mut self, lr: LearningRate, module: M, grads: MultiGradientsParams) -> M {
+        let (high_lr_grads, with_wd_grads, no_wd_grads) =
+            split_grads_multi::<B, M>(&module, grads, &self.param_groups);
+
+        let module = self
+            .optim_no_wd
+            .step_multi(lr * self.high_lr_scale, module, high_lr_grads);
+        let module = self.optim_with_wd.step_multi(lr, module, with_wd_grads);
+        self.optim_no_wd.step_multi(lr, module, no_wd_grads)
     }
 
     fn to_record(&self) -> Self::Record {

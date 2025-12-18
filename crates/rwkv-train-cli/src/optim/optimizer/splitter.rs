@@ -1,10 +1,10 @@
 use std::marker::PhantomData;
 
 use burn::{
-    module::{AutodiffModule, ModuleVisitor, Param, ParamId},
+    module::{AutodiffModule, ModuleVisitor, Param},
     tensor::{Tensor, backend::AutodiffBackend},
 };
-use burn_optim::GradientsParams;
+use burn_optim::{GradientsParams, MultiGradientsParams};
 
 use super::grouping::ParamGroups;
 
@@ -24,6 +24,47 @@ where
     let mut no_wd_grads = GradientsParams::new();
 
     let mut splitter = GradsSplitter::<B> {
+        source: &mut source_grads,
+        high_lr: &mut high_lr_grads,
+        with_wd: &mut with_wd_grads,
+        no_wd: &mut no_wd_grads,
+        groups,
+        phantom_data: PhantomData,
+    };
+
+    model.visit(&mut splitter);
+
+    (high_lr_grads, with_wd_grads, no_wd_grads)
+}
+
+pub fn split_grads_multi<B, M>(
+    model: &M,
+    mut source_grads: MultiGradientsParams,
+    groups: &ParamGroups,
+) -> (MultiGradientsParams, MultiGradientsParams, MultiGradientsParams)
+where
+    B: AutodiffBackend,
+    M: AutodiffModule<B>,
+{
+    let num_sources = source_grads.grads.len();
+
+    let mut high_lr_grads = MultiGradientsParams::default();
+    let mut with_wd_grads = MultiGradientsParams::default();
+    let mut no_wd_grads = MultiGradientsParams::default();
+
+    high_lr_grads.grads = Vec::with_capacity(num_sources);
+    with_wd_grads.grads = Vec::with_capacity(num_sources);
+    no_wd_grads.grads = Vec::with_capacity(num_sources);
+
+    for (_, device_id) in source_grads.grads.iter() {
+        let device_id = *device_id;
+
+        high_lr_grads.grads.push((GradientsParams::new(), device_id));
+        with_wd_grads.grads.push((GradientsParams::new(), device_id));
+        no_wd_grads.grads.push((GradientsParams::new(), device_id));
+    }
+
+    let mut splitter = MultiGradsSplitter::<B> {
         source: &mut source_grads,
         high_lr: &mut high_lr_grads,
         with_wd: &mut with_wd_grads,
@@ -59,6 +100,42 @@ impl<B: AutodiffBackend> ModuleVisitor<B> for GradsSplitter<'_, B> {
                 self.with_wd.register::<B::InnerBackend, D>(param.id, grad);
             } else {
                 self.no_wd.register::<B::InnerBackend, D>(param.id, grad);
+            }
+        }
+    }
+}
+
+struct MultiGradsSplitter<'a, B: AutodiffBackend> {
+    source: &'a mut MultiGradientsParams,
+    high_lr: &'a mut MultiGradientsParams,
+    with_wd: &'a mut MultiGradientsParams,
+    no_wd: &'a mut MultiGradientsParams,
+    groups: &'a ParamGroups,
+    phantom_data: PhantomData<B>,
+}
+
+impl<B: AutodiffBackend> ModuleVisitor<B> for MultiGradsSplitter<'_, B> {
+    fn visit_float<const D: usize>(&mut self, param: &Param<Tensor<B, D>>) {
+        let num_sources = self.source.grads.len();
+
+        for source_index in 0..num_sources {
+            if let Some(grad) = self.source.grads[source_index]
+                .0
+                .remove::<B::InnerBackend, D>(param.id)
+            {
+                if self.groups.high_lr.contains(&param.id) {
+                    self.high_lr.grads[source_index]
+                        .0
+                        .register::<B::InnerBackend, D>(param.id, grad);
+                } else if self.groups.with_wd.contains(&param.id) {
+                    self.with_wd.grads[source_index]
+                        .0
+                        .register::<B::InnerBackend, D>(param.id, grad);
+                } else {
+                    self.no_wd.grads[source_index]
+                        .0
+                        .register::<B::InnerBackend, D>(param.id, grad);
+                }
             }
         }
     }

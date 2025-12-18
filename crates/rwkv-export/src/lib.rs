@@ -1,10 +1,32 @@
 use burn::{
     prelude::*,
     record::{FullPrecisionSettings, NamedMpkFileRecorder},
-    tensor::{backend::DeviceId, bf16},
+    tensor::backend::DeviceId,
 };
 use burn_store::{ModuleSnapshot, pytorch::PytorchStore};
 use rwkv_lm::auto_regressive_model::AutoRegressiveModelConfig;
+
+#[derive(Clone, Debug)]
+pub struct ConvertPthToMpkOptions {
+    model_path: String,
+    output_path: String,
+}
+
+impl ConvertPthToMpkOptions {
+    pub fn new(model_path: impl Into<String>, output_path: impl Into<String>) -> Self {
+        Self {
+            model_path: model_path.into(),
+            output_path: output_path.into(),
+        }
+    }
+}
+
+pub fn convert_pth_to_mpk<B: Backend>(
+    options: &ConvertPthToMpkOptions,
+    model_config: AutoRegressiveModelConfig,
+) {
+    pth2mpk::<B>(&options.model_path, &options.output_path, model_config);
+}
 
 pub fn pth2mpk<B: Backend>(
     model_path: &str,

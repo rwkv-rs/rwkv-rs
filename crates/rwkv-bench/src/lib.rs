@@ -12,7 +12,6 @@
 /// let result = rwkv_bench::hp_block!("forward", || model.forward(input));
 /// ```
 #[macro_export]
-
 macro_rules! hp_block {
     ($label:expr, $body:expr) => {{
         #[cfg(feature = "hotpath")]
@@ -35,7 +34,6 @@ macro_rules! hp_block {
 /// let grads = rwkv_bench::hp_rank0_block!(is_rank0, "ddp_sync", || syncer.sync(grads));
 /// ```
 #[macro_export]
-
 macro_rules! hp_rank0_block {
     ($is_active:expr, $label:expr, $body:expr) => {{
         if $is_active {
@@ -48,7 +46,6 @@ macro_rules! hp_rank0_block {
 
 /// Conditionally measure a code block only when `cond` evaluates to true.
 #[macro_export]
-
 macro_rules! hp_block_if {
     ($cond:expr, $label:expr, $body:expr) => {{
         if $cond {
@@ -61,13 +58,11 @@ macro_rules! hp_block_if {
 
 /// Returns `true` when the build enables hotpath profiling.
 #[inline]
-
 pub const fn is_hotpath_enabled() -> bool {
     cfg!(feature = "hotpath")
 }
 
 /// RAII helper that starts a hotpath guard if profiling is active and enabled.
-
 pub struct HpScopeGuard {
     #[cfg(feature = "hotpath")]
     guard: Option<hotpath::HotPath>,
@@ -78,7 +73,6 @@ impl HpScopeGuard {
     ///
     /// The guard is only armed when both the `hotpath` feature is enabled and
     /// `active` evaluates to `true`.
-
     pub fn new(label: impl Into<String>, active: bool) -> Self {
         #[cfg(feature = "hotpath")]
         {
@@ -109,13 +103,11 @@ impl HpScopeGuard {
 
     /// Convenience helper for the common pattern where only rank 0 should emit
     /// data.
-
     pub fn rank0(label: impl Into<String>, is_rank0: bool) -> Self {
         Self::new(label, is_rank0)
     }
 
     /// Returns whether the inner guard is active.
-
     pub fn is_active(&self) -> bool {
         #[cfg(feature = "hotpath")]
         {
@@ -136,11 +128,11 @@ impl Default for HpScopeGuard {
 }
 
 /// Iterator wrapper that measures each `next` call with a specific label.
-
 pub struct HpIter<I> {
     inner: I,
-    label: &'static str,
     active: bool,
+    #[cfg(feature = "hotpath")]
+    label: &'static str,
 }
 
 impl<I> Iterator for HpIter<I>
@@ -150,9 +142,17 @@ where
     type Item = I::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.active {
+        if !self.active {
+            return self.inner.next();
+        }
+
+        #[cfg(feature = "hotpath")]
+        {
             crate::hp_block!(self.label, || self.inner.next())
-        } else {
+        }
+
+        #[cfg(not(feature = "hotpath"))]
+        {
             self.inner.next()
         }
     }
@@ -160,7 +160,6 @@ where
 
 /// Wrap an iterator so that each `next` call is profiled with `hp_block!`.
 #[inline]
-
 pub fn hp_iter<I>(label: &'static str, iter: I) -> HpIter<I>
 where
     I: Iterator,
@@ -170,14 +169,23 @@ where
 
 /// Same as [`hp_iter`] but only active when `active` is true.
 #[inline]
-
 pub fn hp_iter_if<I>(label: &'static str, iter: I, active: bool) -> HpIter<I>
 where
     I: Iterator,
 {
-    HpIter {
-        inner: iter,
-        label,
-        active,
+    #[cfg(feature = "hotpath")]
+    {
+        HpIter {
+            inner: iter,
+            active,
+            label,
+        }
+    }
+
+    #[cfg(not(feature = "hotpath"))]
+    {
+        let _ = label;
+
+        HpIter { inner: iter, active }
     }
 }

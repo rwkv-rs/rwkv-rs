@@ -10,7 +10,6 @@ use burn::{
 };
 use dialoguer::Confirm;
 use regex::Regex;
-use rwkv_config::validated::train::FinalTrainConfigBuilder;
 
 pub fn auto_create_directory(path: PathBuf) -> PathBuf {
     if !path.exists() {

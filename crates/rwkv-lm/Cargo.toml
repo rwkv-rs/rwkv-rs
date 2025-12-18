@@ -9,8 +9,8 @@ license = "Apache-2.0"
 default = ["fusion"]
 fusion = []
 hotpath = ["dep:hotpath", "hotpath/hotpath"]
-hotpath-alloc-bytes-total = ["dep:hotpath", "hotpath/hotpath-alloc-bytes-total"]
-hotpath-alloc-count-total = ["dep:hotpath", "hotpath/hotpath-alloc-count-total"]
+hotpath-alloc-bytes-total = ["dep:hotpath", "hotpath/hotpath-alloc"]
+hotpath-alloc-count-total = ["dep:hotpath", "hotpath/hotpath-alloc"]
 hotpath-off = ["dep:hotpath", "hotpath/hotpath-off"]
 
 [dependencies]

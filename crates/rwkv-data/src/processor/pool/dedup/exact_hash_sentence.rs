@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashSet, num::NonZeroUsize, sync::Arc};
+use std::{borrow::Cow, num::NonZeroUsize, sync::Arc};
 
 use dashmap::DashSet;
 use once_cell::sync::Lazy;
@@ -14,7 +14,6 @@ static HTML_PRE_REGEX: Lazy<Regex> =
 static CODE_FENCE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"```.*?```").unwrap());
 
 #[derive(Clone)]
-
 struct SentenceChunk {
     hash: u128,
     text: String,

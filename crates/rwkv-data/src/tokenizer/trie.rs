@@ -1,5 +1,4 @@
 #[derive(Default, Debug)]
-
 struct TrieNode {
     children: [[Option<Box<TrieNode>>; 16]; 16],
     id: u16,
@@ -21,7 +20,6 @@ impl TrieNode {
 }
 
 #[derive(Debug)]
-
 pub struct Trie {
     root: TrieNode,
 }
@@ -79,15 +77,15 @@ impl Trie {
                     old_index = index;
                 }
 
-                node = &next_node;
+                node = next_node;
 
                 index += 1;
             } else {
-                if node.id == 0 {
-                    return (old_index, old_node.id);
+                return if node.id == 0 {
+                    (old_index, old_node.id)
                 } else {
-                    return (index, node.id);
-                }
+                    (index, node.id)
+                };
             }
         }
 
@@ -109,7 +107,7 @@ impl Trie {
             let result = self.search_the_longest(&text.as_bytes()[index..]);
 
             if result.0 != 0 {
-                vec.push(result.1.into());
+                vec.push(result.1);
 
                 index += <u16 as Into<usize>>::into(result.0);
             } else {

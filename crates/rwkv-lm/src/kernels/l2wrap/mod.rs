@@ -76,7 +76,7 @@ impl<B: Backend, C: CheckpointStrategy> L2WrapBackend for Autodiff<B, C> {
                     let inject_vals_f32 = B::float_mul_scalar(max_vals_f32, factor);
 
                     let logits_grad_f32 =
-                        B::float_scatter(last_dim, zeros_f32, max_ids, inject_vals_f32);
+                        B::float_scatter_add(last_dim, zeros_f32, max_ids, inject_vals_f32);
 
                     // Cast gradient back to original dtype of backend float
                     let logits_grad =
@@ -106,7 +106,6 @@ impl<B: Backend, C: CheckpointStrategy> L2WrapBackend for Autodiff<B, C> {
 }
 
 /// High-level API for L2Wrap application
-
 pub fn l2wrap_apply<B: L2WrapBackend>(loss: Tensor<B, 1>, logits: Tensor<B, 3>) -> Tensor<B, 1> {
     let output = B::apply_l2wrap(
         loss.into_primitive().tensor(),
@@ -117,9 +116,7 @@ pub fn l2wrap_apply<B: L2WrapBackend>(loss: Tensor<B, 1>, logits: Tensor<B, 3>) 
 }
 
 /// Marker trait for backends that support both L2Wrap and AutodiffBackend
-
 pub trait L2WrapAutodiffBackend: L2WrapBackend + AutodiffBackend {}
 
 /// Blanket implementation
-
 impl<B: L2WrapBackend + AutodiffBackend> L2WrapAutodiffBackend for B {}

@@ -99,8 +99,13 @@ impl StepStats {
     }
 }
 
-#[derive(Clone)]
+impl Default for StepStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
+#[derive(Clone)]
 pub struct StepStatsSnapshot {
     step_name: String,
     step_index: usize,
@@ -325,10 +330,10 @@ impl StepWorker {
 
                         data_batch.push((data, len));
 
-                        if data_batch.len() >= self.batch_size {
-                            if self.flush(&mut data_batch).await.is_err() {
-                                return;
-                            }
+                        if data_batch.len() >= self.batch_size
+                            && self.flush(&mut data_batch).await.is_err()
+                        {
+                            return;
                         }
                     }
                 },

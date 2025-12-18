@@ -16,7 +16,6 @@ use unescape::unescape;
 /// 世界分词器
 /// 基于Trie树实现的文本分词工具
 #[derive(Debug)]
-
 pub struct Tokenizer {
     /// token列表
     tokens: Vec<Vec<u8>>,
@@ -32,7 +31,6 @@ impl Tokenizer {
     ///
     /// # 返回
     /// * 分词器实例或IO错误
-
     pub fn new(vocab_filepath: &str) -> io::Result<Self> {
         let mut tokenizer = Tokenizer {
             tokens: Vec::with_capacity(65536), // 预分配空间以减少重新分配
@@ -56,7 +54,6 @@ impl Tokenizer {
     ///
     /// # 返回
     /// * 成功或IO错误
-
     fn load_vocabulary<P: AsRef<Path>>(&mut self, vocab_path: P) -> io::Result<()> {
         let file = File::open(vocab_path)?;
 
@@ -149,7 +146,6 @@ impl Tokenizer {
     ///
     /// # 返回
     /// * token ID序列
-
     pub fn encode(&self, text: &str, add_end_of_doc: bool) -> Vec<u16> {
         self.trie.tokenize(text, add_end_of_doc)
     }
@@ -161,7 +157,6 @@ impl Tokenizer {
     ///
     /// # 返回
     /// * 各文本对应的token ID序列列表
-
     pub fn encode_batch(&self, texts: Vec<String>, add_end_of_doc: bool) -> Vec<Vec<u16>> {
         texts
             .par_iter()
@@ -176,7 +171,6 @@ impl Tokenizer {
     ///
     /// # 返回
     /// * 解码后的文本
-
     pub fn decode(&self, token_ids: Vec<u16>) -> String {
         let mut result = Vec::new();
 
@@ -198,7 +192,6 @@ impl Tokenizer {
     ///
     /// # 返回
     /// * 词汇表大小
-
     pub fn vocab_size(&self) -> usize {
         self.tokens.len()
     }
@@ -207,7 +200,6 @@ impl Tokenizer {
     ///
     /// # 返回
     /// * 词汇表映射 (token文本 -> token ID)
-
     pub fn get_vocab(&self) -> HashMap<String, usize> {
         let mut vocab = HashMap::with_capacity(self.tokens.len());
 
@@ -234,7 +226,6 @@ impl Tokenizer {
     ///
     /// # 返回
     /// * 字节数组或None（如果输入无效）
-
     fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
         let hex = hex.replace("\\x", "");
 

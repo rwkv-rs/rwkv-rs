@@ -17,7 +17,6 @@ use crate::kernels::wkv7::{Wkv7AutodiffBackend, Wkv7Backend};
 
 // CubeCL imports removed as they're not used in this file
 /// Implement WKV7Backend for Autodiff-decorated backends
-
 impl<B: Wkv7Backend, C: CheckpointStrategy> Wkv7Backend for Autodiff<B, C> {
     fn wkv7_forward(
         weight_decay: FloatTensor<Self>,
@@ -30,7 +29,6 @@ impl<B: Wkv7Backend, C: CheckpointStrategy> Wkv7Backend for Autodiff<B, C> {
         chunk_len: usize,
     ) -> (FloatTensor<Self>, FloatTensor<Self>, FloatTensor<Self>) {
         #[derive(Debug)]
-
         struct Wkv7Backward;
 
         impl<B: Wkv7Backend> Backward<B, 6> for Wkv7Backward {
