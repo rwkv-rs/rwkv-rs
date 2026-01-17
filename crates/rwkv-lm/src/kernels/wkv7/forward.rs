@@ -173,7 +173,7 @@ fn wkv7_forward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolEl
 
     let cube_count = CubeCount::Static(num_heads as u32, batch_size as u32, 1);
 
-    let cube_dim = CubeDim::new(dim as u32, 1, 1);
+    let cube_dim = CubeDim::new_1d(dim as u32);
 
     wkv7_forward_kernel::launch::<FE, R>(
         &client,
@@ -273,7 +273,7 @@ fn wkv7_backward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolE
 
     let cube_count = CubeCount::Static(num_heads as u32, batch_size as u32, 1);
 
-    let cube_dim = CubeDim::new(dim as u32, 1, 1);
+    let cube_dim = CubeDim::new_1d(dim as u32);
 
     wkv7_backward_kernel::launch::<FE, R>(
         &client,
