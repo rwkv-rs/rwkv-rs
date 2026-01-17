@@ -169,11 +169,11 @@ fn wkv7_forward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolEl
     });
 
     let config = Wkv7Config {
-        _batch_size: batch_size as u32,
-        sequence_length: seq_len as u32,
-        num_heads: num_heads as u32,
-        head_size: dim as u32,
-        chunk_length: chunk_len as u32,
+        _batch_size: batch_size,
+        sequence_length: seq_len,
+        num_heads: num_heads,
+        head_size: dim,
+        chunk_length: chunk_len,
     };
 
     let cube_count = CubeCount::Static(num_heads as u32, batch_size as u32, 1);
@@ -269,11 +269,11 @@ fn wkv7_backward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolE
         empty_device::<R, FE>(client.clone(), device.clone(), initial_state_shape);
 
     let config = Wkv7Config {
-        _batch_size: batch_size as u32,
-        sequence_length: seq_len as u32,
-        num_heads: num_heads as u32,
-        head_size: dim as u32,
-        chunk_length: chunk_len as u32,
+        _batch_size: batch_size,
+        sequence_length: seq_len,
+        num_heads: num_heads,
+        head_size: dim,
+        chunk_length: chunk_len,
     };
 
     let cube_count = CubeCount::Static(num_heads as u32, batch_size as u32, 1);

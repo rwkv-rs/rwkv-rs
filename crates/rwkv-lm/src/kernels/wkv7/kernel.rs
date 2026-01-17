@@ -12,9 +12,9 @@ pub fn wkv7_forward_kernel<F: Float>(
     let head_size = comptime![config.head_size];
     let chunk_length = comptime![config.chunk_length];
 
-    let batch_index = CUBE_POS_Y;
-    let head_index = CUBE_POS_X;
-    let head_dim_index = UNIT_POS;
+    let batch_index = CUBE_POS_Y as usize;
+    let head_index = CUBE_POS_X as usize;
+    let head_dim_index = UNIT_POS as usize;
 
     if head_dim_index >= head_size {
         terminate!();
@@ -91,7 +91,6 @@ pub fn wkv7_forward_kernel<F: Float>(
 }
 
 #[cube(launch)]
-
 pub fn wkv7_backward_kernel<F: Float>(
     inputs: &Wkv7BackwardInputs<F>,
     outputs: &mut Wkv7BackwardOutputs<F>,
@@ -102,9 +101,9 @@ pub fn wkv7_backward_kernel<F: Float>(
     let head_size = comptime![config.head_size];
     let chunk_length = comptime![config.chunk_length];
 
-    let batch_index = CUBE_POS_Y;
-    let head_index = CUBE_POS_X;
-    let head_dim_index = UNIT_POS;
+    let batch_index = CUBE_POS_Y as usize;
+    let head_index = CUBE_POS_X as usize;
+    let head_dim_index = UNIT_POS as usize;
 
     if head_dim_index >= head_size {
         terminate!();
@@ -137,7 +136,7 @@ pub fn wkv7_backward_kernel<F: Float>(
     // let mut removal_indexed: F = F::new(0.0);
     // let mut replacement_indexed: F = F::new(0.0);
     // let mut output_grad_indexed: F = F::new(0.0);
-    let t = RuntimeCell::<u32>::new(sequence_length);
+    let t = RuntimeCell::<usize>::new(sequence_length);
 
     while t.read() > 0 {
         t.store(t.read() - 1);
@@ -304,9 +303,9 @@ pub struct Wkv7BackwardOutputs<F: Float> {
 
 #[derive(CubeLaunch, CubeType, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Wkv7Config {
-    pub _batch_size: u32,
-    pub sequence_length: u32,
-    pub num_heads: u32,
-    pub head_size: u32,
-    pub chunk_length: u32,
+    pub _batch_size: usize,
+    pub sequence_length: usize,
+    pub num_heads: usize,
+    pub head_size: usize,
+    pub chunk_length: usize,
 }
