@@ -336,7 +336,7 @@ impl StepWorker {
                             return;
                         }
                     }
-                },
+                }
                 DataItem::FileStart(path) => {
                     if !data_batch.is_empty() && self.flush(&mut data_batch).await.is_err() {
                         break;
@@ -349,7 +349,7 @@ impl StepWorker {
                     {
                         break;
                     }
-                },
+                }
             }
         }
 
@@ -408,7 +408,7 @@ impl StepWorker {
                     self.progress.inc(1);
 
                     keep_batch.push(output);
-                },
+                }
                 StepOutcome::Exclude(output) => {
                     self.stats.record(input_len, None);
 
@@ -417,7 +417,7 @@ impl StepWorker {
                     self.progress.inc(1);
 
                     exclude_batch.push(output);
-                },
+                }
             }
         }
 

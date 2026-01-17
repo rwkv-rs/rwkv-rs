@@ -5,5 +5,4 @@ pub mod idx;
 pub mod map;
 pub mod sample;
 
-
 const MMAP_VERSION: [u8; 8] = 1u64.to_le_bytes();

@@ -215,7 +215,7 @@ impl<B: Wkv7Backend, C: CheckpointStrategy> Wkv7Backend for Autodiff<B, C> {
 
                 // Match trait contract: (s, sa, y)
                 (state_tensor, removal_state_autodiff, output_tensor)
-            },
+            }
             OpsKind::UnTracked(prep) => {
                 let initial_state_primitive = initial_state.map(|s| s.primitive);
 
@@ -237,7 +237,7 @@ impl<B: Wkv7Backend, C: CheckpointStrategy> Wkv7Backend for Autodiff<B, C> {
                 let removal_state_autodiff = Autodiff::<B, C>::from_inner(removal_state_out);
 
                 (state_tensor, removal_state_autodiff, output_tensor)
-            },
+            }
         }
     }
 

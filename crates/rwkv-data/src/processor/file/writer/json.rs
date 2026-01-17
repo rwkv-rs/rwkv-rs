@@ -71,7 +71,7 @@ where
                         let file = File::create(output_path).await.unwrap();
 
                         current_writer = Some(BufWriter::new(file));
-                    },
+                    }
                     DataItem::DataBatch(batch) => {
                         if let Some(writer) = current_writer.as_mut() {
                             for data in batch {
@@ -84,7 +84,7 @@ where
                                 }
                             }
                         }
-                    },
+                    }
                 }
             }
 

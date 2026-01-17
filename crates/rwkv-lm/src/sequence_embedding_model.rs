@@ -78,12 +78,12 @@ impl<B: Backend> SequenceEmbeddingModel<B> {
                 let lr_init = 0.45 / self.embedded_dim as f64;
 
                 uniform_init(&mut emb.weight, -lr_init, lr_init);
-            },
+            }
             EmbModule::Continuous(linear) => {
                 let lr_init = 0.45 / self.embedded_dim as f64;
 
                 uniform_init(&mut linear.weight, -lr_init, lr_init);
-            },
+            }
         }
 
         orthogonal_init(&mut self.unembed.weight, Some(0.5));

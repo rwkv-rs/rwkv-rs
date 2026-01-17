@@ -4,8 +4,7 @@ mod splitter;
 use burn::{config::Config, module::AutodiffModule, tensor::backend::AutodiffBackend};
 use burn_optim::{
     AdamW, AdamWConfig, GradientsParams, LearningRate, MultiGradientsParams, Optimizer,
-    adaptor::OptimizerAdaptor,
-    grad_clipping::GradientClippingConfig,
+    adaptor::OptimizerAdaptor, grad_clipping::GradientClippingConfig,
 };
 use grouping::{ParamGrouperVisitor, ParamGroups};
 use splitter::{split_grads, split_grads_multi};

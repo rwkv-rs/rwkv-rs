@@ -1,11 +1,4 @@
-use std::{
-    borrow::Cow,
-    fs::File,
-    io::Read,
-    marker::PhantomData,
-    mem::size_of,
-    path::Path,
-};
+use std::{borrow::Cow, fs::File, io::Read, marker::PhantomData, mem::size_of, path::Path};
 
 use bytemuck::try_cast_slice;
 use log::info;
@@ -52,9 +45,11 @@ impl<T: TokenUnit> BinReader<T> {
         let num_units_per_token = metadata.num_units_per_token as u64;
         let dtype = metadata.dtype;
         assert_eq!(
-            dtype, T::DTYPE,
+            dtype,
+            T::DTYPE,
             "Token type mismatch: metadata dtype {:?} but reader requested {:?}.",
-            dtype, T::DTYPE
+            dtype,
+            T::DTYPE
         );
 
         info!(
@@ -63,13 +58,12 @@ impl<T: TokenUnit> BinReader<T> {
         );
 
         let expected_mmap_len =
-            calculate_expected_len(&metadata, token_unit_size)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "Overflow calculating expected size for .bin file {:?}.",
-                        bin_path
-                    )
-                });
+            calculate_expected_len(&metadata, token_unit_size).unwrap_or_else(|| {
+                panic!(
+                    "Overflow calculating expected size for .bin file {:?}.",
+                    bin_path
+                )
+            });
 
         assert_eq!(
             mmap.len(),
@@ -232,7 +226,10 @@ fn read_metadata(idx_path: &Path, token_unit_size: usize) -> Metadata {
         nums_tokens_per_line.len()
     );
 
-    let num_tokens = nums_tokens_per_line.iter().map(|&x| x as usize).sum::<usize>();
+    let num_tokens = nums_tokens_per_line
+        .iter()
+        .map(|&x| x as usize)
+        .sum::<usize>();
     info!("Total token count computed: {}", num_tokens);
 
     Metadata {

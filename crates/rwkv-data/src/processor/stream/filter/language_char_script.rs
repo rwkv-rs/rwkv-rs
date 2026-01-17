@@ -78,10 +78,7 @@ impl LanguageCharScriptFilter {
 
             let ratio_len1 = len1_runs as f64 / runs.len() as f64;
 
-            let adj_same = runs
-                .iter()
-                .map(|&len| len.saturating_sub(1))
-                .sum::<usize>();
+            let adj_same = runs.iter().map(|&len| len.saturating_sub(1)).sum::<usize>();
 
             let adj_ratio = if count > 1 {
                 adj_same as f64 / (count - 1) as f64

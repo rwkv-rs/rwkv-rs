@@ -97,7 +97,7 @@ impl Tokenizer {
                                 io::ErrorKind::InvalidData,
                                 format!("无法解析转义字符串: {}", string),
                             ));
-                        },
+                        }
                     }
                 } else {
                     // 二进制token

@@ -1,13 +1,13 @@
 use std::fs::File;
 
+use burn::backend::Autodiff;
 use burn::{
     backend::Cuda,
     module::Module,
     prelude::{Backend, DeviceOps, Shape, TensorData},
     record::{FullPrecisionSettings, NamedMpkFileRecorder, Recorder},
-    tensor::{backend::DeviceId, cast::ToElement, Float, Int, Tensor},
+    tensor::{Float, Int, Tensor, backend::DeviceId, cast::ToElement},
 };
-use burn::backend::Autodiff;
 use itertools::izip;
 use ndarray::ArrayD;
 use ndarray_npy::ReadNpyExt;
@@ -136,7 +136,11 @@ pub fn load_expected_f32<B: Backend, const D: usize>(
     file_name: &str,
     device: &B::Device,
 ) -> Tensor<B, D, Float> {
-    let file = File::open(format!("../../../data/var_track_from_peft/{}.npy", file_name)).unwrap();
+    let file = File::open(format!(
+        "../../../data/var_track_from_peft/{}.npy",
+        file_name
+    ))
+    .unwrap();
     let array: ArrayD<f32> = ArrayD::<f32>::read_npy(file).unwrap();
     array_npy2burn_f32(&array, device)
 }
@@ -145,7 +149,11 @@ pub fn load_expected_i64<B: Backend, const D: usize>(
     file_name: &str,
     device: &B::Device,
 ) -> Tensor<B, D, Int> {
-    let file = File::open(format!("../../../data/var_track_from_peft/{}.npy", file_name)).unwrap();
+    let file = File::open(format!(
+        "../../../data/var_track_from_peft/{}.npy",
+        file_name
+    ))
+    .unwrap();
     let array: ArrayD<i64> = ArrayD::<i64>::read_npy(file).unwrap();
     array_npy2burn_i64(&array, device)
 }

@@ -133,7 +133,7 @@ where
 
                             writer.close().unwrap();
                         }));
-                    },
+                    }
                     DataItem::DataBatch(batch) => {
                         if let Some(tx) = &current_data_tx {
                             for data in batch {
@@ -146,7 +146,7 @@ where
                                 }
                             }
                         }
-                    },
+                    }
                 }
             }
 

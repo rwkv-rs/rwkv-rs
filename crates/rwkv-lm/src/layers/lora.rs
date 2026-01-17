@@ -77,13 +77,13 @@ impl<B: Backend> LoRA<B> {
                         )
                         .reshape([1, 1, self.embedded_dim]),
                     );
-                },
+                }
                 LoRAType::LearningRate => {
                     *bias = Param::from_tensor(
                         get_learning_rate_lora_bias(self.embedded_dim, self.head_size, device)
                             .reshape([1, 1, self.embedded_dim]),
                     );
-                },
+                }
                 LoRAType::ValueResidual => {
                     *bias = Param::from_tensor(
                         get_value_lora_bias(self.embedded_dim, device).reshape([
@@ -92,7 +92,7 @@ impl<B: Backend> LoRA<B> {
                             self.embedded_dim,
                         ]),
                     );
-                },
+                }
             }
         }
     }

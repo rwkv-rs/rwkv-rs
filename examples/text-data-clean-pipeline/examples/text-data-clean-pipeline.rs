@@ -137,7 +137,7 @@ impl DialogueMessage {
                 match name.as_str() {
                     "role" => role = Some(idx),
                     "content" => content = Some(idx),
-                    _ => {},
+                    _ => {}
                 }
             }
 
@@ -277,7 +277,7 @@ async fn main() {
             processor.run().await;
 
             println!("GptOss processing completed!");
-        },
+        }
         Task::WildChat => {
             let reader = ParquetReader::new(
                 get_parquet_files(Path::new("/public/home/ssjxzkz/Datasets/lm/wildchat")),
@@ -350,7 +350,7 @@ async fn main() {
                                 cleaned.push(entry);
 
                                 expect_user = false;
-                            },
+                            }
                             DialogueEntry::User { .. } => {
                                 if matches!(cleaned.last(), Some(DialogueEntry::User { .. })) {
                                     cleaned.pop();
@@ -359,15 +359,15 @@ async fn main() {
                                 cleaned.push(entry);
 
                                 expect_user = false;
-                            },
+                            }
                             DialogueEntry::Assistant { .. } if !expect_user => {
                                 cleaned.push(entry);
 
                                 expect_user = true;
-                            },
+                            }
                             DialogueEntry::Assistant { .. } => {
                                 continue;
-                            },
+                            }
                         }
                     }
 
@@ -388,7 +388,7 @@ async fn main() {
             processor.run().await;
 
             println!("WildChat processing completed!");
-        },
+        }
     }
 }
 

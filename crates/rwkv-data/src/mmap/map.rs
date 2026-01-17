@@ -50,7 +50,7 @@ impl Map {
             ),
             Err(err) => {
                 panic!("Map::get_with_u128: failed to fetch entry for hash {line_ref:#x}: {err}")
-            },
+            }
         }
     }
 

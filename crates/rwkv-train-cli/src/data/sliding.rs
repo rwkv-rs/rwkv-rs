@@ -15,9 +15,7 @@ use burn::{
     prelude::*,
     tensor::backend::AutodiffBackend,
 };
-use rwkv_config::validated::{
-    train::{FinalTrainConfigBuilder, MmapTokenDtypeOptions, TRAIN_CFG},
-};
+use rwkv_config::validated::train::{FinalTrainConfigBuilder, MmapTokenDtypeOptions, TRAIN_CFG};
 use rwkv_data::mmap::{
     bin::BinReader,
     dtype::{TokenUnit, TokenUnitDType},
@@ -258,16 +256,16 @@ impl<B: Backend, T: TokenUnit> Batcher<B, DataItem<T>, AutoRegressiveBatch<B>>
         match (self.num_units_per_token > 1, T::IS_DISCRETE) {
             (true, true) => {
                 get_batch_3d!(self, data, device, Int, MultiUnitIntTokens)
-            },
+            }
             (true, false) => {
                 get_batch_3d!(self, data, device, Float, MultiUnitFloatTokens)
-            },
+            }
             (false, true) => {
                 get_batch_2d!(self, data, device, Int, SingleUnitIntTokens)
-            },
+            }
             (false, false) => {
                 get_batch_2d!(self, data, device, Float, SingleUnitFloatTokens)
-            },
+            }
         }
     }
 }

@@ -186,6 +186,9 @@ where
     {
         let _ = label;
 
-        HpIter { inner: iter, active }
+        HpIter {
+            inner: iter,
+            active,
+        }
     }
 }

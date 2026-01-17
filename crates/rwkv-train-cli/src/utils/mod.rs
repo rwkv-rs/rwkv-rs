@@ -52,7 +52,7 @@ pub fn read_record_file(
             }
 
             Some(full_record_path.to_string_lossy().to_string())
-        },
+        }
         None => find_last_record_path(&full_records_dir_path)
             .map(|last_record_path| last_record_path.to_string_lossy().to_string()),
     }

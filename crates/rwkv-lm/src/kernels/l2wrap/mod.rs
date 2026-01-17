@@ -99,7 +99,7 @@ impl<B: Backend, C: CheckpointStrategy> L2WrapBackend for Autodiff<B, C> {
                 let output = loss.primitive.clone();
 
                 prep.finish(logits_state, output)
-            },
+            }
             OpsKind::UnTracked(prep) => prep.finish(loss.primitive),
         }
     }

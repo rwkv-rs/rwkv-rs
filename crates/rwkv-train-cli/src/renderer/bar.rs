@@ -3,8 +3,8 @@ use std::sync::Arc;
 use burn::train::{
     metric::{MetricDefinition, MetricId},
     renderer::{
-        EvaluationName, EvaluationProgress, MetricState, MetricsRenderer, MetricsRendererEvaluation,
-        MetricsRendererTraining, TrainingProgress,
+        EvaluationName, EvaluationProgress, MetricState, MetricsRenderer,
+        MetricsRendererEvaluation, MetricsRendererTraining, TrainingProgress,
     },
 };
 use indicatif::{ProgressBar, ProgressStyle};

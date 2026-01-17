@@ -73,8 +73,8 @@ impl<B: Backend> AutoRegressiveModel<B> {
         match &mut self.embed {
             EmbModule::Discrete(emb) => {
                 uniform_init(&mut emb.weight, -1e-4, 1e-4);
-            },
-            EmbModule::Continuous(_linear) => {},
+            }
+            EmbModule::Continuous(_linear) => {}
         }
 
         if self.vocabulary_size > self.embedded_dim {

@@ -268,10 +268,10 @@ impl TextNormalizer {
                     }
 
                     result.push(' ');
-                },
+                }
                 _ => {
                     result.push(ch);
-                },
+                }
             }
         }
 

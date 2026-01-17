@@ -14,7 +14,6 @@ use crate::{
 };
 
 #[derive(Config, Debug)]
-
 pub struct CausalCellConfig {
     num_cells: usize,
     embedded_dim: usize,

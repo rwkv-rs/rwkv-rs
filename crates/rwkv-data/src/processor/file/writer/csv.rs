@@ -93,7 +93,7 @@ where
                             .create_writer(file);
 
                         current_writer = Some(writer);
-                    },
+                    }
                     DataItem::DataBatch(batch) => {
                         if let Some(writer) = current_writer.as_mut() {
                             for data in batch {
@@ -104,7 +104,7 @@ where
                                 writer.write_record(&fields).await.unwrap();
                             }
                         }
-                    },
+                    }
                 }
             }
 

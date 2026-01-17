@@ -77,7 +77,7 @@ impl<B: Backend> AutoRegressiveLoss<B> {
                 } else {
                     loss
                 }
-            },
+            }
             (LossOption::MseLoss(mse_loss), TokensOptions::SingleUnitFloatTokens(targets)) => {
                 let targets = targets.clone().unsqueeze_dim(2);
                 debug_assert_eq!(
@@ -86,7 +86,7 @@ impl<B: Backend> AutoRegressiveLoss<B> {
                     "Prediction and target tensors must be the same shape for MSE loss"
                 );
                 mse_loss.forward(pred, targets, Reduction::Mean)
-            },
+            }
             (LossOption::MseLoss(mse_loss), TokensOptions::MultiUnitFloatTokens(targets)) => {
                 debug_assert_eq!(
                     pred.dims(),
@@ -94,7 +94,7 @@ impl<B: Backend> AutoRegressiveLoss<B> {
                     "Prediction and target tensors must be the same shape for MSE loss"
                 );
                 mse_loss.forward(pred, targets.clone(), Reduction::Mean)
-            },
+            }
             _ => panic!("Mismatched loss configuration and target tensor type"),
         }
     }

@@ -1,13 +1,12 @@
 mod test_tools;
 
 use burn::{Tensor, prelude::Float, tensor::TensorPrimitive};
+use rwkv_lm::kernels::wkv7::Wkv7Backend;
 use rwkv_lm::{
     functions::token_shift::token_shift, kernels::wkv7::wkv7_forward,
     layers::embedding::TokensOptions,
 };
-use rwkv_lm::kernels::wkv7::Wkv7Backend;
 use test_tools::*;
-
 
 #[test]
 fn test_rwkv7_0p1b_forward() {

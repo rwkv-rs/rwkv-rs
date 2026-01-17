@@ -160,7 +160,12 @@ fn wkv7_forward_impl<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: BoolEl
     let initial_state_shape = Shape::new([batch_size, num_heads, dim, dim]);
 
     let initial_state = initial_state.map(into_contiguous).unwrap_or_else(|| {
-        zeros_client::<R>(client.clone(), device.clone(), initial_state_shape.clone(), FE::dtype())
+        zeros_client::<R>(
+            client.clone(),
+            device.clone(),
+            initial_state_shape.clone(),
+            FE::dtype(),
+        )
     });
 
     let config = Wkv7Config {

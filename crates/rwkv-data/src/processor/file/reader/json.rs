@@ -1,11 +1,4 @@
-use std::{
-    borrow::Cow,
-    future::Future,
-    marker::PhantomData,
-    path::PathBuf,
-    pin::Pin,
-    sync::Arc,
-};
+use std::{borrow::Cow, future::Future, marker::PhantomData, path::PathBuf, pin::Pin, sync::Arc};
 
 use sonic_rs::{Deserialize, from_str};
 use tokio::{

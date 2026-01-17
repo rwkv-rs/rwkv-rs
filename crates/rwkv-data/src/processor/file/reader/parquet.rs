@@ -1,11 +1,5 @@
 use std::{
-    borrow::Cow,
-    fs::File,
-    future::Future,
-    marker::PhantomData,
-    path::PathBuf,
-    pin::Pin,
-    sync::Arc,
+    borrow::Cow, fs::File, future::Future, marker::PhantomData, path::PathBuf, pin::Pin, sync::Arc,
 };
 
 use parquet::{

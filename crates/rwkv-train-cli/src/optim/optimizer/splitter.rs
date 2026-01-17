@@ -41,7 +41,11 @@ pub fn split_grads_multi<B, M>(
     model: &M,
     mut source_grads: MultiGradientsParams,
     groups: &ParamGroups,
-) -> (MultiGradientsParams, MultiGradientsParams, MultiGradientsParams)
+) -> (
+    MultiGradientsParams,
+    MultiGradientsParams,
+    MultiGradientsParams,
+)
 where
     B: AutodiffBackend,
     M: AutodiffModule<B>,
@@ -59,8 +63,12 @@ where
     for (_, device_id) in source_grads.grads.iter() {
         let device_id = *device_id;
 
-        high_lr_grads.grads.push((GradientsParams::new(), device_id));
-        with_wd_grads.grads.push((GradientsParams::new(), device_id));
+        high_lr_grads
+            .grads
+            .push((GradientsParams::new(), device_id));
+        with_wd_grads
+            .grads
+            .push((GradientsParams::new(), device_id));
         no_wd_grads.grads.push((GradientsParams::new(), device_id));
     }
 

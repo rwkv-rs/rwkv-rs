@@ -316,7 +316,8 @@ pub trait Trainer {
 
         let metric_id_loss = MetricId::new(Arc::new(METRIC_NAME_LOSS.to_string()));
 
-        let metric_id_learning_rate = MetricId::new(Arc::new(METRIC_NAME_LEARNING_RATE.to_string()));
+        let metric_id_learning_rate =
+            MetricId::new(Arc::new(METRIC_NAME_LEARNING_RATE.to_string()));
 
         while let Ok(message) = metrics_receiver.recv() {
             global_train_step_index += 1;

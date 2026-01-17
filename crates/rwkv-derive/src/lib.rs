@@ -154,7 +154,7 @@ pub fn derive_line_ref(input: TokenStream) -> TokenStream {
                             String::from_utf8(tokens.into_owned()).unwrap()
                         }
                     });
-                },
+                }
                 LineRefType::U128 => {
                     // 处理 u128 类型：从内存映射中获取 u128 的位置信息
                     to_serialized_lets.push(quote! {
@@ -170,7 +170,7 @@ pub fn derive_line_ref(input: TokenStream) -> TokenStream {
                             u128::from_le_bytes(bytes)
                         }
                     });
-                },
+                }
             }
 
             // 为序列化结构体实例化添加偏移量和长度字段
@@ -287,7 +287,7 @@ fn extract_line_ref_type(ty: &Type) -> LineRefType {
                     last_segment.ident
                 ),
             }
-        },
+        }
         // 对于其他类型形式，暂时不支持
         _ => panic!(
             "Unsupported line_ref type. Only String and u128 are supported. \
