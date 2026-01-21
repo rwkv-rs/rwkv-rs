@@ -1,0 +1,17 @@
+[package]
+name = "rwkv-lm-trainer"
+authors = ["Cai-z-us <caizus@rwkvos.com>"]
+description = "Example: orchestrate RWKV Language model training via rwkv-train-cli components"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rwkv = { path = "../../crates/rwkv"}
+
+# Utils
+derive-new = { workspace = true }

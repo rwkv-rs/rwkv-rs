@@ -24,5 +24,7 @@ chrono = { workspace = true }
 rwkv-config = { path = "../../crates/rwkv-config" }
 rwkv-data = { path = "../../crates/rwkv-data" }
 rwkv-lm = { path = "../../crates/rwkv-lm" }
-rwkv-train-cli = { path = "../../crates/rwkv-train-cli" }
+rwkv-train = { path = "../../crates/rwkv-train" }
 
+# Utils
+derive-new = { workspace = true }

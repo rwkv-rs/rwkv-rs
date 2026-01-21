@@ -57,3 +57,11 @@ pub enum OptimizerOptions {
     Muon,
     Adopt,
 }
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DatasetFormatOptions {
+    #[default]
+    Rwkv,
+    RwkvLegacy,
+}

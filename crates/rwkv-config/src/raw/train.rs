@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{OptimizerOptions, TrainStageOptions, fill_default};
+use crate::{DatasetFormatOptions, OptimizerOptions, TrainStageOptions, fill_default};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawTrainConfig {
@@ -12,6 +12,7 @@ pub struct RawTrainConfig {
 
     pub dataset_base_path: String,
     pub filename_without_extensions: String,
+    pub dataset_format: Option<DatasetFormatOptions>,
 
     pub train_stage: TrainStageOptions,
 
@@ -47,6 +48,7 @@ impl RawTrainConfig {
             experiment_log_base_path: "logs".to_string(),
             random_seed: 42,
             save_freq: 1,
+            dataset_format: DatasetFormatOptions::Rwkv,
             num_nodes: 1,
             num_devices_per_node: 1,
             batch_size_per_device: 1,

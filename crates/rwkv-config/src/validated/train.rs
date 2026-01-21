@@ -4,7 +4,7 @@ use once_cell::sync::OnceCell;
 use rwkv_derive::ConfigBuilder;
 use serde::Serialize;
 
-use crate::{OptimizerOptions, TrainStageOptions};
+use crate::{DatasetFormatOptions, OptimizerOptions, TrainStageOptions};
 
 #[derive(Clone, Debug, Serialize, ConfigBuilder)]
 #[config_builder(raw = "crate::raw::train::RawTrainConfig", cell = "TRAIN_CFG")]
@@ -19,6 +19,7 @@ pub struct FinalTrainConfig {
 
     pub dataset_base_path: String,
     pub filename_without_extensions: String,
+    pub dataset_format: DatasetFormatOptions,
     #[skip_raw]
     pub mmap_num_tokens_auto: usize,
     #[skip_raw]

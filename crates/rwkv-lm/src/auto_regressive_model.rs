@@ -143,8 +143,8 @@ impl<B: Backend> AutoRegressiveModel<B> {
 
         let x = self.layer_norm_for_unembed.forward(x);
 
-        let x = self.unembed.forward(x);
+        let logits = self.unembed.forward(x);
 
-        (x, states)
+        (logits, states)
     }
 }

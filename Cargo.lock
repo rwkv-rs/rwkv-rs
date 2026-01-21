@@ -6488,6 +6488,19 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 [[package]]
 name = "rwkv"
 version = "0.1.0"
+dependencies = [
+ "burn",
+ "burn-cubecl",
+ "burn-fusion",
+ "burn-ir",
+ "burn-optim",
+ "burn-store",
+ "burn-train",
+ "rwkv-config",
+ "rwkv-data",
+ "rwkv-lm",
+ "rwkv-train",
+]
 
 [[package]]
 name = "rwkv-agent"
@@ -6560,11 +6573,12 @@ dependencies = [
  "burn-ir",
  "chrono",
  "clia-tracing-config",
+ "derive-new 0.7.0",
  "log",
  "rwkv-config",
  "rwkv-data",
  "rwkv-lm",
- "rwkv-train-cli",
+ "rwkv-train",
  "tokio",
 ]
 
@@ -6616,6 +6630,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rwkv-lm-trainer"
+version = "0.1.0"
+dependencies = [
+ "derive-new 0.7.0",
+ "rwkv",
+]
+
+[[package]]
 name = "rwkv-prompt"
 version = "0.1.0"
 
@@ -6624,7 +6646,7 @@ name = "rwkv-trace"
 version = "0.1.0"
 
 [[package]]
-name = "rwkv-train-cli"
+name = "rwkv-train"
 version = "0.1.0"
 dependencies = [
  "async-trait",

@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     marker::PhantomData,
     path::PathBuf,
     sync::{
@@ -15,15 +16,68 @@ use burn::{
     prelude::*,
     tensor::backend::AutodiffBackend,
 };
-use rwkv_config::validated::train::{FinalTrainConfigBuilder, MmapTokenDtypeOptions, TRAIN_CFG};
+use rwkv_config::{
+    DatasetFormatOptions,
+    validated::train::{FinalTrainConfigBuilder, MmapTokenDtypeOptions, TRAIN_CFG},
+};
 use rwkv_data::mmap::{
-    bin::BinReader,
+    bin,
+    bin_old,
     dtype::{TokenUnit, TokenUnitDType},
     sample::Sampler,
 };
 use rwkv_lm::layers::embedding::TokensOptions;
 
 use crate::data::EPOCH_INDEX;
+
+enum MmapBinReader<T: TokenUnit> {
+    Rwkv(bin::BinReader<T>),
+    RwkvLegacy(bin_old::BinReader<T>),
+}
+
+impl<T: TokenUnit> MmapBinReader<T> {
+    fn open<P: AsRef<std::path::Path>>(path: P, format: DatasetFormatOptions) -> Self {
+        match format {
+            DatasetFormatOptions::Rwkv => Self::Rwkv(bin::BinReader::new(path)),
+            DatasetFormatOptions::RwkvLegacy => Self::RwkvLegacy(bin_old::BinReader::new(path)),
+        }
+    }
+
+    fn num_tokens(&self) -> u64 {
+        match self {
+            Self::Rwkv(bin) => bin.num_tokens,
+            Self::RwkvLegacy(bin) => bin.num_tokens,
+        }
+    }
+
+    fn num_units_per_token(&self) -> u64 {
+        match self {
+            Self::Rwkv(bin) => bin.num_units_per_token,
+            Self::RwkvLegacy(bin) => bin.num_units_per_token,
+        }
+    }
+
+    fn dtype(&self) -> TokenUnitDType {
+        match self {
+            Self::Rwkv(bin) => bin.dtype,
+            Self::RwkvLegacy(bin) => bin.dtype,
+        }
+    }
+
+    fn get_magic_prime(&self, ctx_len: u64) -> u64 {
+        match self {
+            Self::Rwkv(bin) => bin.get_magic_prime(ctx_len),
+            Self::RwkvLegacy(bin) => bin.get_magic_prime(ctx_len),
+        }
+    }
+
+    fn get(&self, offset: u64, length: u64) -> Cow<'_, [T]> {
+        match self {
+            Self::Rwkv(bin) => bin.get(offset, length),
+            Self::RwkvLegacy(bin) => bin.get(offset, length),
+        }
+    }
+}
 
 pub fn get_sliding_data_loaders<B: AutodiffBackend, T: TokenUnit>(
     train_cfg_builder: &mut FinalTrainConfigBuilder,
@@ -33,11 +87,14 @@ pub fn get_sliding_data_loaders<B: AutodiffBackend, T: TokenUnit>(
         .join(train_cfg_builder.get_filename_without_extensions().unwrap())
         .with_extension("bin");
 
-    let bin = Arc::new(BinReader::<T>::new(&bin_path));
+    let dataset_format = train_cfg_builder
+        .get_dataset_format()
+        .unwrap_or(DatasetFormatOptions::Rwkv);
+    let bin = Arc::new(MmapBinReader::<T>::open(&bin_path, dataset_format));
     train_cfg_builder.fill_after_read_bin(
-        bin.num_tokens as usize,
-        bin.num_units_per_token as usize,
-        match bin.dtype {
+        bin.num_tokens() as usize,
+        bin.num_units_per_token() as usize,
+        match bin.dtype() {
             TokenUnitDType::U8 => MmapTokenDtypeOptions::U8,
             TokenUnitDType::U16 => MmapTokenDtypeOptions::U16,
             TokenUnitDType::F32 => MmapTokenDtypeOptions::F32,
@@ -88,7 +145,7 @@ pub fn get_sliding_data_loaders<B: AutodiffBackend, T: TokenUnit>(
 pub struct SlidingDataset<T: TokenUnit> {
     pub context_length: u64,
 
-    pub bin: Arc<BinReader<T>>,
+    pub bin: Arc<MmapBinReader<T>>,
     pub sampler: Sampler,
     pub mini_epoch_index: Arc<AtomicUsize>,
 
@@ -99,7 +156,7 @@ impl<T: TokenUnit> SlidingDataset<T> {
     pub fn new(
         context_length: u64,
 
-        bin: Arc<BinReader<T>>,
+        bin: Arc<MmapBinReader<T>>,
         sampler: Sampler,
         profile_rank0: bool,
     ) -> Self {
@@ -173,11 +230,11 @@ impl<B: Backend, T: TokenUnit> AutoRegressiveBatcher<B, T> {
 }
 
 #[derive(Clone, Debug)]
-
 pub struct AutoRegressiveBatch<B: Backend> {
     pub inputs: TokensOptions<B>,
     pub targets: TokensOptions<B>,
 }
+
 
 macro_rules! get_batch_2d {
     ($self:ident, $data:ident, $device:ident, $Scalar:ident, $Variant:ident) => {{

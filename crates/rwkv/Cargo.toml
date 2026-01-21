@@ -6,3 +6,15 @@ description = "Facade crate that re-exports rwkv-rs training, inference, data, a
 license = "Apache-2.0"
 
 [dependencies]
+burn = { workspace = true }
+burn-train = { workspace = true }
+burn-fusion = { workspace = true }
+burn-cubecl = { workspace = true }
+burn-ir = { workspace = true }
+burn-store = { workspace = true }
+burn-optim = { workspace = true }
+
+rwkv-config = { path = "../rwkv-config" }
+rwkv-data = { path = "../rwkv-data" }
+rwkv-lm = { path = "../rwkv-lm" }
+rwkv-train = { path = "../rwkv-train" }
