@@ -5,6 +5,10 @@
 
 pub mod custom {
     pub use burn::*;
+    #[cfg(feature = "store")]
+    pub mod store {
+        pub use burn_store::*;
+    }
 }
 
 #[macro_export]
@@ -18,14 +22,17 @@ pub mod config {
     pub use rwkv_config::*;
 }
 
+#[cfg(feature = "data")]
 pub mod data {
     pub use rwkv_data::*;
 }
 
-pub mod lm {
-    pub use rwkv_lm::*;
+#[cfg(feature = "nn")]
+pub mod nn {
+    pub use rwkv_nn::*;
 }
 
+#[cfg(feature = "train")]
 pub mod train {
     pub use rwkv_train::*;
 }

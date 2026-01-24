@@ -19,7 +19,7 @@
 - **职责**: 作为整个生态系统的基石，定义所有共享的“数据契约”（纯数据结构）和“行为契约”（Traits）。它是依赖图的根，除了 `burn` 的核心库外，不应有任何 `rwkv-*` 依赖。
 - **设计哲学：组合优于继承**:
     - `rwkv-config` 的存在是为了促成一个健壮的组合式架构。
-    - 例如，`ModelConfig` 和 `LoraConfig` 都在 `rwkv-config` 中定义。`rwkv-lm` 中的模型实现会依赖 `ModelConfig`，而 `rwkv-train` 中的训练器则会同时依赖 `ModelConfig` 和 `LoraConfig` 来组合出完整的训练流程。
+    - 例如，`ModelConfig` 和 `LoraConfig` 都在 `rwkv-config` 中定义。`rwkv-nn` 中的模型实现会依赖 `ModelConfig`，而 `rwkv-train` 中的训练器则会同时依赖 `ModelConfig` 和 `LoraConfig` 来组合出完整的训练流程。
     - 这种方式将“数据”和“使用数据的逻辑”完全解耦，从根本上避免了循环依赖的可能。
 - **内容**: `trait Model`, `struct ModelConfig`, `struct LoraConfig`, `struct TrainConfig` 等所有跨 crate 共享的定义。
 - **规则**: `rwkv` (Facade) 负责将其内容重导出到 `rwkv::config` 或 `rwkv::model` 模块下。

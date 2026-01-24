@@ -29,20 +29,16 @@ use rwkv_config::validated::{
     train::{FinalTrainConfigBuilder, TRAIN_CFG},
 };
 use rwkv_data::mmap::dtype::TokenUnit;
-use rwkv_lm::kernels::wkv7::Wkv7Backend;
+use rwkv_nn::kernels::wkv7::Wkv7Backend;
 use wandb::LogData;
 
-use crate::{
-    data::EPOCH_INDEX,
-    renderer::{METRIC_NAME_LEARNING_RATE, METRIC_NAME_LOSS, TrainMetricMessage},
-    trainer::{
-        RwkvAutodiff, RwkvTrainBackend,
-        common::{
-            init_cfg, init_devices, init_file_logger, init_log, init_renderer, init_wandb_logger,
-        },
-        ddp::GradSyncer,
+use crate::{data::EPOCH_INDEX, renderer::{METRIC_NAME_LEARNING_RATE, METRIC_NAME_LOSS, TrainMetricMessage}, trainer, trainer::{
+    RwkvAutodiff, RwkvTrainBackend,
+    common::{
+        init_cfg, init_devices, init_file_logger, init_log, init_renderer, init_wandb_logger,
     },
-};
+    ddp::GradSyncer,
+}};
 
 #[derive(Clone, Copy, Debug)]
 pub struct TrainStepContext {
@@ -89,7 +85,7 @@ pub trait Trainer {
 
     fn run<B>(model_cfg_path: &str, train_cfg_path: &str)
     where
-        B: Backend + Wkv7Backend,
+        B: Backend + Wkv7Backend + trainer::common::BackendDeviceInit,
     {
         let (model_cfg_builder, mut train_cfg_builder) = init_cfg(model_cfg_path, train_cfg_path);
 
@@ -110,7 +106,7 @@ pub trait Trainer {
         }
     }
 
-    fn train<B: RwkvTrainBackend>(
+    fn train<B: RwkvTrainBackend + trainer::common::BackendDeviceInit>(
         model_cfg_builder: FinalModelConfigBuilder,
         mut train_cfg_builder: FinalTrainConfigBuilder,
         full_experiment_log_path: &Path,
