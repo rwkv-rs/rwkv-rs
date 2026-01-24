@@ -5,16 +5,59 @@ edition = "2024"
 description = "Facade crate that re-exports rwkv-rs training, inference, data, and agent APIs"
 license = "Apache-2.0"
 
+[features]
+default = ["std", "nn"]
+std = ["burn/std", "rwkv-train?/std"]
+train = [
+    "dep:rwkv-train",
+    "rwkv-train/train",
+    "rwkv-train/tui",
+    "rwkv-train/collective",
+    "burn/train",
+    "autodiff",
+    "dataset",
+    "data",
+    "nn",
+]
+tui = ["burn/tui", "rwkv-train?/tui"]
+metrics = ["burn/metrics", "rwkv-train?/metrics"]
+dataset = ["burn/dataset"]
+collective = ["burn/collective", "rwkv-train?/collective"]
+data = ["dep:rwkv-data", "dataset"]
+nn = ["dep:rwkv-nn"]
+store = ["burn/store", "dep:burn-store", "burn-store/std", "burn-store/pytorch"]
+
+autodiff = ["burn/autodiff"]
+fusion = ["burn/fusion", "rwkv-nn?/fusion"]
+cubecl = ["burn/cubecl"]
+autotune = ["burn/autotune"]
+autotune-checks = ["burn/autotune-checks"]
+
+ndarray = ["burn/ndarray"]
+accelerate = ["burn/accelerate"]
+blas-netlib = ["burn/blas-netlib"]
+openblas = ["burn/openblas"]
+openblas-system = ["burn/openblas-system"]
+simd = ["burn/simd"]
+tch = ["burn/tch"]
+wgpu = ["burn/wgpu"]
+vulkan = ["wgpu", "burn/vulkan"]
+webgpu = ["wgpu", "burn/webgpu"]
+metal = ["wgpu", "burn/metal"]
+cuda = ["burn/cuda"]
+rocm = ["burn/rocm"]
+remote = ["burn/remote"]
+router = ["burn/router"]
+cpu = ["burn/cpu"]
+candle = ["burn/candle"]
+candle-cuda = ["burn/candle-cuda"]
+candle-metal = ["burn/candle-metal"]
+
 [dependencies]
-burn = { workspace = true }
-burn-train = { workspace = true }
-burn-fusion = { workspace = true }
-burn-cubecl = { workspace = true }
-burn-ir = { workspace = true }
-burn-store = { workspace = true }
-burn-optim = { workspace = true }
+burn = { workspace = true, default-features = false, features = [] }
+burn-store = { workspace = true, default-features = false, optional = true }
 
 rwkv-config = { path = "../rwkv-config" }
-rwkv-data = { path = "../rwkv-data" }
-rwkv-lm = { path = "../rwkv-lm" }
-rwkv-train = { path = "../rwkv-train" }
+rwkv-data = { path = "../rwkv-data", optional = true }
+rwkv-nn = { path = "../rwkv-nn", default-features = false, optional = true }
+rwkv-train = { path = "../rwkv-train", default-features = false, optional = true }

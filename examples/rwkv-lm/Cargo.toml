@@ -1,0 +1,52 @@
+[package]
+name = "rwkv-lm"
+authors = ["Cai-z-us <caizus@rwkvos.com>"]
+description = "Example: RWKV Language model"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = [
+    "training",
+    "cuda",
+    "ddp",
+    "pth2mpk"
+]
+f16 = []
+flex32 = []
+ndarray = ["rwkv/ndarray"]
+ndarray-blas-accelerate = ["rwkv/ndarray", "rwkv/accelerate"]
+ndarray-blas-netlib = ["rwkv/ndarray", "rwkv/blas-netlib"]
+ndarray-blas-openblas = ["rwkv/ndarray", "rwkv/openblas"]
+tch-cpu = ["rwkv/tch"]
+tch-gpu = ["rwkv/tch"]
+wgpu = ["rwkv/wgpu"]
+vulkan = ["rwkv/vulkan"]
+remote = ["rwkv/remote"]
+cuda = ["rwkv/cuda"]
+rocm = ["rwkv/rocm"]
+metal = ["rwkv/metal"]
+ddp = ["rwkv/collective"]
+training = []
+pth2mpk = ["rwkv/store", "rwkv/cubecl"]
+
+[dependencies]
+rwkv = { path = "../../crates/rwkv", features = [
+    "data",
+    "nn",
+    "train",
+    "tui",
+    "metrics",
+    "ndarray",
+    "autotune",
+    "fusion",
+    "std",
+], default-features = false}
+
+# Utils
+derive-new = { workspace = true }

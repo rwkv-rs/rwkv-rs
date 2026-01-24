@@ -6,8 +6,8 @@ description = "Utilities for exporting RWKV checkpoints between PyTorch .pth and
 license = "Apache-2.0"
 
 [dependencies]
-burn = { workspace = true }
-burn-store = { workspace = true }
+burn = { workspace = true, default-features = false, features = ["std"] }
+burn-store = { workspace = true, default-features = false, features = ["std", "pytorch"] }
 
 rwkv-data = { path = "../../crates/rwkv-data" }
-rwkv-lm = { path = "../../crates/rwkv-lm" }
+rwkv-nn = { path = "../../crates/rwkv-nn" }

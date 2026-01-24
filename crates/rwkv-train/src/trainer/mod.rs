@@ -2,11 +2,11 @@ use burn::{
     backend::{Autodiff, autodiff::checkpoint::strategy::CheckpointStrategy},
     tensor::backend::AutodiffBackend,
 };
-use rwkv_lm::kernels::{l2wrap::L2WrapBackend, wkv7::Wkv7Backend};
+use rwkv_nn::kernels::{l2wrap::L2WrapBackend, wkv7::Wkv7Backend};
 
-mod common;
+pub mod common;
 pub mod custom;
-mod ddp;
+pub mod ddp;
 
 type RwkvAutodiff<B, C> = Autodiff<B, C>;
 

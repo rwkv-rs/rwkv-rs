@@ -40,7 +40,7 @@ unicode-normalization = { workspace = true }
 zstd = { workspace = true }
 log = { workspace = true }
 
-burn = { workspace = true }
+burn = { workspace = true, default-features = false, features = ["std"] }
 
 # === Local Dependencies ===
 rwkv-derive = { path = "../rwkv-derive" }

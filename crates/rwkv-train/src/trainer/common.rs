@@ -1,9 +1,18 @@
 use std::path::{Path, PathBuf};
 
-use burn::{
-    prelude::{Backend, DeviceOps},
-    tensor::backend::DeviceId,
-};
+use burn::backend::Autodiff;
+use burn::backend::autodiff::checkpoint::strategy::CheckpointStrategy;
+#[cfg(feature = "backend_cuda")]
+use burn::backend::cuda::Cuda;
+#[cfg(feature = "backend_ndarray")]
+use burn::backend::ndarray::{FloatNdArrayElement, IntNdArrayElement, NdArray, QuantElement};
+#[cfg(any(feature = "backend_wgpu", feature = "backend_metal"))]
+use burn::backend::wgpu::Wgpu;
+#[cfg(any(feature = "backend_cuda", feature = "backend_wgpu", feature = "backend_metal"))]
+use burn::cubecl::{FloatElement, IntElement};
+#[cfg(any(feature = "backend_wgpu", feature = "backend_metal"))]
+use burn::cubecl::BoolElement;
+use burn::prelude::Backend;
 use burn_train::{
     Interrupter,
     logger::{AsyncLogger, FileLogger, Logger},
@@ -78,14 +87,99 @@ pub fn init_log(train_cfg_builder: &mut FinalTrainConfigBuilder) -> PathBuf {
     full_experiment_log_path
 }
 
-pub fn init_devices<B: Backend>(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<B::Device> {
-    (0..train_cfg_builder.get_num_devices_per_node().unwrap())
-        .map(|i| {
-            let device = B::Device::from_id(DeviceId::new(0, i as u32));
-            B::seed(&device, train_cfg_builder.get_random_seed().unwrap());
-            device
-        })
-        .collect::<Vec<B::Device>>()
+
+pub trait BackendDeviceInit: Backend {
+    fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device>;
+}
+
+impl<B, C> BackendDeviceInit for Autodiff<B, C>
+where
+    B: BackendDeviceInit,
+    C: CheckpointStrategy,
+{
+    fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device> {
+        B::init_devices(train_cfg_builder)
+    }
+}
+
+#[cfg(feature = "backend_ndarray")]
+impl<E, I, Q> BackendDeviceInit for NdArray<E, I, Q>
+where
+    E: FloatNdArrayElement,
+    I: IntNdArrayElement,
+    Q: QuantElement,
+{
+    fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device> {
+        let seed = train_cfg_builder.get_random_seed().unwrap();
+        (0..train_cfg_builder.get_num_devices_per_node().unwrap())
+            .map(|_| {
+                let device = burn::backend::ndarray::NdArrayDevice::Cpu;
+                Self::seed(&device, seed);
+                device
+            })
+            .collect()
+    }
+}
+
+#[cfg(feature = "backend_cuda")]
+impl<F, I> BackendDeviceInit for Cuda<F, I>
+where
+    F: FloatElement,
+    I: IntElement,
+{
+    fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device> {
+        let seed = train_cfg_builder.get_random_seed().unwrap();
+        (0..train_cfg_builder.get_num_devices_per_node().unwrap())
+            .map(|i| {
+                let device = burn::backend::cuda::CudaDevice::new(i);
+                Self::seed(&device, seed);
+                device
+            })
+            .collect()
+    }
+}
+
+#[cfg(any(feature = "backend_wgpu", feature = "backend_metal"))]
+impl<F, I, B> BackendDeviceInit for Wgpu<F, I, B>
+where
+    F: FloatElement,
+    I: IntElement,
+    B: BoolElement,
+{
+    fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device> {
+        let seed = train_cfg_builder.get_random_seed().unwrap();
+        let requested = train_cfg_builder.get_num_devices_per_node().unwrap();
+        let devices = if requested <= 1 {
+            vec![burn::backend::wgpu::WgpuDevice::default()]
+        } else {
+            (0..requested)
+                .map(|i| burn::backend::wgpu::WgpuDevice::DiscreteGpu(i))
+                .collect::<Vec<_>>()
+        };
+
+        for device in &devices {
+            #[cfg(feature = "backend_metal")]
+            burn::backend::wgpu::init_setup::<burn::backend::wgpu::graphics::Metal>(
+                device,
+                Default::default(),
+            );
+            #[cfg(all(not(feature = "backend_metal"), feature = "backend_wgpu"))]
+            burn::backend::wgpu::init_setup::<burn::backend::wgpu::graphics::AutoGraphicsApi>(
+                device,
+                Default::default(),
+            );
+
+            Self::seed(device, seed);
+        }
+
+        devices
+    }
+}
+
+pub fn init_devices<B: BackendDeviceInit>(
+    train_cfg_builder: &FinalTrainConfigBuilder,
+) -> Vec<B::Device> {
+    B::init_devices(train_cfg_builder)
 }
 
 pub fn init_file_logger(exp_log_path: &Path) -> AsyncLogger<String> {

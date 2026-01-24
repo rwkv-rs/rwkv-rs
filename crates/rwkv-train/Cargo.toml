@@ -6,39 +6,78 @@ description = "Distributed training CLI orchestrating data pipelines, Burn train
 license = "Apache-2.0"
 
 [features]
-# Backend features for auto-adaptation
-backend_cuda = ["burn/cuda"]
-backend_metal = ["burn/metal"]
-backend_wgpu = ["burn/wgpu"]
-backend_ndarray = ["burn/ndarray"]
+default = ["std", "train", "tui", "metrics", "collective"]
+std = ["burn/std", "burn-optim/std"]
+train = [
+    "dep:burn-train",
+    "burn/train",
+    "autodiff",
+    "dataset",
+    "dep:rwkv-nn",
+    "dep:rwkv-data",
+    "dep:rwkv-config",
+    "dep:rwkv-bench",
+]
+tui = ["burn/tui", "burn-train?/tui"]
+metrics = ["burn/metrics", "burn-train?/sys-metrics"]
+dataset = ["burn/dataset"]
+collective = ["burn/collective", "burn-optim/collective", "burn-train?/ddp"]
 
-# Default feature for different platforms
-default = []
-hotpath = ["dep:hotpath", "rwkv-lm/hotpath", "rwkv-bench/hotpath", "hotpath/hotpath"]
+autodiff = ["burn/autodiff"]
+fusion = ["burn/fusion", "rwkv-nn?/fusion"]
+cubecl = ["burn/cubecl"]
+autotune = ["burn/autotune"]
+autotune-checks = ["burn/autotune-checks"]
+
+backend_ndarray = ["burn/ndarray"]
+ndarray = ["backend_ndarray"]
+accelerate = ["burn/accelerate"]
+blas-netlib = ["burn/blas-netlib"]
+openblas = ["burn/openblas"]
+openblas-system = ["burn/openblas-system"]
+simd = ["burn/simd"]
+tch = ["burn/tch"]
+backend_wgpu = ["burn/wgpu"]
+wgpu = ["backend_wgpu"]
+vulkan = ["wgpu", "burn/vulkan"]
+webgpu = ["wgpu", "burn/webgpu"]
+backend_metal = ["burn/metal"]
+metal = ["backend_metal"]
+backend_cuda = ["burn/cuda"]
+cuda = ["backend_cuda"]
+rocm = ["burn/rocm"]
+remote = ["burn/remote"]
+router = ["burn/router"]
+cpu = ["burn/cpu"]
+candle = ["burn/candle"]
+candle-cuda = ["burn/candle-cuda"]
+candle-metal = ["burn/candle-metal"]
+
+hotpath = ["dep:hotpath", "rwkv-nn/hotpath", "rwkv-bench/hotpath", "hotpath/hotpath"]
 hotpath-alloc-bytes-total = [
     "hotpath",
-    "rwkv-lm/hotpath-alloc-bytes-total",
+    "rwkv-nn/hotpath-alloc-bytes-total",
     "rwkv-bench/hotpath-alloc-bytes-total",
     "hotpath/hotpath-alloc",
 ]
 hotpath-alloc-count-total = [
     "hotpath",
-    "rwkv-lm/hotpath-alloc-count-total",
+    "rwkv-nn/hotpath-alloc-count-total",
     "rwkv-bench/hotpath-alloc-count-total",
     "hotpath/hotpath-alloc",
 ]
 hotpath-off = [
     "hotpath",
-    "rwkv-lm/hotpath-off",
+    "rwkv-nn/hotpath-off",
     "rwkv-bench/hotpath-off",
     "hotpath/hotpath-off",
 ]
 
 [dependencies]
 # === Deep Learning Core ===
-burn = { workspace = true }
-burn-train = { workspace = true }
-burn-optim = { workspace = true }
+burn = { workspace = true, default-features = false, features = [] }
+burn-train = { workspace = true, default-features = false, features = [], optional = true }
+burn-optim = { workspace = true, default-features = false, features = [] }
 
 # === Serialization ===
 serde = { workspace = true }
@@ -74,7 +113,7 @@ indicatif = { workspace = true }
 hotpath = { workspace = true, optional = true }
 
 # === Local Dependencies ===
-rwkv-lm = { path = "../rwkv-lm" }
-rwkv-data = { path = "../rwkv-data" }
-rwkv-config = { path = "../rwkv-config" }
-rwkv-bench = { path = "../rwkv-bench" }
+rwkv-nn = { path = "../rwkv-nn", default-features = false, optional = true }
+rwkv-data = { path = "../rwkv-data", optional = true }
+rwkv-config = { path = "../rwkv-config", optional = true }
+rwkv-bench = { path = "../rwkv-bench", optional = true }
