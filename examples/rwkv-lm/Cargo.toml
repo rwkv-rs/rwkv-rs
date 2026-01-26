@@ -36,6 +36,7 @@ training = []
 pth2mpk = ["rwkv/store", "rwkv/cubecl"]
 
 [dependencies]
+log = "0.4.29"
 rwkv = { path = "../../crates/rwkv", features = [
     "data",
     "nn",

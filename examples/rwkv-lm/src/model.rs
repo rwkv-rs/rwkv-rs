@@ -6,12 +6,14 @@
 use rwkv::custom::config::Config;
 use rwkv::custom::module::Module;
 use rwkv::custom::nn::{Embedding, EmbeddingConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig};
-use rwkv::custom::tensor::backend::Backend;
-use rwkv::custom::Tensor;
-use rwkv::data::mmap::dtype::TokenUnit;
-use rwkv::nn::cells::causal::{CausalCellState, MultiCausalCells, MultiCausalCellsConfig};
+use rwkv::custom::nn::loss::CrossEntropyLossConfig;
+use rwkv::custom::tensor::backend::{AutodiffBackend, Backend};
+use rwkv::custom::train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep};
+use rwkv::nn::cells::causal::{MultiCausalCells, MultiCausalCellsConfig};
 use rwkv::nn::functions::init_weights::{orthogonal_init, uniform_init};
+use rwkv::nn::kernels::l2wrap::{l2wrap, L2WrapBackend};
 use rwkv::nn::kernels::wkv7::Wkv7Backend;
+
 use crate::data::batcher::AutoRegressiveBatch;
 
 rwkv::custom_mode!();
@@ -27,7 +29,7 @@ pub struct AutoRegressiveModelConfig {
 }
 
 impl AutoRegressiveModelConfig {
-    pub fn init<B: Backend, T: TokenUnit>(&self, device: &B::Device) -> AutoRegressiveModel<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> AutoRegressiveModel<B> {
         AutoRegressiveModel {
             embed: EmbeddingConfig::new(self.vocabulary_size, self.embedded_dim).init(device),
             layer_norm_for_first_cell: LayerNormConfig::new(self.embedded_dim).init(device),
@@ -82,25 +84,70 @@ impl<B: Backend> AutoRegressiveModel<B> {
     pub fn forward(
         &self,
         item: AutoRegressiveBatch<B>,
-    ) -> (Tensor<B, 3>, Vec<CausalCellState<B>>)
+    ) -> ClassificationOutput<B>
     where
-        B: Wkv7Backend,
+        B: Wkv7Backend + L2WrapBackend,
     {
-        let x = self.embed.forward(item.inputs);
+        let [batch_size, context_length] = item.inputs.dims();
+        let device = &self.embed.devices()[0];
+
+        let inputs = item.inputs.to_device(device);
+        let targets = item.targets.to_device(device);
+
+        let x = self.embed.forward(inputs);
         let x = self.layer_norm_for_first_cell.forward(x);
-        let (x, states) = self.cells.forward(x, None);
+        let (x, _states) = self.cells.forward(x, None);
         let x = self.layer_norm_for_unembed.forward(x);
         let logits = self.unembed.forward(x);
-        (logits, states)
+
+        let logits_classification = logits.reshape([
+            batch_size * context_length, self.embedded_dim
+        ]);
+        let targets_classification = targets.reshape([
+            batch_size * context_length,
+        ]);
+
+        let loss = l2wrap(
+            CrossEntropyLossConfig::new()
+                .init(&logits_classification.device())
+                .forward(logits_classification.clone(), targets_classification.clone()),
+            logits_classification.clone(),
+        );
+
+        // Return the output and loss
+        ClassificationOutput {
+            loss,
+            output: logits_classification,
+            targets: targets_classification,
+        }
     }
 }
 
-//
-// impl<B: AutodiffBackend> TrainStep for MyRwkvLM<B> {
-//     type Input = AutoRegressiveBatch<B>,
-//     type Output = ClassificationOutput<B>,
-//     fn step(&self, item: Self::Input) -> TrainOutput<Self::Output> {
-//         let item = self.forward
-//     }
-// }
 
+/// Define training step
+impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegressiveModel<B> {
+    type Input = AutoRegressiveBatch<B>;
+    type Output = ClassificationOutput<B>;
+
+    fn step(
+        &self,
+        item: AutoRegressiveBatch<B>,
+    ) -> TrainOutput<ClassificationOutput<B>> {
+        // Run forward pass, calculate gradients and return them along with the output
+        let item = self.forward(item);
+        let grads = item.loss.backward();
+
+        TrainOutput::new(self, grads, item)
+    }
+}
+
+/// Define validation step
+impl<B: Backend + Wkv7Backend + L2WrapBackend> InferenceStep for AutoRegressiveModel<B> {
+    type Input = AutoRegressiveBatch<B>;
+    type Output = ClassificationOutput<B>;
+
+    fn step(&self, item: AutoRegressiveBatch<B>) -> ClassificationOutput<B> {
+        // Run forward pass and return the output
+        self.forward(item)
+    }
+}

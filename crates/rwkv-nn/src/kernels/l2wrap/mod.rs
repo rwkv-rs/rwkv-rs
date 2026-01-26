@@ -106,7 +106,7 @@ impl<B: Backend, C: CheckpointStrategy> L2WrapBackend for Autodiff<B, C> {
 }
 
 /// High-level API for L2Wrap application
-pub fn l2wrap_apply<B: L2WrapBackend>(loss: Tensor<B, 1>, logits: Tensor<B, 3>) -> Tensor<B, 1> {
+pub fn l2wrap<B: L2WrapBackend>(loss: Tensor<B, 1>, logits: Tensor<B, 2>) -> Tensor<B, 1> {
     let output = B::apply_l2wrap(
         loss.into_primitive().tensor(),
         logits.into_primitive().tensor(),

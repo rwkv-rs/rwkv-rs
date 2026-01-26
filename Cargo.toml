@@ -64,8 +64,8 @@ unicode-segmentation = "1.12.0"
 unicode-script = "0.5.8"
 unicode-normalization = "0.1.25"
 
-proc-macro2 = "1.0"
-quote = "1.0"
+proc-macro2 = "1.0.105"
+quote = "1.0.44"
 syn = { version = "2.0.114", features = ["full"] }
 
 # === CLI & Monitoring ===

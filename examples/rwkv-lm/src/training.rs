@@ -5,9 +5,9 @@
 // to build a learner, which is used to train the model. The trained model and the configuration are
 // then saved to the specified directory.
 
-use std::sync::Arc;
-use rwkv::config::validated::model::FinalModelConfigBuilder;
-use rwkv::config::validated::train::FinalTrainConfigBuilder;
+use log::info;
+use rwkv::config::validated::model::{FinalModelConfigBuilder, MODEL_CFG};
+use rwkv::config::validated::train::{FinalTrainConfigBuilder, TRAIN_CFG};
 #[cfg(feature = "ddp")]
 use rwkv::custom::collective::{AllReduceStrategy, CollectiveConfig};
 use rwkv::custom::train::{Learner, SupervisedTraining};
@@ -27,8 +27,12 @@ use rwkv::custom::{
         },
     },
 };
+use rwkv::custom::optim::LearningRate;
 use rwkv::custom::tensor::backend::AutodiffBackend;
 use rwkv::train::data::sliding::SlidingDataset;
+use rwkv::train::optim::lr_scheduler::WsdLrSchedulerConfig;
+use rwkv::train::optim::optimizer::GroupedOptimizerConfig;
+use crate::model::AutoRegressiveModelConfig;
 
 rwkv::custom_mode!();
 
@@ -41,40 +45,37 @@ pub fn train<B: AutodiffBackend>(
     mut train_cfg_builder: FinalTrainConfigBuilder,
     artifact_dir: &str,      // Directory to save model and config files
 ) {
-    // Initialize tokenizer
-    let tokenizer = Arc::new(BertCasedTokenizer::default());
+    // let data_loaders = ;
 
-    // Initialize batcher
-    let batcher = TextClassificationBatcher::new(tokenizer.clone(), config.seq_length);
+    model_cfg_builder.build();
+    train_cfg_builder.build();
 
     // Initialize model
-    let model = TextClassificationModelConfig::new(
-        config.transformer.clone(),
-        D::num_classes(),
-        tokenizer.vocab_size(),
-        config.seq_length,
-    )
-        .init::<B>(&devices[0]);
+    let mut model = AutoRegressiveModelConfig::new(
+        MODEL_CFG.get().unwrap().num_cells,
+        MODEL_CFG.get().unwrap().vocabulary_size,
+        MODEL_CFG.get().unwrap().embedded_dim,
+        MODEL_CFG.get().unwrap().num_heads,
+        MODEL_CFG.get().unwrap().head_size_auto,
+    ).init::<B>(&devices[0]);
 
-    // Initialize data loaders for training and testing data
-    let dataloader_train = DataLoaderBuilder::new(batcher.clone())
-        .batch_size(config.batch_size)
-        .num_workers(1)
-        .build(SamplerDataset::new(dataset_train, 50_000));
-    let dataloader_test = DataLoaderBuilder::new(batcher)
-        .batch_size(config.batch_size)
-        .num_workers(1)
-        .build(SamplerDataset::new(dataset_test, 5_000));
+    if TRAIN_CFG.get().unwrap().need_init_weight_auto {
+        model.init_weights(&devices[0]);
+        info!("Initializing model");
+    }
 
     // Initialize optimizer
-    let optim = config.optimizer.init();
+    let optim = GroupedOptimizerConfig::new(
+        0.9, 0.99, 1e-16, TRAIN_CFG.get().unwrap().weight_decay
+    ).init(&model);
 
     // Initialize learning rate scheduler
-    let lr_scheduler = NoamLrSchedulerConfig::new(1e-2)
-        .with_warmup_steps(1000)
-        .with_model_size(config.transformer.d_model)
-        .init()
-        .unwrap();
+    let lr_scheduler = WsdLrSchedulerConfig::new(
+        TRAIN_CFG.get().unwrap().learning_rate_start as LearningRate,
+        TRAIN_CFG.get().unwrap().learning_rate_end as LearningRate,
+        TRAIN_CFG.get().unwrap().warmup_steps,
+        TRAIN_CFG.get().unwrap().num_mini_epochs_auto,
+    ).init();
 
     // Initialize learner
     #[cfg(not(feature = "ddp"))]
