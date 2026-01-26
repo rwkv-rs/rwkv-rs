@@ -6,6 +6,8 @@
 // then saved to the specified directory.
 
 use std::sync::Arc;
+use rwkv::config::validated::model::FinalModelConfigBuilder;
+use rwkv::config::validated::train::FinalTrainConfigBuilder;
 #[cfg(feature = "ddp")]
 use rwkv::custom::collective::{AllReduceStrategy, CollectiveConfig};
 use rwkv::custom::train::{Learner, SupervisedTraining};
@@ -25,30 +27,18 @@ use rwkv::custom::{
         },
     },
 };
-
+use rwkv::custom::tensor::backend::AutodiffBackend;
+use rwkv::train::data::sliding::SlidingDataset;
 
 rwkv::custom_mode!();
 
 
-// Define configuration struct for the experiment
-#[derive(Config, Debug)]
-pub struct ExperimentConfig {
-    pub transformer: TransformerEncoderConfig,
-    pub optimizer: AdamConfig,
-    #[config(default = "SeqLengthOption::Fixed(256)")]
-    pub seq_length: SeqLengthOption,
-    #[config(default = 8)]
-    pub batch_size: usize,
-    #[config(default = 5)]
-    pub num_epochs: usize,
-}
-
 // Define train function
-pub fn train<B: AutodiffBackend, D: AutoRegressive + 'static>(
+pub fn train<B: AutodiffBackend>(
     devices: Vec<B::Device>, // Device on which to perform computation (e.g., CPU or CUDA device)
-    dataset_train: D,        // Training dataset
-    dataset_test: D,         // Testing dataset
-    config: ExperimentConfig, // Experiment configuration
+    dataset: SlidingDataset<u16>,
+    model_cfg_builder: FinalModelConfigBuilder,
+    mut train_cfg_builder: FinalTrainConfigBuilder,
     artifact_dir: &str,      // Directory to save model and config files
 ) {
     // Initialize tokenizer

@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 use rwkv::config::DatasetFormatOptions;
-use rwkv::config::validated::train::{FinalTrainConfigBuilder, MmapTokenDtypeOptions};
+use rwkv::config::validated::train::FinalTrainConfigBuilder;
 use rwkv::custom::data::dataloader::batcher::Batcher;
 use rwkv::custom::data::dataloader::{DataLoader, DataLoaderBuilder};
 use rwkv::custom::prelude::{Backend, Int, TensorData};
@@ -93,9 +93,9 @@ pub fn get_sliding_data_loaders<B: AutodiffBackend, T: TokenUnit>(
         bin.num_tokens() as usize,
         bin.num_units_per_token() as usize,
         match bin.dtype() {
-            TokenUnitDType::U8 => MmapTokenDtypeOptions::U8,
-            TokenUnitDType::U16 => MmapTokenDtypeOptions::U16,
-            TokenUnitDType::F32 => MmapTokenDtypeOptions::F32,
+            TokenUnitDType::U8 => TokenUnitDType::U8,
+            TokenUnitDType::U16 => TokenUnitDType::U16,
+            TokenUnitDType::F32 => TokenUnitDType::F32,
         },
         bin.get_magic_prime(train_cfg_builder.get_context_length().unwrap() as u64) as usize,
     );
