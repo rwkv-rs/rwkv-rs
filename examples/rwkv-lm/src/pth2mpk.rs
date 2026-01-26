@@ -173,7 +173,7 @@ pub fn pth2mpk<B: Backend>(
 
     let device = B::Device::from_id(DeviceId::new(0, 0));
 
-    let mut model = model_config.init::<B, u16>(&device);
+    let mut model = model_config.init::<B>(&device);
 
     // model.init_weights(&device);
     let _result = model.load_from(&mut store).unwrap();
