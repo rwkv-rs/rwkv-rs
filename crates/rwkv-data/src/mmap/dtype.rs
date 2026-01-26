@@ -1,7 +1,9 @@
 use burn::tensor::Element;
 use bytemuck::Pod;
-pub use rwkv_config::TokenUnitDType;
 use serde::Serialize;
+
+pub use rwkv_config::TokenUnitDType;
+
 
 pub trait TokenUnit: IsDiscrete + Clone + Serialize + Pod + Element {
     const DTYPE: TokenUnitDType;

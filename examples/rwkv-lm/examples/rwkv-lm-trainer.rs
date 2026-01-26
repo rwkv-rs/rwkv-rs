@@ -1,16 +1,10 @@
 #![recursion_limit = "256"]
 
 use rwkv::config::DatasetFormatOptions;
-use rwkv::config::validated::train::TokenUnitDType;
-#[allow(unused)]
-use rwkv::custom::backend::Autodiff;
-#[allow(unused)]
-use rwkv::custom::backend::autodiff::checkpoint::strategy::BalancedCheckpointing;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use rwkv::custom::tensor::backend::AutodiffBackend;
-use rwkv::data::mmap::dtype::TokenUnitDType;
 use rwkv::data::mmap::sample::Sampler;
 use rwkv::train::data::sliding::{MmapBinReader, SlidingDataset};
 use rwkv::train::trainer::common::{init_cfg, init_devices, init_log};
@@ -67,7 +61,7 @@ pub fn launch<B: AutodiffBackend>() {
         profile_rank0,
     );
 
-    rwkv_lm::training::train::<B, AgNewsDataset>(
+    rwkv_lm::training::train::<B>(
         devices,
         dataset,
         model_cfg_builder,
@@ -83,99 +77,93 @@ pub fn launch<B: AutodiffBackend>() {
     feature = "ndarray-blas-accelerate",
 ))]
 mod ndarray {
-    use rwkv::custom::backend::ndarray::{NdArray, NdArrayDevice};
-
-    use crate::{ElemType, launch};
+    use rwkv::custom::backend::Autodiff;
+    use rwkv::custom::backend::ndarray::NdArray;
+    use crate::{launch, ElemType};
 
     pub fn run() {
-        println!("Running NDArray training...");
-        launch::<Autodiff<NdArray<ElemType>>>(vec![NdArrayDevice::Cpu]);
+        launch::<Autodiff<NdArray<ElemType>>>();
     }
 }
 
 #[cfg(feature = "tch-gpu")]
 mod tch_gpu {
-    use crate::{ElemType, launch};
-    use rwkv::custom::backend::libtorch::{LibTorch, LibTorchDevice};
+    use rwkv::custom::backend::Autodiff;
+    use rwkv::custom::backend::libtorch::LibTorch;
+    use rwkv::custom::backend::autodiff::checkpoint::strategy::BalancedCheckpointing;
+    use crate::{launch, ElemType};
 
-    pub fn run() {
-        #[cfg(not(target_os = "macos"))]
-        let device = LibTorchDevice::Cuda(0);
-        #[cfg(target_os = "macos")]
-        let device = LibTorchDevice::Mps;
-
-        launch::<Autodiff<LibTorch<ElemType>>>(vec![device]);
-    }
+    pub fn run() { launch::<Autodiff<LibTorch<ElemType>>, BalancedCheckpointing>(); }
 }
 
 #[cfg(feature = "tch-cpu")]
 mod tch_cpu {
-    use rwkv::custom::backend::libtorch::{LibTorch, LibTorchDevice};
-
-    use crate::{ElemType, launch};
+    use rwkv::custom::backend::Autodiff;
+    use rwkv::custom::backend::libtorch::LibTorch;
+    use crate::{launch, ElemType};
 
     pub fn run() {
-        launch::<Autodiff<LibTorch<ElemType>>>(vec![LibTorchDevice::Cpu]);
+        launch::<Autodiff<LibTorch<ElemType>>>();
     }
 }
 
 #[cfg(feature = "wgpu")]
 mod wgpu {
-    use crate::{ElemType, launch};
-    use rwkv::custom::backend::Wgpu;
+    use rwkv::custom::backend::{Autodiff, Wgpu};
+    use crate::{launch, ElemType};
 
     pub fn run() {
-        launch::<Autodiff<Wgpu<ElemType, i32>>>(vec![Default::default()]);
+        launch::<Autodiff<Wgpu<ElemType, i32>>>();
     }
 }
 
 #[cfg(feature = "vulkan")]
 mod vulkan {
-    use crate::{ElemType, launch};
+    use rwkv::custom::backend::{Autodiff, Vulkan};
+    use rwkv::custom::backend::autodiff::checkpoint::strategy::BalancedCheckpointing;
+    use crate::{launch, ElemType};
 
-    pub fn run() {
-        launch::<Autodiff<Vulkan<ElemType, i32>, BalancedCheckpointing>>(vec![Default::default()]);
-    }
+    pub fn run() { launch::<Autodiff<Vulkan<ElemType, i32>, BalancedCheckpointing>>(); }
 }
 
 #[cfg(feature = "metal")]
 mod metal {
-    use crate::{ElemType, launch};
     use rwkv::custom::backend::{Autodiff, Metal};
+    use crate::{launch, ElemType};
 
     pub fn run() {
-        launch::<Autodiff<Metal<ElemType, i32>>>(vec![Default::default()]);
+        launch::<Autodiff<Metal<ElemType, i32>>>();
     }
 }
 
 #[cfg(feature = "remote")]
 mod remote {
-    use crate::{ElemType, launch};
     use rwkv::custom::backend::{Autodiff, RemoteBackend};
+    use crate::{launch, ElemType};
 
     pub fn run() {
-        launch::<Autodiff<RemoteBackend>>(vec![Default::default()]);
+        launch::<Autodiff<RemoteBackend>>();
     }
 }
 
 #[cfg(feature = "cuda")]
 mod cuda {
-    use crate::{ElemType, launch_multi};
-    use rwkv::custom::backend::Cuda;
+    use rwkv::custom::backend::{Autodiff, Cuda};
+    use rwkv::custom::backend::autodiff::checkpoint::strategy::BalancedCheckpointing;
+    use crate::{launch, ElemType};
 
     pub fn run() {
-        launch_multi::<Autodiff<Cuda<ElemType, i32>, BalancedCheckpointing>>();
+        launch::<Autodiff<Cuda<ElemType, i32>, BalancedCheckpointing>>();
     }
 }
 
 #[cfg(feature = "rocm")]
 mod rocm {
-    use crate::{ElemType, launch};
-    use rwkv::custom::backend::Rocm;
+    use rwkv::custom::backend::{Autodiff, Rocm};
+    use rwkv::custom::backend::autodiff::checkpoint::strategy::BalancedCheckpointing;
+    use crate::{launch, ElemType};
 
-    pub fn run() {
-        launch::<Autodiff<Rocm<ElemType, i32>, BalancedCheckpointing>>(vec![Default::default()]);
-    }
+    pub fn run() {launch::<Autodiff<Rocm<ElemType, i32>, BalancedCheckpointing>>(); }
 }
 
 fn main() {
