@@ -1,7 +1,7 @@
 pub mod raw;
 pub mod validated;
 
-use std::{fs, path::Path};
+use std::{fs, mem::size_of, path::Path};
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -64,4 +64,36 @@ pub enum DatasetFormatOptions {
     #[default]
     Rwkv,
     RwkvLegacy,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq, Hash)]
+#[repr(u8)]
+pub enum TokenUnitDType {
+    U8 = 0,
+    #[default]
+    U16 = 1,
+    F32 = 2,
+}
+
+impl TokenUnitDType {
+    pub fn is_discrete(&self) -> bool {
+        matches!(self, TokenUnitDType::U8 | TokenUnitDType::U16)
+    }
+
+    pub fn get_dtype(code: u8) -> Self {
+        match code {
+            0 => TokenUnitDType::U8,
+            1 => TokenUnitDType::U16,
+            2 => TokenUnitDType::F32,
+            _ => panic!("Unsupported DTYPE code: {}", code),
+        }
+    }
+
+    pub fn get_token_unit_size(&self) -> usize {
+        match self {
+            TokenUnitDType::U8 => size_of::<u8>(),
+            TokenUnitDType::U16 => size_of::<u16>(),
+            TokenUnitDType::F32 => size_of::<f32>(),
+        }
+    }
 }

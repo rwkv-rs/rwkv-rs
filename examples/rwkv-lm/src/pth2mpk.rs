@@ -1,8 +1,8 @@
 use rwkv::custom::cubecl::device::DeviceId;
 use rwkv::custom::module::Module;
-use rwkv::custom::prelude::Backend;
+use rwkv::custom::prelude::{Backend, DeviceOps};
 use rwkv::custom::record::{FullPrecisionSettings, NamedMpkFileRecorder};
-use rwkv::custom::store::PytorchStore;
+use rwkv::custom::store::{ModuleSnapshot, PytorchStore};
 use crate::model::AutoRegressiveModelConfig;
 
 

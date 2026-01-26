@@ -2,15 +2,15 @@ use std::path::{Path, PathBuf};
 
 use burn::backend::Autodiff;
 use burn::backend::autodiff::checkpoint::strategy::CheckpointStrategy;
-#[cfg(feature = "backend_cuda")]
+#[cfg(feature = "cuda")]
 use burn::backend::cuda::Cuda;
-#[cfg(feature = "backend_ndarray")]
+#[cfg(feature = "ndarray")]
 use burn::backend::ndarray::{FloatNdArrayElement, IntNdArrayElement, NdArray, QuantElement};
-#[cfg(any(feature = "backend_wgpu", feature = "backend_metal"))]
+#[cfg(any(feature = "wgpu", feature = "metal"))]
 use burn::backend::wgpu::Wgpu;
-#[cfg(any(feature = "backend_cuda", feature = "backend_wgpu", feature = "backend_metal"))]
+#[cfg(any(feature = "cuda", feature = "wgpu", feature = "metal"))]
 use burn::cubecl::{FloatElement, IntElement};
-#[cfg(any(feature = "backend_wgpu", feature = "backend_metal"))]
+#[cfg(any(feature = "wgpu", feature = "metal"))]
 use burn::cubecl::BoolElement;
 use burn::prelude::Backend;
 use burn_train::{
@@ -102,7 +102,7 @@ where
     }
 }
 
-#[cfg(feature = "backend_ndarray")]
+#[cfg(feature = "ndarray")]
 impl<E, I, Q> BackendDeviceInit for NdArray<E, I, Q>
 where
     E: FloatNdArrayElement,
@@ -121,7 +121,7 @@ where
     }
 }
 
-#[cfg(feature = "backend_cuda")]
+#[cfg(feature = "cuda")]
 impl<F, I> BackendDeviceInit for Cuda<F, I>
 where
     F: FloatElement,
@@ -139,7 +139,7 @@ where
     }
 }
 
-#[cfg(any(feature = "backend_wgpu", feature = "backend_metal"))]
+#[cfg(any(feature = "wgpu", feature = "metal"))]
 impl<F, I, B> BackendDeviceInit for Wgpu<F, I, B>
 where
     F: FloatElement,
@@ -158,12 +158,12 @@ where
         };
 
         for device in &devices {
-            #[cfg(feature = "backend_metal")]
+            #[cfg(feature = "metal")]
             burn::backend::wgpu::init_setup::<burn::backend::wgpu::graphics::Metal>(
                 device,
                 Default::default(),
             );
-            #[cfg(all(not(feature = "backend_metal"), feature = "backend_wgpu"))]
+            #[cfg(all(not(feature = "metal"), feature = "wgpu"))]
             burn::backend::wgpu::init_setup::<burn::backend::wgpu::graphics::AutoGraphicsApi>(
                 device,
                 Default::default(),

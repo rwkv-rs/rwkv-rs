@@ -44,6 +44,7 @@ burn = { workspace = true, default-features = false, features = ["std"] }
 
 # === Local Dependencies ===
 rwkv-derive = { path = "../rwkv-derive" }
+rwkv-config = { path = "../rwkv-config" }
 
 [dev-dependencies]
 tempfile = "3.0"
