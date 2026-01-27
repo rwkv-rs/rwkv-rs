@@ -6,14 +6,16 @@
 // then saved to the specified directory.
 
 use log::info;
-use rwkv::config::validated::model::{FinalModelConfigBuilder, MODEL_CFG};
+use std::path::PathBuf;
+use std::sync::Arc;
+use rwkv::config::{DatasetFormatOptions, validated::model::{FinalModelConfigBuilder, MODEL_CFG}};
 use rwkv::config::validated::train::{FinalTrainConfigBuilder, TRAIN_CFG};
 #[cfg(feature = "ddp")]
 use rwkv::custom::collective::{AllReduceStrategy, CollectiveConfig};
+use rwkv::custom::data::dataloader::DataLoaderBuilder;
 use rwkv::custom::train::{Learner, SupervisedTraining};
 #[cfg(not(feature = "ddp"))]
 use rwkv::custom::{
-    data::{dataloader::DataLoaderBuilder, dataset::transform::SamplerDataset},
     lr_scheduler::noam::NoamLrSchedulerConfig,
     nn::{attention::SeqLengthOption, transformer::TransformerEncoderConfig},
     optim::AdamConfig,
@@ -29,9 +31,11 @@ use rwkv::custom::{
 };
 use rwkv::custom::optim::LearningRate;
 use rwkv::custom::tensor::backend::AutodiffBackend;
-use rwkv::train::data::sliding::SlidingDataset;
+use rwkv::data::mmap::sample::Sampler;
+use rwkv::train::data::sliding::{MmapBinReader, SlidingDataset};
 use rwkv::train::optim::lr_scheduler::WsdLrSchedulerConfig;
 use rwkv::train::optim::optimizer::GroupedOptimizerConfig;
+use crate::data::batcher::AutoRegressiveBatcher;
 use crate::model::AutoRegressiveModelConfig;
 
 rwkv::custom_mode!();
@@ -40,12 +44,60 @@ rwkv::custom_mode!();
 // Define train function
 pub fn train<B: AutodiffBackend>(
     devices: Vec<B::Device>, // Device on which to perform computation (e.g., CPU or CUDA device)
-    dataset: SlidingDataset<u16>,
     model_cfg_builder: FinalModelConfigBuilder,
     mut train_cfg_builder: FinalTrainConfigBuilder,
     artifact_dir: &str,      // Directory to save model and config files
 ) {
-    // let data_loaders = ;
+    let bin_path = PathBuf::from(train_cfg_builder.get_dataset_base_path().unwrap())
+        .join(train_cfg_builder.get_filename_without_extensions().unwrap())
+        .with_extension("bin");
+
+    let dataset_format = train_cfg_builder
+        .get_dataset_format()
+        .unwrap_or(DatasetFormatOptions::Rwkv);
+    let bin = Arc::new(MmapBinReader::<u16>::open(&bin_path, dataset_format));
+    train_cfg_builder.fill_after_read_bin(
+        bin.num_tokens() as usize,
+        bin.num_units_per_token() as usize,
+        bin.dtype(),
+        bin.get_magic_prime(train_cfg_builder.get_context_length().unwrap() as u64) as usize,
+    );
+
+    let num_devices = devices.len();
+    let mut samplers = Vec::with_capacity(num_devices);
+    for device_index in 0..num_devices {
+        let sampler = Sampler::new(
+            train_cfg_builder.get_num_devices_per_node().unwrap() as u64,
+            device_index as u64,
+            (train_cfg_builder
+                .get_num_steps_per_mini_epoch_auto()
+                .unwrap()
+                * train_cfg_builder.get_batch_size_auto().unwrap()) as u64,
+            train_cfg_builder.get_magic_prime_auto().unwrap() as u64,
+        );
+        samplers.push(sampler);
+    }
+
+    let dataset = SlidingDataset::new(
+        train_cfg_builder.get_context_length().unwrap() as u64,
+        bin.clone(),
+        samplers,
+        true,
+    );
+
+    let batcher = AutoRegressiveBatcher::<B, u16>::new(
+        train_cfg_builder.get_mmap_num_units_per_token().unwrap(),
+        train_cfg_builder.get_batch_size_per_device().unwrap(),
+        train_cfg_builder.get_context_length().unwrap(),
+        true,
+    );
+
+    let dataloader_train = DataLoaderBuilder::new(batcher)
+        .batch_size(train_cfg_builder.get_batch_size_per_device().unwrap())
+        .num_workers(1)
+        .build(dataset);
+
+    let dataloader_test = dataloader_train.clone();
 
     model_cfg_builder.build();
     train_cfg_builder.build();
