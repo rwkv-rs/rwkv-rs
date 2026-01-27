@@ -70,7 +70,7 @@ impl FinalTrainConfigBuilder {
         let batch_size_auto = self.num_nodes.unwrap()
             * self.num_devices_per_node.unwrap()
             * self.batch_size_per_device.unwrap();
-        let num_steps_per_mini_epoch_auto = 40320 / batch_size_auto;
+        let num_steps_per_mini_epoch_auto = 40320 / self.batch_size_per_device.unwrap();
 
         self.set_batch_size_auto(Some(batch_size_auto))
             .set_num_steps_per_mini_epoch_auto(Some(num_steps_per_mini_epoch_auto));

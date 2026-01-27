@@ -117,7 +117,7 @@ pub fn get_sliding_data_loaders<B: AutodiffBackend, T: TokenUnit>(
         let dataset = SlidingDataset::new(
             train_cfg_builder.get_context_length().unwrap() as u64,
             bin.clone(),
-            sampler,
+            vec![sampler],
             profile_rank0,
         );
 

@@ -69,7 +69,7 @@ pub struct SlidingDataset<T: TokenUnit> {
     pub context_length: u64,
 
     pub bin: Arc<MmapBinReader<T>>,
-    pub sampler: Sampler,
+    pub samplers: Vec<Sampler>,
     pub mini_epoch_index: Arc<AtomicUsize>,
 
     profile_rank0: bool,
@@ -80,14 +80,14 @@ impl<T: TokenUnit> SlidingDataset<T> {
         context_length: u64,
 
         bin: Arc<MmapBinReader<T>>,
-        sampler: Sampler,
+        samplers: Vec<Sampler>,
         profile_rank0: bool,
     ) -> Self {
         let mini_epoch_index = Arc::new(AtomicUsize::new(0));
 
         Self {
             bin,
-            sampler,
+            samplers,
             mini_epoch_index,
             context_length,
             profile_rank0,
@@ -97,11 +97,28 @@ impl<T: TokenUnit> SlidingDataset<T> {
 
 impl<T: TokenUnit> Dataset<Vec<T>> for SlidingDataset<T> {
     fn get(&self, index: usize) -> Option<Vec<T>> {
+        if self.samplers.is_empty() {
+            return None;
+        }
+
+        let per_device_len = TRAIN_CFG.get().unwrap().num_steps_per_mini_epoch_auto
+            * TRAIN_CFG.get().unwrap().batch_size_per_device;
+        let num_devices = self.samplers.len();
+        let total_len = per_device_len * num_devices;
+
+        if index >= total_len {
+            return None;
+        }
+
+        let device_index = index / per_device_len;
+        let local_index = index % per_device_len;
         let mini_epoch_index = EPOCH_INDEX.load(Ordering::Relaxed);
 
-        let base_offset = self.sampler.get_base_offset(index as u64, mini_epoch_index);
+        let sampler = &self.samplers[device_index];
+        let base_offset = sampler.get_base_offset(local_index as u64, mini_epoch_index);
 
-        let token_units = rwkv_bench::hp_block_if!(self.profile_rank0, "data.bin_get", || {
+        let profile_rank0 = self.profile_rank0 && device_index == 0;
+        let token_units = rwkv_bench::hp_block_if!(profile_rank0, "data.bin_get", || {
             self.bin
                 .get(base_offset * self.context_length, self.context_length + 1)
                 .into_owned()
@@ -111,7 +128,12 @@ impl<T: TokenUnit> Dataset<Vec<T>> for SlidingDataset<T> {
     }
 
     fn len(&self) -> usize {
-        TRAIN_CFG.get().unwrap().num_steps_per_mini_epoch_auto
-            * TRAIN_CFG.get().unwrap().batch_size_per_device
+        if self.samplers.is_empty() {
+            return 0;
+        }
+
+        let per_device_len = TRAIN_CFG.get().unwrap().num_steps_per_mini_epoch_auto
+            * TRAIN_CFG.get().unwrap().batch_size_per_device;
+        per_device_len * self.samplers.len()
     }
 }
