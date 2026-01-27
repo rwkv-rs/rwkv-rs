@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use burn::{data::dataset::Dataset, prelude::*};
+use burn::data::dataset::Dataset;
 use rwkv_config::{DatasetFormatOptions, validated::train::TRAIN_CFG};
 use rwkv_data::mmap::{
     bin, bin_old,
@@ -97,43 +97,34 @@ impl<T: TokenUnit> SlidingDataset<T> {
 
 impl<T: TokenUnit> Dataset<Vec<T>> for SlidingDataset<T> {
     fn get(&self, index: usize) -> Option<Vec<T>> {
-        if self.samplers.is_empty() {
-            return None;
-        }
+        assert!(!self.samplers.is_empty());
 
-        let per_device_len = TRAIN_CFG.get().unwrap().num_steps_per_mini_epoch_auto
-            * TRAIN_CFG.get().unwrap().batch_size_per_device;
-        let num_devices = self.samplers.len();
-        let total_len = per_device_len * num_devices;
+        let num_samples_per_mini_epoch_per_device =
+            TRAIN_CFG.get().unwrap().num_steps_per_mini_epoch_auto
+                * TRAIN_CFG.get().unwrap().batch_size_per_device;
 
-        if index >= total_len {
-            return None;
-        }
+        assert!(index < num_samples_per_mini_epoch_per_device * self.samplers.len());
 
-        let device_index = index / per_device_len;
-        let local_index = index % per_device_len;
+        let device_index = index / num_samples_per_mini_epoch_per_device;
+        let local_index = index % num_samples_per_mini_epoch_per_device;
         let mini_epoch_index = EPOCH_INDEX.load(Ordering::Relaxed);
 
         let sampler = &self.samplers[device_index];
         let base_offset = sampler.get_base_offset(local_index as u64, mini_epoch_index);
 
-        let profile_rank0 = self.profile_rank0 && device_index == 0;
-        let token_units = rwkv_bench::hp_block_if!(profile_rank0, "data.bin_get", || {
-            self.bin
-                .get(base_offset * self.context_length, self.context_length + 1)
-                .into_owned()
-        });
+        let token_units = self
+            .bin
+            .get(base_offset * self.context_length, self.context_length + 1)
+            .into_owned();
 
         Some(token_units)
     }
 
     fn len(&self) -> usize {
-        if self.samplers.is_empty() {
-            return 0;
-        }
+        assert!(!self.samplers.is_empty());
 
-        let per_device_len = TRAIN_CFG.get().unwrap().num_steps_per_mini_epoch_auto
-            * TRAIN_CFG.get().unwrap().batch_size_per_device;
-        per_device_len * self.samplers.len()
+        TRAIN_CFG.get().unwrap().num_steps_per_mini_epoch_auto
+            * TRAIN_CFG.get().unwrap().batch_size_per_device
+            * self.samplers.len()
     }
 }
