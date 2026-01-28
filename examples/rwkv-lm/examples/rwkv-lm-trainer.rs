@@ -1,7 +1,9 @@
 #![recursion_limit = "256"]
 
 use rwkv::custom::tensor::backend::AutodiffBackend;
-use rwkv::train::trainer::common::{init_cfg, init_devices, init_log};
+use rwkv::nn::kernels::l2wrap::L2WrapBackend;
+use rwkv::nn::kernels::wkv7::Wkv7Backend;
+use rwkv::train::trainer::common::{BackendDeviceInit, init_cfg, init_devices, init_log};
 
 #[cfg(not(any(feature = "f16", feature = "flex32")))]
 #[allow(unused)]
@@ -11,7 +13,10 @@ type ElemType = rwkv::custom::tensor::f16;
 #[cfg(feature = "flex32")]
 type ElemType = rwkv::custom::tensor::flex32;
 
-pub fn launch<B: AutodiffBackend>() {
+pub fn launch<B: AutodiffBackend + BackendDeviceInit + Wkv7Backend + L2WrapBackend>()
+where
+    <B as AutodiffBackend>::InnerBackend: Wkv7Backend + L2WrapBackend,
+{
     let (model_cfg_builder, mut train_cfg_builder) = init_cfg(
         "examples/rwkv-lm/config/model.toml",
         "examples/rwkv-lm/config/train.toml",
@@ -25,7 +30,7 @@ pub fn launch<B: AutodiffBackend>() {
         devices,
         model_cfg_builder,
         train_cfg_builder,
-        "/tmp/text-classification-ag-news",
+        &exp_log_path,
     );
 }
 

@@ -6,35 +6,35 @@
 // then saved to the specified directory.
 
 use log::info;
-use std::path::PathBuf;
+#[cfg(not(feature = "tui"))]
+use log::warn;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use rwkv::config::{DatasetFormatOptions, validated::model::{FinalModelConfigBuilder, MODEL_CFG}};
 use rwkv::config::validated::train::{FinalTrainConfigBuilder, TRAIN_CFG};
 #[cfg(feature = "ddp")]
 use rwkv::custom::collective::{AllReduceStrategy, CollectiveConfig};
 use rwkv::custom::data::dataloader::DataLoaderBuilder;
-use rwkv::custom::train::{Learner, SupervisedTraining};
-#[cfg(not(feature = "ddp"))]
-use rwkv::custom::{
-    lr_scheduler::noam::NoamLrSchedulerConfig,
-    nn::{attention::SeqLengthOption, transformer::TransformerEncoderConfig},
-    optim::AdamConfig,
-    prelude::*,
-    record::{CompactRecorder, Recorder},
-    tensor::backend::AutodiffBackend,
-    train::{
-        MultiDeviceOptim,
-        metric::{
-            AccuracyMetric, CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric,
-        },
-    },
-};
-use rwkv::custom::optim::LearningRate;
+use rwkv::custom::record::{CompactRecorder, Recorder};
 use rwkv::custom::tensor::backend::AutodiffBackend;
+use rwkv::custom::prelude::Module;
+use rwkv::custom::train::{
+    Interrupter, Learner, SupervisedTraining,
+    logger::FileMetricLogger,
+    metric::{AccuracyMetric, CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric},
+};
+#[cfg(not(feature = "ddp"))]
+use rwkv::custom::train::MultiDeviceOptim;
+use rwkv::custom::optim::LearningRate;
 use rwkv::data::mmap::sample::Sampler;
+use rwkv::nn::kernels::l2wrap::L2WrapBackend;
+use rwkv::nn::kernels::wkv7::Wkv7Backend;
 use rwkv::train::data::sliding::{MmapBinReader, SlidingDataset};
 use rwkv::train::optim::lr_scheduler::WsdLrSchedulerConfig;
 use rwkv::train::optim::optimizer::GroupedOptimizerConfig;
+use rwkv::train::renderer::BarMetricsRenderer;
+use rwkv::train::trainer::common::init_wandb_metric_logger;
 use crate::data::batcher::AutoRegressiveBatcher;
 use crate::model::AutoRegressiveModelConfig;
 
@@ -46,8 +46,11 @@ pub fn train<B: AutodiffBackend>(
     devices: Vec<B::Device>, // Device on which to perform computation (e.g., CPU or CUDA device)
     model_cfg_builder: FinalModelConfigBuilder,
     mut train_cfg_builder: FinalTrainConfigBuilder,
-    artifact_dir: &str,      // Directory to save model and config files
-) {
+    exp_log_path: &Path, // Experiment log directory (also used for artifacts)
+) where
+    B: Wkv7Backend + L2WrapBackend,
+    B::InnerBackend: Wkv7Backend + L2WrapBackend,
+{
     let bin_path = PathBuf::from(train_cfg_builder.get_dataset_base_path().unwrap())
         .join(train_cfg_builder.get_filename_without_extensions().unwrap())
         .with_extension("bin");
@@ -78,12 +81,12 @@ pub fn train<B: AutodiffBackend>(
         samplers.push(sampler);
     }
 
-    let dataset = SlidingDataset::new(
+    let dataset = Arc::new(SlidingDataset::new(
         train_cfg_builder.get_context_length().unwrap() as u64,
         bin.clone(),
         samplers,
         true,
-    );
+    ));
 
     let batcher = AutoRegressiveBatcher::<B, u16>::new(
         train_cfg_builder.get_mmap_num_units_per_token().unwrap(),
@@ -95,9 +98,19 @@ pub fn train<B: AutodiffBackend>(
     let dataloader_train = DataLoaderBuilder::new(batcher)
         .batch_size(train_cfg_builder.get_batch_size_per_device().unwrap())
         .num_workers(1)
-        .build(dataset);
+        .build(dataset.clone());
 
-    let dataloader_test = dataloader_train.clone();
+    let batcher_valid = AutoRegressiveBatcher::<B::InnerBackend, u16>::new(
+        train_cfg_builder.get_mmap_num_units_per_token().unwrap(),
+        train_cfg_builder.get_batch_size_per_device().unwrap(),
+        train_cfg_builder.get_context_length().unwrap(),
+        true,
+    );
+    let dataloader_valid = DataLoaderBuilder::new(batcher_valid)
+        .batch_size(train_cfg_builder.get_batch_size_per_device().unwrap())
+        .num_workers(1)
+        .set_device(devices[0].clone())
+        .build(dataset.clone());
 
     model_cfg_builder.build();
     train_cfg_builder.build();
@@ -130,8 +143,9 @@ pub fn train<B: AutodiffBackend>(
     ).init();
 
     // Initialize learner
-    #[cfg(not(feature = "ddp"))]
-    let training = SupervisedTraining::new(artifact_dir, dataloader_train, dataloader_test)
+    let interrupter = Interrupter::new();
+
+    let mut training = SupervisedTraining::new(exp_log_path, dataloader_train, dataloader_valid)
         .metric_train(CudaMetric::new())
         .metric_valid(CudaMetric::new())
         .metric_train(IterationSpeedMetric::new())
@@ -141,40 +155,68 @@ pub fn train<B: AutodiffBackend>(
         .metric_valid_numeric(AccuracyMetric::new())
         .metric_train_numeric(LearningRateMetric::new())
         .with_file_checkpointer(CompactRecorder::new())
-        .num_epochs(config.num_epochs)
+        .num_epochs(TRAIN_CFG.get().unwrap().num_mini_epochs_auto)
         .summary()
-        .with_training_strategy(rwkv::custom::train::TrainingStrategy::MultiDevice(
-            devices,
-            MultiDeviceOptim::OptimSharded,
-        ));
+        .with_interrupter(interrupter.clone())
+        .with_application_logger(None);
+
+    training = training.with_metric_logger(FileMetricLogger::new(exp_log_path));
+
+    if let Some(wandb_logger) = init_wandb_metric_logger() {
+        training = training.with_metric_logger(wandb_logger);
+    }
+
+    let training = if TRAIN_CFG.get().unwrap().use_tui {
+        #[cfg(feature = "tui")]
+        {
+            training.renderer(rwkv::custom::train::renderer::tui::TuiMetricsRenderer::new(
+                interrupter.clone(),
+                None,
+            ))
+        }
+        #[cfg(not(feature = "tui"))]
+        {
+            warn!("use_tui=true but feature \"tui\" is disabled, falling back to bar renderer");
+            training.renderer(BarMetricsRenderer::new(
+                TRAIN_CFG.get().unwrap().num_mini_epochs_auto,
+            ))
+        }
+    } else {
+        training.renderer(BarMetricsRenderer::new(
+            TRAIN_CFG.get().unwrap().num_mini_epochs_auto,
+        ))
+    };
+
+    #[cfg(not(feature = "ddp"))]
+    let training = training.with_training_strategy(rwkv::custom::train::TrainingStrategy::MultiDevice(
+        devices,
+        MultiDeviceOptim::OptimSharded,
+    ));
 
     #[cfg(feature = "ddp")]
     let collective_config =
         CollectiveConfig::default().with_local_all_reduce_strategy(AllReduceStrategy::Tree(2));
     #[cfg(feature = "ddp")]
-    let training = SupervisedTraining::new(artifact_dir, dataloader_train, dataloader_test)
-        .metric_train(CudaMetric::new())
-        .metric_valid(CudaMetric::new())
-        .metric_train(IterationSpeedMetric::new())
-        .metric_train_numeric(LossMetric::new())
-        .metric_valid_numeric(LossMetric::new())
-        .metric_train_numeric(AccuracyMetric::new())
-        .metric_valid_numeric(AccuracyMetric::new())
-        .metric_train_numeric(LearningRateMetric::new())
-        .with_file_checkpointer(CompactRecorder::new())
-        .with_training_strategy(rwkv::custom::train::ddp(devices, collective_config))
-        .num_epochs(config.num_epochs)
-        .summary();
+    let training = training
+        .with_training_strategy(rwkv::custom::train::ddp(devices, collective_config));
 
     // Train the model
     let result = training.launch(Learner::new(model, optim, lr_scheduler));
 
     // Save the configuration and the trained model
-    config.save(format!("{artifact_dir}/config.json")).unwrap();
+    let config_json = sonic_rs::json!({
+        "model": MODEL_CFG.get().unwrap().as_ref(),
+        "train": TRAIN_CFG.get().unwrap().as_ref(),
+    });
+    fs::write(
+        exp_log_path.join("config.json"),
+        sonic_rs::to_string_pretty(&config_json).unwrap(),
+    )
+    .unwrap();
     CompactRecorder::new()
         .record(
             result.model.into_record(),
-            format!("{artifact_dir}/model").into(),
+            exp_log_path.join("model"),
         )
         .unwrap();
 }

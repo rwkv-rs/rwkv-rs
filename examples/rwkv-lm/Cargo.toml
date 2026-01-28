@@ -15,10 +15,18 @@ default = [
     "training",
     "cuda",
     "ddp",
-    "pth2mpk"
+    "pth2mpk",
+    "std"
 ]
 f16 = []
 flex32 = []
+fusion = ["rwkv/fusion"]
+cubecl = ["rwkv/cubecl"]
+autotune = ["rwkv/autotune"]
+metrics = ["rwkv/metrics"]
+nn = ["rwkv/nn"]
+std = ["rwkv/std"]
+tui = ["rwkv/tui"]
 ndarray = ["rwkv/ndarray"]
 ndarray-blas-accelerate = ["rwkv/ndarray", "rwkv/accelerate"]
 ndarray-blas-netlib = ["rwkv/ndarray", "rwkv/blas-netlib"]
@@ -32,22 +40,13 @@ cuda = ["rwkv/cuda"]
 rocm = ["rwkv/rocm"]
 metal = ["rwkv/metal"]
 ddp = ["rwkv/collective"]
-training = []
-pth2mpk = ["rwkv/store", "rwkv/cubecl"]
+training = ["rwkv/train", "rwkv/cubecl", "metrics", "std"]
+pth2mpk = ["rwkv/store", "rwkv/cubecl", "nn", "std"]
 
 [dependencies]
 log = "0.4.29"
-rwkv = { path = "../../crates/rwkv", features = [
-    "data",
-    "nn",
-    "train",
-    "tui",
-    "metrics",
-    "ndarray",
-    "autotune",
-    "fusion",
-    "std",
-], default-features = false}
+sonic-rs = { version = "0.5.6" }
+rwkv = { path = "../../crates/rwkv", default-features = false }
 
 # Utils
 derive-new = { workspace = true }

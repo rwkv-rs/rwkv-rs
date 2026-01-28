@@ -11,8 +11,6 @@ std = ["burn/std", "rwkv-train?/std"]
 train = [
     "dep:rwkv-train",
     "rwkv-train/train",
-    "rwkv-train/tui",
-    "rwkv-train/collective",
     "burn/train",
     "autodiff",
     "dataset",
@@ -28,8 +26,8 @@ nn = ["dep:rwkv-nn"]
 store = ["burn/store", "dep:burn-store", "burn-store/std", "burn-store/pytorch"]
 
 autodiff = ["burn/autodiff"]
-fusion = ["burn/fusion", "rwkv-nn?/fusion"]
-cubecl = ["burn/cubecl"]
+fusion = ["burn/fusion", "rwkv-nn?/fusion", "rwkv-train?/fusion"]
+cubecl = ["burn/cubecl", "rwkv-train?/cubecl"]
 autotune = ["burn/autotune"]
 autotune-checks = ["burn/autotune-checks"]
 
