@@ -92,7 +92,6 @@ pub struct WandbLogger {
     runtime: Runtime,
     metric_definitions: HashMap<MetricId, MetricDefinition>,
     global_step: u64,
-    last_epoch: Option<usize>,
 }
 
 impl WandbLogger {
@@ -102,7 +101,6 @@ impl WandbLogger {
             runtime: Runtime::new().expect("tokio runtime should be created"),
             metric_definitions: HashMap::new(),
             global_step: 0,
-            last_epoch: None,
         }
     }
 }
@@ -119,22 +117,21 @@ impl Logger<LogData> for WandbLogger {
 
 impl MetricLogger for WandbLogger {
     fn log(&mut self, update: MetricsUpdate, epoch: usize, split: Split, tag: Option<Arc<String>>) {
-        if split != Split::Train {
-            return;
-        }
-
-        if self.last_epoch != Some(epoch) {
-            self.last_epoch = Some(epoch);
-            self.global_step = 0;
-        }
-
         self.global_step += 1;
 
         let mut log = LogData::new();
         log.insert("_step", self.global_step);
         log.insert("epoch", epoch as u64);
 
-        if let Some(tag) = tag {
+        let metric_prefix = match tag.as_deref() {
+            Some(tag) => {
+                let tag = tag.trim().replace(' ', "-").to_lowercase();
+                format!("{split}/{tag}/")
+            }
+            None => format!("{split}/"),
+        };
+
+        if let Some(tag) = tag.as_deref() {
             log.insert("tag", tag.to_string());
         }
 
@@ -144,6 +141,7 @@ impl MetricLogger for WandbLogger {
                 .get(&entry.entry.metric_id)
                 .map(|definition| definition.name.as_str())
                 .unwrap_or("metric");
+            let name = format!("{metric_prefix}{name}");
 
             match entry.numeric_entry {
                 NumericEntry::Value(value) => {
