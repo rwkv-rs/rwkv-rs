@@ -34,43 +34,6 @@ where
     );
 }
 
-#[cfg(any(
-    feature = "ndarray",
-    feature = "ndarray-blas-netlib",
-    feature = "ndarray-blas-openblas",
-    feature = "ndarray-blas-accelerate",
-))]
-mod ndarray {
-    use rwkv::custom::backend::Autodiff;
-    use rwkv::custom::backend::ndarray::NdArray;
-    use crate::{launch, ElemType};
-
-    pub fn run() {
-        launch::<Autodiff<NdArray<ElemType>>>();
-    }
-}
-
-#[cfg(feature = "tch-gpu")]
-mod tch_gpu {
-    use rwkv::custom::backend::Autodiff;
-    use rwkv::custom::backend::libtorch::LibTorch;
-    use rwkv::custom::backend::autodiff::checkpoint::strategy::BalancedCheckpointing;
-    use crate::{launch, ElemType};
-
-    pub fn run() { launch::<Autodiff<LibTorch<ElemType>>, BalancedCheckpointing>(); }
-}
-
-#[cfg(feature = "tch-cpu")]
-mod tch_cpu {
-    use rwkv::custom::backend::Autodiff;
-    use rwkv::custom::backend::libtorch::LibTorch;
-    use crate::{launch, ElemType};
-
-    pub fn run() {
-        launch::<Autodiff<LibTorch<ElemType>>>();
-    }
-}
-
 #[cfg(feature = "wgpu")]
 mod wgpu {
     use rwkv::custom::backend::{Autodiff, Wgpu};
@@ -100,16 +63,6 @@ mod metal {
     }
 }
 
-#[cfg(feature = "remote")]
-mod remote {
-    use rwkv::custom::backend::{Autodiff, RemoteBackend};
-    use crate::{launch, ElemType};
-
-    pub fn run() {
-        launch::<Autodiff<RemoteBackend>>();
-    }
-}
-
 #[cfg(feature = "cuda")]
 mod cuda {
     use rwkv::custom::backend::{Autodiff, Cuda};
@@ -131,25 +84,12 @@ mod rocm {
 }
 
 fn main() {
-    #[cfg(any(
-        feature = "ndarray",
-        feature = "ndarray-blas-netlib",
-        feature = "ndarray-blas-openblas",
-        feature = "ndarray-blas-accelerate",
-    ))]
-    ndarray::run();
-    #[cfg(feature = "tch-gpu")]
-    tch_gpu::run();
-    #[cfg(feature = "tch-cpu")]
-    tch_cpu::run();
     #[cfg(feature = "wgpu")]
     wgpu::run();
     #[cfg(feature = "cuda")]
     cuda::run();
     #[cfg(feature = "rocm")]
     rocm::run();
-    #[cfg(feature = "remote")]
-    remote::run();
     #[cfg(feature = "vulkan")]
     vulkan::run();
     #[cfg(feature = "metal")]

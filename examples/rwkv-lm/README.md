@@ -23,40 +23,6 @@ cd rwkv-rs
 cargo run --example rwkv-lm --release --features cuda   # Train on the minipile dataset
 ```
 
-## Torch GPU backend
-
-```bash
-git clone https://github.com/rwkv-rs/rwkv-rs.git
-cd rwkv-rs
-
-# Use the --release flag to really speed up training.
-# Use the f16 feature if your CUDA device supports FP16 (half precision) operations. May not work well on every device.
-export TORCH_CUDA_VERSION=cu128  # Set the cuda version (CUDA users)
-cargo run --example rwkv-lm --release --features tch-gpu   # Train on the minipile dataset
-```
-
-## Torch CPU backend
-
-```bash
-git clone https://github.com/rwkv-rs/rwkv-rs.git
-cd rwkv-rs
-
-# Use the --release flag to really speed up training.
-cargo run --example rwkv-lm --release --features tch-cpu   # Train on the minipile dataset
-
-```
-
-## ndarray backend
-
-```bash
-git clone https://github.com/rwkv-rs/rwkv-rs.git
-cd rwkv-rs
-
-# Use the --release flag to really speed up training.
-# Replace ndarray by ndarray-blas-netlib, ndarray-blas-openblas or ndarray-blas-accelerate for different matmul techniques
-cargo run --example rwkv-lm --release --features ndarray   # Train on the minipile dataset
-```
-
 ## WGPU backend
 
 ```bash
