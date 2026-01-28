@@ -4,8 +4,6 @@ use burn::backend::Autodiff;
 use burn::backend::autodiff::checkpoint::strategy::CheckpointStrategy;
 #[cfg(feature = "cuda")]
 use burn::backend::cuda::Cuda;
-#[cfg(feature = "ndarray")]
-use burn::backend::ndarray::{FloatNdArrayElement, IntNdArrayElement, NdArray, QuantElement};
 #[cfg(any(feature = "wgpu", feature = "metal"))]
 use burn::backend::wgpu::Wgpu;
 #[cfg(feature = "fusion")]
@@ -138,25 +136,6 @@ where
         (0..count)
             .map(|index| {
                 let device = R::Device::from_id(DeviceId::new(0, index as u32));
-                Self::seed(&device, seed);
-                device
-            })
-            .collect()
-    }
-}
-
-#[cfg(feature = "ndarray")]
-impl<E, I, Q> BackendDeviceInit for NdArray<E, I, Q>
-where
-    E: FloatNdArrayElement,
-    I: IntNdArrayElement,
-    Q: QuantElement,
-{
-    fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device> {
-        let seed = train_cfg_builder.get_random_seed().unwrap();
-        (0..train_cfg_builder.get_num_devices_per_node().unwrap())
-            .map(|_| {
-                let device = burn::backend::ndarray::NdArrayDevice::Cpu;
                 Self::seed(&device, seed);
                 device
             })

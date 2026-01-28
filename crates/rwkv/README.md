@@ -49,7 +49,7 @@ Feature flags 应按用户意图分类，而非实现细节。
 ### 1. 后端 (Backend Features)
 
 - **作用**: 决定计算后端。
-- **Features**: `wgpu` (默认), `tch`, `ndarray`, `candle` 等。
+- **Features**: `wgpu` (默认), `cuda`, `rocm`, `vulkan`, `metal`, `webgpu`, `cpu` 等。
 - **规则**: `rwkv` 负责将这些 feature 级联到所有需要的 `burn-*` 和 `rwkv-*` 依赖上。
 
 ### 2. 核心能力 (Capability Features)
@@ -76,7 +76,7 @@ Feature flags 应按用户意图分类，而非实现细节。
 
 1.  **只依赖 `rwkv`**: 你的 `Cargo.toml` 里只有一个 `rwkv`。
 2.  **用 Feature 声明意图**: 在 `rwkv` 的 `features` 列表里告诉它你想做什么（比如 `train`）。
-3.  **所有 `use` 都从 `rwkv` 开始**: `use rwkv::backend::...`, `use rwkv::train::...`, `use rwkv::model::...`。
+3.  **所有 `use` 都从 `rwkv` 开始**: `use rwkv::custom::backend::...`, `use rwkv::train::...`, `use rwkv::model::...`。
 
 ### 示例 `Cargo.toml`
 
@@ -89,15 +89,15 @@ rwkv = "..."
 ```
 *`rwkv` 的默认 features (`["infer", "wgpu", "safetensors"]`) 已为你准备好一切。*
 
-**场景2：一个使用 `ndarray` 后端进行训练的应用**
-*你的意图：我需要训练，但我没有 GPU，所以用 CPU (`ndarray`)。*
+**场景2：一个使用 `cpu` 后端进行训练的应用**
+*你的意图：我需要训练，但我没有 GPU，所以用 CPU (`cpu`)。*
 ```toml
 # 用户的 Cargo.toml
 [dependencies]
 rwkv = { 
     version = "...", 
     default-features = false, 
-    features = ["train", "ndarray"] 
+    features = ["train", "cpu"] 
 }
 ```
 *这就够了。你不需要知道 `burn-train` 的存在。*
@@ -107,8 +107,8 @@ rwkv = {
 ```rust
 // 用户的 main.rs
 
-// 从 rwkv::backend 选择你的计算后端
-use rwkv::backend::{Wgpu, NdArray};
+// 从 rwkv::custom::backend 选择你的计算后端
+use rwkv::custom::backend::{Wgpu, Cpu};
 
 // 从 rwkv::model 获取模型定义
 use rwkv::model::{Model, ModelConfig};
