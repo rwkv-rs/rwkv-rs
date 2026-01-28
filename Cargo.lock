@@ -6242,6 +6242,7 @@ dependencies = [
  "derive-new 0.7.0",
  "log",
  "rwkv",
+ "sonic-rs",
 ]
 
 [[package]]
@@ -6275,6 +6276,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "burn",
+ "burn-cubecl",
+ "burn-fusion",
  "burn-optim",
  "burn-train",
  "chrono",

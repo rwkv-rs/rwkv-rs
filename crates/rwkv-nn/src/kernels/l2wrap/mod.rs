@@ -12,6 +12,9 @@ use burn::{
         backend::{AutodiffBackend, Backend},
     },
 };
+use burn_cubecl::{BoolElement, CubeBackend, CubeRuntime, FloatElement, IntElement};
+#[cfg(feature = "fusion")]
+use burn_fusion::{Fusion, FusionBackend};
 use rwkv_config::validated::train::TRAIN_CFG;
 
 pub trait L2WrapBackend: Backend {
@@ -102,6 +105,31 @@ impl<B: Backend, C: CheckpointStrategy> L2WrapBackend for Autodiff<B, C> {
             }
             OpsKind::UnTracked(prep) => prep.finish(loss.primitive),
         }
+    }
+}
+
+impl<R, F, I, BT> L2WrapBackend for CubeBackend<R, F, I, BT>
+where
+    R: CubeRuntime,
+    F: FloatElement,
+    I: IntElement,
+    BT: BoolElement,
+{
+    fn apply_l2wrap(
+        loss: <Self as Backend>::FloatTensorPrimitive,
+        _logits: <Self as Backend>::FloatTensorPrimitive,
+    ) -> <Self as Backend>::FloatTensorPrimitive {
+        loss
+    }
+}
+
+#[cfg(feature = "fusion")]
+impl<B: FusionBackend> L2WrapBackend for Fusion<B> {
+    fn apply_l2wrap(
+        loss: <Self as Backend>::FloatTensorPrimitive,
+        _logits: <Self as Backend>::FloatTensorPrimitive,
+    ) -> <Self as Backend>::FloatTensorPrimitive {
+        loss
     }
 }
 

@@ -8,6 +8,12 @@ use burn::backend::cuda::Cuda;
 use burn::backend::ndarray::{FloatNdArrayElement, IntNdArrayElement, NdArray, QuantElement};
 #[cfg(any(feature = "wgpu", feature = "metal"))]
 use burn::backend::wgpu::Wgpu;
+#[cfg(feature = "fusion")]
+use burn_fusion::{Fusion, FusionBackend};
+#[cfg(feature = "cubecl")]
+use burn_cubecl::{CubeBackend, CubeRuntime};
+#[cfg(feature = "cubecl")]
+use burn_cubecl::cubecl::device::{Device as CubeDevice, DeviceId};
 #[cfg(any(feature = "cuda", feature = "wgpu", feature = "metal"))]
 use burn::cubecl::{FloatElement, IntElement};
 #[cfg(any(feature = "wgpu", feature = "metal"))]
@@ -16,8 +22,10 @@ use burn::prelude::Backend;
 use burn_train::{
     Interrupter,
     logger::{AsyncLogger, FileLogger, Logger},
-    renderer::{MetricsRenderer, tui::TuiMetricsRenderer},
+    renderer::MetricsRenderer,
 };
+#[cfg(feature = "tui")]
+use burn_train::renderer::tui::TuiMetricsRenderer;
 use chrono::Local;
 use log::{info, warn};
 use rwkv_config::{
@@ -32,7 +40,7 @@ use tokio::runtime::Runtime;
 use wandb::LogData;
 
 use crate::{
-    logger::wandb::{WandbLoggerConfig, init_logger},
+    logger::wandb::{WandbLogger, WandbLoggerConfig, init_logger, init_metric_logger},
     renderer::BarMetricsRenderer,
     utils::{auto_create_directory, read_record_file},
 };
@@ -99,6 +107,41 @@ where
 {
     fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device> {
         B::init_devices(train_cfg_builder)
+    }
+}
+
+#[cfg(feature = "fusion")]
+impl<B> BackendDeviceInit for Fusion<B>
+where
+    B: FusionBackend + BackendDeviceInit,
+{
+    fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device> {
+        <B as BackendDeviceInit>::init_devices(train_cfg_builder)
+    }
+}
+
+#[cfg(feature = "cubecl")]
+impl<R, F, I, BT> BackendDeviceInit for CubeBackend<R, F, I, BT>
+where
+    R: CubeRuntime,
+    R::Device: CubeDevice,
+    F: burn_cubecl::FloatElement,
+    I: burn_cubecl::IntElement,
+    BT: burn_cubecl::BoolElement,
+{
+    fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device> {
+        let seed = train_cfg_builder.get_random_seed().unwrap();
+        let requested = train_cfg_builder.get_num_devices_per_node().unwrap();
+        let available = R::Device::device_count_total();
+        let count = requested.min(available.max(1));
+
+        (0..count)
+            .map(|index| {
+                let device = R::Device::from_id(DeviceId::new(0, index as u32));
+                Self::seed(&device, seed);
+                device
+            })
+            .collect()
     }
 }
 
@@ -217,19 +260,59 @@ pub fn init_wandb_logger() -> Option<AsyncLogger<LogData>> {
     wandb_logger
 }
 
+pub fn init_wandb_metric_logger() -> Option<WandbLogger> {
+    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    let mut wandb_logger: Option<WandbLogger> = None;
+    if TRAIN_CFG.get().unwrap().upload_to_wandb {
+        let api_key = TRAIN_CFG.get().unwrap().wandb_api_key.as_ref().unwrap();
+        let project = TRAIN_CFG
+            .get()
+            .unwrap()
+            .wandb_project_name
+            .as_ref()
+            .unwrap();
+        let entity = TRAIN_CFG.get().unwrap().wandb_entity_name.as_ref();
+
+        let run_name = format!("{}_{}", TRAIN_CFG.get().unwrap().experiment_name, timestamp);
+        let mut config = WandbLoggerConfig::new(api_key, project).run_name(run_name);
+        if let Some(entity) = entity {
+            config = config.entity(entity);
+        } else {
+            warn!("wandb entity name missing, falling back to default entity");
+        }
+        let rt = Runtime::new().unwrap();
+        wandb_logger = rt.block_on(async { Some(init_metric_logger(config).await) });
+        info!("Wandb metric logger initialized.");
+    }
+    wandb_logger
+}
+
 pub fn init_renderer() -> (Interrupter, Box<dyn MetricsRenderer>) {
     let interrupter = Interrupter::new();
     if TRAIN_CFG.get().unwrap().use_tui {
-        (
-            interrupter.clone(),
-            Box::new(TuiMetricsRenderer::new(interrupter, None)),
-        )
+        #[cfg(feature = "tui")]
+        {
+            return (
+                interrupter.clone(),
+                Box::new(TuiMetricsRenderer::new(interrupter, None)),
+            );
+        }
+        #[cfg(not(feature = "tui"))]
+        {
+            warn!("use_tui=true but feature \"tui\" is disabled, falling back to bar renderer");
+        }
     } else {
-        (
+        return (
             interrupter,
             Box::new(BarMetricsRenderer::new(
                 TRAIN_CFG.get().unwrap().num_mini_epochs_auto,
             )),
-        )
+        );
     }
+    (
+        interrupter,
+        Box::new(BarMetricsRenderer::new(
+            TRAIN_CFG.get().unwrap().num_mini_epochs_auto,
+        )),
+    )
 }

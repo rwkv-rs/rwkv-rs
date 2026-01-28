@@ -6,7 +6,7 @@ description = "Distributed training CLI orchestrating data pipelines, Burn train
 license = "Apache-2.0"
 
 [features]
-default = ["std", "train", "tui", "metrics", "collective"]
+default = ["std", "train"]
 std = ["burn/std", "burn-optim/std"]
 train = [
     "dep:burn-train",
@@ -17,6 +17,7 @@ train = [
     "dep:rwkv-data",
     "dep:rwkv-config",
     "dep:rwkv-bench",
+    "cubecl",
 ]
 tui = ["burn/tui", "burn-train?/tui"]
 metrics = ["burn/metrics", "burn-train?/sys-metrics"]
@@ -24,8 +25,8 @@ dataset = ["burn/dataset"]
 collective = ["burn/collective", "burn-optim/collective", "burn-train?/ddp"]
 
 autodiff = ["burn/autodiff"]
-fusion = ["burn/fusion", "rwkv-nn?/fusion"]
-cubecl = ["burn/cubecl"]
+fusion = ["burn/fusion", "rwkv-nn?/fusion", "dep:burn-fusion"]
+cubecl = ["burn/cubecl", "dep:burn-cubecl"]
 autotune = ["burn/autotune"]
 autotune-checks = ["burn/autotune-checks"]
 
@@ -74,6 +75,8 @@ hotpath-off = [
 burn = { workspace = true, default-features = false, features = [] }
 burn-train = { workspace = true, default-features = false, features = [], optional = true }
 burn-optim = { workspace = true, default-features = false, features = [] }
+burn-fusion = { workspace = true, default-features = false, optional = true }
+burn-cubecl = { workspace = true, default-features = false, optional = true }
 
 # === Serialization ===
 serde = { workspace = true }

@@ -1,6 +1,10 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use burn::train::logger::{AsyncLogger, Logger};
+use burn::train::{
+    logger::{AsyncLogger, Logger, MetricLogger},
+    metric::{MetricDefinition, MetricId, NumericEntry},
+    metric::store::{EpochSummary, MetricsUpdate, Split},
+};
 use tokio::runtime::Runtime;
 use wandb::{BackendOptions, LogData, Run, RunInfo, WandB};
 
@@ -62,9 +66,33 @@ pub async fn init_logger(config: WandbLoggerConfig) -> AsyncLogger<LogData> {
     AsyncLogger::new(WandbLogger::new(run))
 }
 
-struct WandbLogger {
+pub async fn init_metric_logger(config: WandbLoggerConfig) -> WandbLogger {
+    let wandb = WandB::new(BackendOptions::new(config.api_key));
+
+    let mut run_info = RunInfo::new(config.project);
+
+    if let Some(entity) = config.entity {
+        run_info = run_info.entity(entity);
+    }
+
+    if let Some(run_name) = config.run_name {
+        run_info = run_info.name(run_name);
+    }
+
+    let run = wandb
+        .new_run(run_info.build().expect("wandb run info should be valid"))
+        .await
+        .expect("wandb run creation should succeed");
+
+    WandbLogger::new(run)
+}
+
+pub struct WandbLogger {
     run: Arc<Run>,
     runtime: Runtime,
+    metric_definitions: HashMap<MetricId, MetricDefinition>,
+    global_step: u64,
+    last_epoch: Option<usize>,
 }
 
 impl WandbLogger {
@@ -72,6 +100,9 @@ impl WandbLogger {
         Self {
             run: Arc::new(run),
             runtime: Runtime::new().expect("tokio runtime should be created"),
+            metric_definitions: HashMap::new(),
+            global_step: 0,
+            last_epoch: None,
         }
     }
 }
@@ -84,4 +115,65 @@ impl Logger<LogData> for WandbLogger {
             run.log(item).await;
         });
     }
+}
+
+impl MetricLogger for WandbLogger {
+    fn log(&mut self, update: MetricsUpdate, epoch: usize, split: Split, tag: Option<Arc<String>>) {
+        if split != Split::Train {
+            return;
+        }
+
+        if self.last_epoch != Some(epoch) {
+            self.last_epoch = Some(epoch);
+            self.global_step = 0;
+        }
+
+        self.global_step += 1;
+
+        let mut log = LogData::new();
+        log.insert("_step", self.global_step);
+        log.insert("epoch", epoch as u64);
+
+        if let Some(tag) = tag {
+            log.insert("tag", tag.to_string());
+        }
+
+        for entry in update.entries_numeric {
+            let name = self
+                .metric_definitions
+                .get(&entry.entry.metric_id)
+                .map(|definition| definition.name.as_str())
+                .unwrap_or("metric");
+
+            match entry.numeric_entry {
+                NumericEntry::Value(value) => {
+                    log.insert(name, value);
+                }
+                NumericEntry::Aggregated { aggregated_value, .. } => {
+                    log.insert(name, aggregated_value);
+                }
+            }
+        }
+
+        let run = Arc::clone(&self.run);
+        self.runtime.spawn(async move {
+            run.log(log).await;
+        });
+    }
+
+    fn read_numeric(
+        &mut self,
+        _name: &str,
+        _epoch: usize,
+        _split: Split,
+    ) -> Result<Vec<NumericEntry>, String> {
+        Ok(Vec::new())
+    }
+
+    fn log_metric_definition(&mut self, definition: MetricDefinition) {
+        self.metric_definitions
+            .insert(definition.metric_id.clone(), definition);
+    }
+
+    fn log_epoch_summary(&mut self, _summary: EpochSummary) {}
 }
