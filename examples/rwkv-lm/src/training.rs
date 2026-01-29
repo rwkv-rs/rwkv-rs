@@ -22,7 +22,7 @@ use rwkv::custom::prelude::Module;
 use rwkv::custom::train::{
     Interrupter, Learner, SupervisedTraining,
     logger::FileMetricLogger,
-    metric::{AccuracyMetric, CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric},
+    metric::{CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric, PerplexityMetric},
 };
 #[cfg(not(feature = "ddp"))]
 use rwkv::custom::train::MultiDeviceOptim;
@@ -139,7 +139,8 @@ pub fn train<B: AutodiffBackend>(
         TRAIN_CFG.get().unwrap().learning_rate_start as LearningRate,
         TRAIN_CFG.get().unwrap().learning_rate_end as LearningRate,
         TRAIN_CFG.get().unwrap().warmup_steps,
-        TRAIN_CFG.get().unwrap().num_mini_epochs_auto,
+        TRAIN_CFG.get().unwrap().num_mini_epochs_auto
+            * TRAIN_CFG.get().unwrap().num_steps_per_mini_epoch_auto,
     ).init();
 
     // Initialize learner
@@ -151,8 +152,8 @@ pub fn train<B: AutodiffBackend>(
         .metric_train(IterationSpeedMetric::new())
         .metric_train_numeric(LossMetric::new())
         .metric_valid_numeric(LossMetric::new())
-        .metric_train_numeric(AccuracyMetric::new())
-        .metric_valid_numeric(AccuracyMetric::new())
+        .metric_train_numeric(PerplexityMetric::new())
+        .metric_valid_numeric(PerplexityMetric::new())
         .metric_train_numeric(LearningRateMetric::new())
         .with_file_checkpointer(CompactRecorder::new())
         .num_epochs(TRAIN_CFG.get().unwrap().num_mini_epochs_auto)
@@ -188,17 +189,17 @@ pub fn train<B: AutodiffBackend>(
     };
 
     #[cfg(not(feature = "ddp"))]
-    let training = training.with_training_strategy(rwkv::custom::train::TrainingStrategy::MultiDevice(
-        devices,
-        MultiDeviceOptim::OptimSharded,
-    ));
+    let training = training.with_training_strategy(
+        rwkv::custom::train::TrainingStrategy::MultiDevice(devices, MultiDeviceOptim::OptimSharded),
+    );
 
     #[cfg(feature = "ddp")]
     let collective_config =
         CollectiveConfig::default().with_local_all_reduce_strategy(AllReduceStrategy::Tree(2));
     #[cfg(feature = "ddp")]
-    let training = training
-        .with_training_strategy(rwkv::custom::train::ddp(devices, collective_config));
+    let training = training.with_training_strategy(
+        rwkv::custom::train::ddp(devices, collective_config)
+    );
 
     // Train the model
     let result = training.launch(Learner::new(model, optim, lr_scheduler));
@@ -214,9 +215,6 @@ pub fn train<B: AutodiffBackend>(
     )
     .unwrap();
     CompactRecorder::new()
-        .record(
-            result.model.into_record(),
-            exp_log_path.join("model"),
-        )
+        .record(result.model.into_record(), exp_log_path.join("model"))
         .unwrap();
 }
