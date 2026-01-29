@@ -129,8 +129,6 @@ where
     fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device> {
         let seed = train_cfg_builder.get_random_seed().unwrap();
         let requested = train_cfg_builder.get_num_devices_per_node().unwrap();
-        let available = <R::Device as CubeDevice>::device_count_total();
-        let count = requested.min(available.max(1));
 
         #[cfg(feature = "wgpu")]
         let is_wgpu = TypeId::of::<R::Device>() == TypeId::of::<WgpuDevice>();
@@ -141,9 +139,34 @@ where
             if requested <= 1 {
                 vec![DeviceId::new(4, 0)]
             } else {
-                (0..count).map(|i| DeviceId::new(0, i as u32)).collect()
+                let available_discrete = <R::Device as CubeDevice>::device_count(0);
+                let available_integrated = <R::Device as CubeDevice>::device_count(1);
+                let available_virtual = <R::Device as CubeDevice>::device_count(2);
+                let available_cpu = <R::Device as CubeDevice>::device_count(3);
+
+                let type_id = if available_discrete >= requested {
+                    0
+                } else if available_integrated >= requested {
+                    1
+                } else if available_virtual >= requested {
+                    2
+                } else if available_cpu >= requested {
+                    3
+                } else {
+                    panic!(
+                        "Requested {requested} WGPU devices, but only found discrete={available_discrete}, \
+integrated={available_integrated}, virtual={available_virtual}, cpu={available_cpu}. \
+Reduce num_devices_per_node or change backend."
+                    );
+                };
+
+                (0..requested)
+                    .map(|i| DeviceId::new(type_id, i as u32))
+                    .collect()
             }
         } else {
+            let available = <R::Device as CubeDevice>::device_count_total();
+            let count = requested.min(available.max(1));
             (0..count).map(|i| DeviceId::new(0, i as u32)).collect()
         };
 
