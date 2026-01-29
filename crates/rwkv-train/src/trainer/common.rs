@@ -33,11 +33,15 @@ use rwkv_config::{
         train::{FinalTrainConfigBuilder, TRAIN_CFG},
     },
 };
-use tokio::runtime::Runtime;
 use wandb::LogData;
 
 use crate::{
-    logger::wandb::{WandbLogger, WandbLoggerConfig, init_logger, init_metric_logger},
+    logger::wandb::{
+        WandbLogger,
+        WandbLoggerConfig,
+        init_logger_blocking,
+        init_metric_logger_blocking,
+    },
     renderer::BarMetricsRenderer,
     utils::{auto_create_directory, read_record_file},
 };
@@ -231,8 +235,7 @@ pub fn init_wandb_logger() -> Option<AsyncLogger<LogData>> {
         } else {
             warn!("wandb entity name missing, falling back to default entity");
         }
-        let rt = Runtime::new().unwrap();
-        wandb_logger = rt.block_on(async { Some(init_logger(config).await) });
+        wandb_logger = Some(init_logger_blocking(config));
         info!("Wandb logger initialized.");
     }
     wandb_logger
@@ -258,8 +261,7 @@ pub fn init_wandb_metric_logger() -> Option<WandbLogger> {
         } else {
             warn!("wandb entity name missing, falling back to default entity");
         }
-        let rt = Runtime::new().unwrap();
-        wandb_logger = rt.block_on(async { Some(init_metric_logger(config).await) });
+        wandb_logger = Some(init_metric_logger_blocking(config));
         info!("Wandb metric logger initialized.");
     }
     wandb_logger

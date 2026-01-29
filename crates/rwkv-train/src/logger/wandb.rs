@@ -1,5 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
-
+use std::{collections::HashMap, sync::{Arc, OnceLock}};
 use burn::train::{
     logger::{AsyncLogger, Logger, MetricLogger},
     metric::{MetricDefinition, MetricId, NumericEntry},
@@ -15,6 +14,12 @@ pub struct WandbLoggerConfig {
     pub entity: Option<String>,
     pub project: String,
     pub run_name: Option<String>,
+}
+
+static WANDB_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+fn wandb_runtime() -> &'static Runtime {
+    WANDB_RUNTIME.get_or_init(|| Runtime::new().expect("tokio runtime should be created"))
 }
 
 impl WandbLoggerConfig {
@@ -66,6 +71,11 @@ pub async fn init_logger(config: WandbLoggerConfig) -> AsyncLogger<LogData> {
     AsyncLogger::new(WandbLogger::new(run))
 }
 
+pub fn init_logger_blocking(config: WandbLoggerConfig) -> AsyncLogger<LogData> {
+    // Keep the runtime alive for the entire process so wandb-rs background tasks don't get dropped.
+    wandb_runtime().block_on(init_logger(config))
+}
+
 pub async fn init_metric_logger(config: WandbLoggerConfig) -> WandbLogger {
     let wandb = WandB::new(BackendOptions::new(config.api_key));
 
@@ -85,6 +95,11 @@ pub async fn init_metric_logger(config: WandbLoggerConfig) -> WandbLogger {
         .expect("wandb run creation should succeed");
 
     WandbLogger::new(run)
+}
+
+pub fn init_metric_logger_blocking(config: WandbLoggerConfig) -> WandbLogger {
+    // Keep the runtime alive for the entire process so wandb-rs background tasks don't get dropped.
+    wandb_runtime().block_on(init_metric_logger(config))
 }
 
 pub struct WandbLogger {
