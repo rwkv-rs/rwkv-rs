@@ -101,7 +101,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
         let logits = self.unembed.forward(x);
 
         let logits_classification = logits.reshape([
-            batch_size * context_length, self.embedded_dim
+            batch_size * context_length, self.vocabulary_size
         ]);
         let targets_classification = targets.reshape([
             batch_size * context_length,
