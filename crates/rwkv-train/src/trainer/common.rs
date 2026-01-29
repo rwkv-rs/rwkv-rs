@@ -1,21 +1,20 @@
-use std::path::{Path, PathBuf};
+use std::{
+    any::Any,
+    path::{Path, PathBuf},
+};
+#[cfg(feature = "wgpu")]
+use std::any::TypeId;
 
 use burn::backend::Autodiff;
 use burn::backend::autodiff::checkpoint::strategy::CheckpointStrategy;
-#[cfg(feature = "cuda")]
-use burn::backend::cuda::Cuda;
-#[cfg(any(feature = "wgpu", feature = "metal"))]
-use burn::backend::wgpu::Wgpu;
 #[cfg(feature = "fusion")]
 use burn_fusion::{Fusion, FusionBackend};
 #[cfg(feature = "cubecl")]
 use burn_cubecl::{CubeBackend, CubeRuntime};
 #[cfg(feature = "cubecl")]
 use burn_cubecl::cubecl::device::{Device as CubeDevice, DeviceId};
-#[cfg(any(feature = "cuda", feature = "wgpu", feature = "metal"))]
-use burn::cubecl::{FloatElement, IntElement};
-#[cfg(any(feature = "wgpu", feature = "metal"))]
-use burn::cubecl::BoolElement;
+#[cfg(feature = "wgpu")]
+use burn::backend::wgpu::WgpuDevice;
 use burn::prelude::Backend;
 use burn_train::{
     Interrupter,
@@ -122,7 +121,7 @@ where
 impl<R, F, I, BT> BackendDeviceInit for CubeBackend<R, F, I, BT>
 where
     R: CubeRuntime,
-    R::Device: CubeDevice,
+    R::Device: CubeDevice + Any,
     F: burn_cubecl::FloatElement,
     I: burn_cubecl::IntElement,
     BT: burn_cubecl::BoolElement,
@@ -130,66 +129,43 @@ where
     fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device> {
         let seed = train_cfg_builder.get_random_seed().unwrap();
         let requested = train_cfg_builder.get_num_devices_per_node().unwrap();
-        let available = R::Device::device_count_total();
+        let available = <R::Device as CubeDevice>::device_count_total();
         let count = requested.min(available.max(1));
 
-        (0..count)
-            .map(|index| {
-                let device = R::Device::from_id(DeviceId::new(0, index as u32));
-                Self::seed(&device, seed);
-                device
-            })
-            .collect()
-    }
-}
+        #[cfg(feature = "wgpu")]
+        let is_wgpu = TypeId::of::<R::Device>() == TypeId::of::<WgpuDevice>();
+        #[cfg(not(feature = "wgpu"))]
+        let is_wgpu = false;
 
-#[cfg(feature = "cuda")]
-impl<F, I> BackendDeviceInit for Cuda<F, I>
-where
-    F: FloatElement,
-    I: IntElement,
-{
-    fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device> {
-        let seed = train_cfg_builder.get_random_seed().unwrap();
-        (0..train_cfg_builder.get_num_devices_per_node().unwrap())
-            .map(|i| {
-                let device = burn::backend::cuda::CudaDevice::new(i);
-                Self::seed(&device, seed);
-                device
-            })
-            .collect()
-    }
-}
-
-#[cfg(any(feature = "wgpu", feature = "metal"))]
-impl<F, I, B> BackendDeviceInit for Wgpu<F, I, B>
-where
-    F: FloatElement,
-    I: IntElement,
-    B: BoolElement,
-{
-    fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device> {
-        let seed = train_cfg_builder.get_random_seed().unwrap();
-        let requested = train_cfg_builder.get_num_devices_per_node().unwrap();
-        let devices = if requested <= 1 {
-            vec![burn::backend::wgpu::WgpuDevice::default()]
+        let device_ids = if is_wgpu {
+            if requested <= 1 {
+                vec![DeviceId::new(4, 0)]
+            } else {
+                (0..count).map(|i| DeviceId::new(0, i as u32)).collect()
+            }
         } else {
-            (0..requested)
-                .map(|i| burn::backend::wgpu::WgpuDevice::DiscreteGpu(i))
-                .collect::<Vec<_>>()
+            (0..count).map(|i| DeviceId::new(0, i as u32)).collect()
         };
 
+        let devices = device_ids
+            .into_iter()
+            .map(<R::Device as CubeDevice>::from_id)
+            .collect::<Vec<_>>();
+
         for device in &devices {
-            #[cfg(feature = "metal")]
-            burn::backend::wgpu::init_setup::<burn::backend::wgpu::graphics::Metal>(
-                device,
-                Default::default(),
-            );
-            #[cfg(all(not(feature = "metal"), feature = "wgpu"))]
-            burn::backend::wgpu::init_setup::<burn::backend::wgpu::graphics::AutoGraphicsApi>(
-                device,
-                Default::default(),
-            );
+            #[cfg(feature = "wgpu")]
+            if let Some(wgpu_device) = (device as &dyn Any).downcast_ref::<WgpuDevice>() {
+                #[cfg(feature = "metal")]
+                burn::backend::wgpu::init_setup::<burn::backend::wgpu::graphics::Metal>(
+                    wgpu_device,
+                    Default::default(),
+                );
+                #[cfg(not(feature = "metal"))]
+                burn::backend::wgpu::init_setup::<burn::backend::wgpu::graphics::AutoGraphicsApi>(
+                    wgpu_device,
+                    Default::default(),
+                );
+            }
 
             Self::seed(device, seed);
         }
