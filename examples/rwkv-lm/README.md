@@ -20,7 +20,7 @@ cd rwkv-rs
 
 # Use the --release flag to really speed up training.
 # Add the f16 feature to run in f16. 
-cargo run --example rwkv-lm --release --features cuda   # Train on the minipile dataset
+cargo run --example rwkv-lm-train --release --features cuda   # Train on the minipile dataset
 ```
 
 ## WGPU backend
@@ -30,7 +30,7 @@ git clone https://github.com/rwkv-rs/rwkv-rs.git
 cd rwkv-rs
 
 # Use the --release flag to really speed up training.
-cargo run --example rwkv-lm --release --features wgpu   # Train on the minipile dataset
+cargo run --example rwkv-lm-train --release --features wgpu   # Train on the minipile dataset
 ```
 
 ## Metal backend
@@ -41,5 +41,5 @@ cd rwkv-rs
 
 # Use the --release flag to really speed up training.
 # Add the f16 feature to run in f16. 
-cargo run --example rwkv-lm --release --features metal   # Train on the minipile dataset
+cargo run --example rwkv-lm-train --release --features metal   # Train on the minipile dataset
 ```
