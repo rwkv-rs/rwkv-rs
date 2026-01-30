@@ -1,0 +1,29 @@
+experiment_name = "your_experiment_name"
+
+dataset_base_path = "/mnt/d/your/dataset/dir"
+filename_without_extensions = "your_dataset_filename"
+dataset_format = "rwkv_legacy"
+random_seed = 42
+
+train_stage = "pretrain"
+
+num_nodes = 1
+num_devices_per_node = 1
+batch_size_per_device = 16
+num_dataset_repeats = 1
+context_length = 512
+
+optimizer = "adam_w"
+learning_rate_start = 6e-4
+learning_rate_end = 6e-5
+warmup_steps = 0
+weight_decay = 0.001
+gradient_clip_val = 1.0
+grad_checkpoint = true
+
+level = "warn"
+use_tui = false
+upload_to_wandb = true
+wandb_api_key = "your_api_key"
+wandb_entity_name = "your_entity_name"
+wandb_project_name = "your_project_name"
