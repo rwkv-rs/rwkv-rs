@@ -37,6 +37,8 @@ type Wkv7BackwardResult<R, FE, I, BT> = (
 macro_rules! wkv7_with_f32_precision {
     (forward: $self:expr, $weight_decay:expr, $receptance:expr, $key:expr, $value:expr, $removal:expr, $replacement:expr, $initial_state:expr => $chunk_len:expr) => {{
         if size_of::<F>() != size_of::<f32>() {
+            // Run kernel in f32 for numerical stability; keep state/removal_state in f32,
+            // and cast only the output back to the original dtype.
             let result_f32 = wkv7_forward_impl::<R, f32, I, BT>(
                 cast::<R>($weight_decay, DType::F32),
                 cast::<R>($receptance, DType::F32),
@@ -49,8 +51,8 @@ macro_rules! wkv7_with_f32_precision {
             );
 
             (
-                cast::<R>(result_f32.0, F::dtype()),
-                cast::<R>(result_f32.1, F::dtype()),
+                result_f32.0,
+                result_f32.1,
                 cast::<R>(result_f32.2, F::dtype()),
             )
         } else {
@@ -387,7 +389,7 @@ where
 #[cfg(feature = "fusion")]
 mod fusion_impl {
 
-    use burn::tensor::{Element, Shape};
+    use burn::tensor::{DType, Element, Shape};
     use burn_fusion::{
         Fusion, FusionBackend, FusionRuntime,
         stream::{Operation, OperationStreams},
@@ -489,12 +491,12 @@ mod fusion_impl {
                 TensorIr::uninit(
                     client.create_empty_handle(),
                     Shape::new([batch, num_heads, num_chunks, dim, dim]),
-                    B::FloatElem::dtype(),
+                    DType::F32,
                 ),
                 TensorIr::uninit(
                     client.create_empty_handle(),
                     Shape::new([batch, seq_len, num_heads, dim]),
-                    B::FloatElem::dtype(),
+                    DType::F32,
                 ),
                 TensorIr::uninit(
                     client.create_empty_handle(),

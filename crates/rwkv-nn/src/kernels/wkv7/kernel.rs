@@ -1,6 +1,8 @@
 use burn::cubecl;
 use cubecl::{cube, prelude::*};
 
+const W_SCALE: f32 = -0.6065306597; // -exp(-0.5), matches RWKV7 clampw CUDA kernel
+
 #[cube(launch)]
 pub fn wkv7_forward_kernel<F: Float>(
     inputs: &Wkv7Inputs<F>,
@@ -49,7 +51,9 @@ pub fn wkv7_forward_kernel<F: Float>(
         shared_removal[head_dim_index] = inputs.removal[flat_index];
         shared_replacement[head_dim_index] = inputs.replacement[flat_index];
         shared_value[head_dim_index] = inputs.value[flat_index];
-        shared_weight_decay[head_dim_index] = F::exp(-F::exp(inputs.weight_decay[flat_index]));
+        let w_raw = inputs.weight_decay[flat_index];
+        let w_sig = F::new(1.0) / (F::new(1.0) + F::exp(-w_raw));
+        shared_weight_decay[head_dim_index] = F::exp(F::new(W_SCALE) * w_sig);
         sync_cube();
 
         let mut removal_state = F::new(0.0);
@@ -151,8 +155,8 @@ pub fn wkv7_backward_kernel<F: Float>(
         shared_receptance[head_dim_index] = receptance_indexed;
 
         let raw_w = inputs.weight_decay[flat_index];
-        let wi_fac = F::exp(raw_w);
-        let weight_decay_indexed = F::exp(-wi_fac);
+        let w_sig = F::new(1.0) / (F::new(1.0) + F::exp(-raw_w));
+        let weight_decay_indexed = F::exp(F::new(W_SCALE) * w_sig);
         shared_weight_decay[head_dim_index] = weight_decay_indexed;
 
         let key_indexed = inputs.key[flat_index];
@@ -222,7 +226,11 @@ pub fn wkv7_backward_kernel<F: Float>(
             replacement_grad += state_transposed_grad[i] * shared_removed_state[i];
         }
 
-        outputs.weight_decay_grad[flat_index] = -weight_decay_grad * weight_decay_indexed * wi_fac;
+        outputs.weight_decay_grad[flat_index] = F::new(W_SCALE)
+            * weight_decay_grad
+            * weight_decay_indexed
+            * w_sig
+            * (F::new(1.0) - w_sig);
         outputs.key_grad[flat_index] = key_grad;
         outputs.value_grad[flat_index] = value_grad;
         outputs.replacement_grad[flat_index] = replacement_grad;

@@ -7,6 +7,8 @@ use burn::{
     tensor::{Tensor, TensorPrimitive, backend::AutodiffBackend, ops::FloatTensor},
 };
 
+/// WKV7 forward outputs: (state, removal_state, output).
+/// `state` and `removal_state` are stored in F32 for numerical stability.
 pub type Wkv7ForwardOutput<B> = (FloatTensor<B>, FloatTensor<B>, FloatTensor<B>);
 
 pub type Wkv7BackwardOutput<B> = (

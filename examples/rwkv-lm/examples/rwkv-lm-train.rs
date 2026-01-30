@@ -5,9 +5,11 @@ use rwkv::nn::kernels::l2wrap::L2WrapBackend;
 use rwkv::nn::kernels::wkv7::Wkv7Backend;
 use rwkv::train::trainer::common::{BackendDeviceInit, init_cfg, init_devices, init_log};
 
-#[cfg(not(any(feature = "f16", feature = "flex32")))]
+#[cfg(not(any(feature = "bf16", feature = "f16", feature = "flex32")))]
 #[allow(unused)]
 type ElemType = f32;
+#[cfg(feature = "bf16")]
+type ElemType = rwkv::custom::tensor::bf16;
 #[cfg(feature = "f16")]
 type ElemType = rwkv::custom::tensor::f16;
 #[cfg(feature = "flex32")]

@@ -19,6 +19,7 @@ default = [
     "std"
 ]
 f16 = []
+bf16 = []
 flex32 = []
 fusion = ["rwkv/fusion"]
 cubecl = ["rwkv/cubecl"]

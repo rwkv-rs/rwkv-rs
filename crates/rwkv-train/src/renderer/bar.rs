@@ -81,7 +81,7 @@ impl MetricsRendererTraining for BarMetricsRenderer {
         self.pb.set_position(item.iteration as u64);
         self.pb.set_message(format!(
             "Epoch {}/{} | lr {:.2e} | train_loss {:.5} | valid_loss {}",
-            self.epoch_index + 1,
+            self.epoch_index,
             self.num_epochs,
             self.train_lr,
             self.train_loss,
@@ -95,13 +95,13 @@ impl MetricsRendererTraining for BarMetricsRenderer {
         let message = match self.valid_loss {
             Some(loss) => format!(
                 "Epoch {}/{} | valid_loss {:.5}",
-                item.epoch + 1,
+                item.epoch,
                 self.num_epochs,
                 loss
             ),
             None => format!(
                 "Epoch {}/{} | valid_loss -",
-                item.epoch + 1,
+                item.epoch,
                 self.num_epochs
             ),
         };
