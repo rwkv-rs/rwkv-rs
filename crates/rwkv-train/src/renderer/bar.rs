@@ -8,6 +8,7 @@ use burn::train::{
     },
 };
 use indicatif::{ProgressBar, ProgressStyle};
+use rwkv_config::validated::train::TRAIN_CFG;
 
 const LOSS_METRIC_NAME: &str = "Loss";
 
@@ -16,8 +17,8 @@ const LEARNING_RATE_METRIC_NAME: &str = "Learning Rate";
 /// Progress bar renderer for training metrics
 pub struct BarMetricsRenderer {
     pb: ProgressBar,
-    current_epoch: usize,
-    total_epochs: usize,
+    epoch_index: usize,
+    num_epochs: usize,
     train_loss: f64,
     train_lr: f64,
     valid_loss: Option<f64>,
@@ -26,7 +27,7 @@ pub struct BarMetricsRenderer {
 }
 
 impl BarMetricsRenderer {
-    pub fn new(total_epochs: usize) -> Self {
+    pub fn new(num_epochs: usize) -> Self {
         let pb = ProgressBar::new(100);
 
         pb.set_style(
@@ -39,8 +40,8 @@ impl BarMetricsRenderer {
 
         Self {
             pb,
-            current_epoch: 0,
-            total_epochs,
+            epoch_index: 0,
+            num_epochs,
             train_loss: 0.0,
             train_lr: 0.0,
             valid_loss: None,
@@ -70,42 +71,23 @@ impl MetricsRendererTraining for BarMetricsRenderer {
     }
 
     fn render_train(&mut self, item: TrainingProgress) {
-        assert!(
-            item.progress.items_total > 0,
-            "items_total must be positive, got {}",
-            item.progress.items_total
-        );
-
         // Reset progress bar when epoch changes
-        if item.epoch != self.current_epoch {
-            self.current_epoch = item.epoch;
-
+        if item.epoch != self.epoch_index {
+            self.epoch_index = item.epoch;
             self.pb.reset();
         }
 
-        // Update progress
-        let total = item.progress.items_total;
-
-        let current = item.progress.items_processed;
-
-        let percentage = (current * 100) / total;
-
-        self.pb.set_length(100);
-
-        self.pb.set_position(percentage as u64);
-
-        let valid_display = self
-            .valid_loss
-            .map(|value| format!("{value:.5}"))
-            .unwrap_or_else(|| "-".to_string());
-
+        self.pb.set_length(TRAIN_CFG.get().unwrap().num_steps_per_mini_epoch_auto as u64);
+        self.pb.set_position(item.iteration as u64);
         self.pb.set_message(format!(
             "Epoch {}/{} | lr {:.2e} | train_loss {:.5} | valid_loss {}",
-            self.current_epoch + 1,
-            self.total_epochs,
+            self.epoch_index + 1,
+            self.num_epochs,
             self.train_lr,
             self.train_loss,
-            valid_display
+            self.valid_loss
+                .map(|value| format!("{value:.5}"))
+                .unwrap_or_else(|| "-".to_string()),
         ));
     }
 
@@ -114,13 +96,13 @@ impl MetricsRendererTraining for BarMetricsRenderer {
             Some(loss) => format!(
                 "Epoch {}/{} | valid_loss {:.5}",
                 item.epoch + 1,
-                self.total_epochs,
+                self.num_epochs,
                 loss
             ),
             None => format!(
                 "Epoch {}/{} | valid_loss -",
                 item.epoch + 1,
-                self.total_epochs
+                self.num_epochs
             ),
         };
 
