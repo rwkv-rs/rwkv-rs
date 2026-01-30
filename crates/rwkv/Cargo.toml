@@ -5,4 +5,46 @@ edition = "2024"
 description = "Facade crate that re-exports rwkv-rs training, inference, data, and agent APIs"
 license = "Apache-2.0"
 
+[features]
+default = ["std", "nn"]
+std = ["burn/std", "rwkv-train?/std"]
+train = [
+    "dep:rwkv-train",
+    "rwkv-train/train",
+    "burn/train",
+    "autodiff",
+    "dataset",
+    "data",
+    "nn",
+]
+tui = ["burn/tui", "rwkv-train?/tui"]
+metrics = ["burn/metrics", "rwkv-train?/metrics"]
+dataset = ["burn/dataset"]
+collective = ["burn/collective", "rwkv-train?/collective"]
+data = ["dep:rwkv-data", "dataset"]
+nn = ["dep:rwkv-nn"]
+store = ["burn/store", "dep:burn-store", "burn-store/std", "burn-store/pytorch"]
+
+autodiff = ["burn/autodiff"]
+fusion = ["burn/fusion", "rwkv-nn?/fusion", "rwkv-train?/fusion"]
+cubecl = ["burn/cubecl", "rwkv-train?/cubecl"]
+autotune = ["burn/autotune"]
+autotune-checks = ["burn/autotune-checks"]
+
+simd = ["burn/simd"]
+wgpu = ["burn/wgpu"]
+vulkan = ["wgpu", "burn/vulkan"]
+webgpu = ["wgpu", "burn/webgpu"]
+metal = ["wgpu", "burn/metal"]
+cuda = ["burn/cuda"]
+rocm = ["burn/rocm"]
+cpu = ["burn/cpu"]
+
 [dependencies]
+burn = { workspace = true, default-features = false, features = [] }
+burn-store = { workspace = true, default-features = false, optional = true }
+
+rwkv-config = { path = "../rwkv-config" }
+rwkv-data = { path = "../rwkv-data", optional = true }
+rwkv-nn = { path = "../rwkv-nn", default-features = false, optional = true }
+rwkv-train = { path = "../rwkv-train", default-features = false, optional = true }

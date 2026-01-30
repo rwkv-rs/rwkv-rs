@@ -24,3 +24,4 @@ reference_for_agents/
 *.mpk
 
 .DS_Store
+/logs

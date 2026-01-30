@@ -1,0 +1,106 @@
+[package]
+name = "rwkv-train"
+version = "0.1.0"
+edition = "2024"
+description = "Distributed training CLI orchestrating data pipelines, Burn trainers, and logging tools"
+license = "Apache-2.0"
+
+[features]
+default = ["std", "train"]
+std = ["burn/std", "burn-optim/std"]
+train = [
+    "dep:burn-train",
+    "burn/train",
+    "autodiff",
+    "dataset",
+    "dep:rwkv-nn",
+    "dep:rwkv-data",
+    "dep:rwkv-config",
+    "dep:rwkv-bench",
+    "cubecl",
+]
+tui = ["burn/tui", "burn-train?/tui"]
+metrics = ["burn/metrics", "burn-train?/sys-metrics"]
+dataset = ["burn/dataset"]
+collective = ["burn/collective", "burn-optim/collective", "burn-train?/ddp"]
+
+autodiff = ["burn/autodiff"]
+fusion = ["burn/fusion", "rwkv-nn?/fusion", "dep:burn-fusion"]
+cubecl = ["burn/cubecl", "dep:burn-cubecl"]
+autotune = ["burn/autotune"]
+autotune-checks = ["burn/autotune-checks"]
+
+wgpu = ["cubecl", "burn/wgpu"]
+vulkan = ["wgpu", "burn/vulkan"]
+webgpu = ["wgpu", "burn/webgpu"]
+metal = ["wgpu", "burn/metal"]
+cuda = ["cubecl", "burn/cuda"]
+rocm = ["cubecl", "burn/rocm"]
+cpu = ["burn/cpu"]
+
+hotpath = ["dep:hotpath", "rwkv-nn/hotpath", "rwkv-bench/hotpath", "hotpath/hotpath"]
+hotpath-alloc-bytes-total = [
+    "hotpath",
+    "rwkv-nn/hotpath-alloc-bytes-total",
+    "rwkv-bench/hotpath-alloc-bytes-total",
+    "hotpath/hotpath-alloc",
+]
+hotpath-alloc-count-total = [
+    "hotpath",
+    "rwkv-nn/hotpath-alloc-count-total",
+    "rwkv-bench/hotpath-alloc-count-total",
+    "hotpath/hotpath-alloc",
+]
+hotpath-off = [
+    "hotpath",
+    "rwkv-nn/hotpath-off",
+    "rwkv-bench/hotpath-off",
+    "hotpath/hotpath-off",
+]
+
+[dependencies]
+# === Deep Learning Core ===
+burn = { workspace = true, default-features = false, features = [] }
+burn-train = { workspace = true, default-features = false, features = [], optional = true }
+burn-optim = { workspace = true, default-features = false, features = [] }
+burn-fusion = { workspace = true, default-features = false, optional = true }
+burn-cubecl = { workspace = true, default-features = false, optional = true }
+
+# === Serialization ===
+serde = { workspace = true }
+toml = { workspace = true }
+
+# === CLI ===
+clap = { workspace = true }
+log = { workspace = true }
+chrono = { workspace = true }
+clia-tracing-config = "*"
+
+# === Async Runtime ===
+tokio = { workspace = true }
+rayon = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# === Data Processing ===
+hashbrown = { workspace = true }
+regex = { workspace = true }
+
+# === Database ===
+redb = { workspace = true }
+redis = { workspace = true }
+
+# === Utilities ===
+primes = { workspace = true }
+dialoguer = { workspace = true }
+
+# === Monitoring ===
+wandb = { workspace = true }
+indicatif = { workspace = true }
+hotpath = { workspace = true, optional = true }
+
+# === Local Dependencies ===
+rwkv-nn = { path = "../rwkv-nn", default-features = false, optional = true }
+rwkv-data = { path = "../rwkv-data", optional = true }
+rwkv-config = { path = "../rwkv-config", optional = true }
+rwkv-bench = { path = "../rwkv-bench", optional = true }

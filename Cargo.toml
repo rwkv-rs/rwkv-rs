@@ -65,7 +65,7 @@ unicode-script = "0.5.8"
 unicode-normalization = "0.1.25"
 
 proc-macro2 = "1.0.105"
-quote = "1.0.43"
+quote = "1.0.44"
 syn = { version = "2.0.114", features = ["full"] }
 
 # === CLI & Monitoring ===
@@ -77,20 +77,18 @@ indicatif = { version = "0.18.3", features = ["tokio"] }
 wandb = { git = "https://github.com/rwkv-rs/wandb-rs", rev = "5d9ab26376a5ac70f779a0fa78e137d3779a1ba2" }
 
 # === Deep Learning Core ===
-burn = { version = "0.20.0", features = [
-    "train", "autodiff", "ndarray", "cuda", "wgpu", "cubecl", "collective",
-] }
-burn-train = { version = "0.20.0" }
-burn-fusion = { version = "0.20.0" }
-burn-cubecl = { version = "0.20.0" }
-burn-ir = { version = "0.20.0" }
-burn-store = { version = "0.20.0" }
-burn-optim = { version = "0.20.0" }
+burn = { version = "0.20", default-features = false }
+burn-train = { version = "0.20", default-features = false }
+burn-fusion = { version = "0.20", default-features = false }
+burn-cubecl = { version = "0.20", default-features = false }
+burn-ir = { version = "0.20", default-features = false }
+burn-store = { version = "0.20", default-features = false }
+burn-optim = { version = "0.20", default-features = false }
 
-ndarray = { version = "0.17.1" }
+ndarray = { version = "0.17.2" }
 ndarray-npy = { version = "0.10.0" }
 
-hotpath = { version = "0.9.2" }
+hotpath = { version = "0.9.3" }
 
 
 [profile.release]

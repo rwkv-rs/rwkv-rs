@@ -7,7 +7,6 @@ use rwkv_derive::LineRef;
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Deserialize, LineRef)]
-
 pub struct AniMatItem {
     #[serde(rename = "Query_name")]
     #[line_ref]
@@ -20,7 +19,6 @@ pub struct AniMatItem {
 }
 
 #[tokio::main]
-
 async fn main() {
     let mut bin = BinWriter::<u8>::new(
         Path::new("/public/home/ssjxzkz/Datasets/geno/ani/paired.bin"),

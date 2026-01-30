@@ -21,11 +21,9 @@ impl Sampler {
     }
 
     pub fn get_base_offset(&self, index: u64, mini_epoch_index: u64) -> u64 {
-        let distributed_idx = index * self.num_devices + self.device_index;
-
         let unique_sample_index = 1
             + mini_epoch_index * self.samples_per_epoch
-            + (distributed_idx * self.num_devices)
+            + (index * self.num_devices)
             + self.device_index;
 
         let u_mod_p = unique_sample_index % self.magic_prime;

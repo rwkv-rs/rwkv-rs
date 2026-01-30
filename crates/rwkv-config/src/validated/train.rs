@@ -4,7 +4,7 @@ use once_cell::sync::OnceCell;
 use rwkv_derive::ConfigBuilder;
 use serde::Serialize;
 
-use crate::{OptimizerOptions, TrainStageOptions};
+use crate::{DatasetFormatOptions, OptimizerOptions, TokenUnitDType, TrainStageOptions};
 
 #[derive(Clone, Debug, Serialize, ConfigBuilder)]
 #[config_builder(raw = "crate::raw::train::RawTrainConfig", cell = "TRAIN_CFG")]
@@ -19,12 +19,13 @@ pub struct FinalTrainConfig {
 
     pub dataset_base_path: String,
     pub filename_without_extensions: String,
+    pub dataset_format: DatasetFormatOptions,
     #[skip_raw]
     pub mmap_num_tokens_auto: usize,
     #[skip_raw]
     pub mmap_num_units_per_token: usize,
     #[skip_raw]
-    pub mmap_token_dtype_auto: MmapTokenDtypeOptions,
+    pub mmap_token_dtype_auto: TokenUnitDType,
 
     pub train_stage: TrainStageOptions,
 
@@ -64,19 +65,6 @@ pub struct FinalTrainConfig {
     pub wandb_project_name: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub enum MmapTokenDtypeOptions {
-    U8,
-    U16,
-    F32,
-}
-
-impl MmapTokenDtypeOptions {
-    pub fn is_discrete(&self) -> bool {
-        matches!(self, MmapTokenDtypeOptions::U8 | MmapTokenDtypeOptions::U16)
-    }
-}
-
 impl FinalTrainConfigBuilder {
     pub fn fill_auto_after_load(&mut self) {
         let batch_size_auto = self.num_nodes.unwrap()
@@ -99,7 +87,7 @@ impl FinalTrainConfigBuilder {
         &mut self,
         mmap_num_tokens_auto: usize,
         mmap_num_units_per_token: usize,
-        mmap_token_dtype_auto: MmapTokenDtypeOptions,
+        mmap_token_dtype_auto: TokenUnitDType,
         magic_prime_auto: usize,
     ) {
         let num_mini_epochs_auto = self.num_dataset_repeats.unwrap() * mmap_num_tokens_auto
