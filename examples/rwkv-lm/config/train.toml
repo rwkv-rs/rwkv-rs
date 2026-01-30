@@ -1,6 +1,6 @@
 experiment_name = "lm"
 
-dataset_base_path = "/mnt/d/your/dataset/dir/filename"
+dataset_base_path = "/mnt/g/Datasets/minipile"
 filename_without_extensions = "minipile"
 dataset_format = "rwkv_legacy"
 random_seed = 42
@@ -24,6 +24,6 @@ grad_checkpoint = true
 level = "warn"
 use_tui = false
 upload_to_wandb = true
-wandb_api_key = "your_api_key"
+wandb_api_key = "0846134e1a784dcd3495320a5ab21a73d2377a1d"
 wandb_entity_name = "rhineai"
 wandb_project_name = "lm"

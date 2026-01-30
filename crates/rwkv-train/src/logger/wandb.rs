@@ -131,12 +131,12 @@ impl Logger<LogData> for WandbLogger {
 }
 
 impl MetricLogger for WandbLogger {
-    fn log(&mut self, update: MetricsUpdate, epoch: usize, split: Split, tag: Option<Arc<String>>) {
+    fn log(&mut self, update: MetricsUpdate, _epoch: usize, split: Split, tag: Option<Arc<String>>) {
         self.global_step += 1;
 
         let mut log = LogData::new();
         log.insert("_step", self.global_step);
-        log.insert("epoch", epoch as u64);
+        // log.insert("epoch", epoch as u64);
 
         let metric_prefix = match tag.as_deref() {
             Some(tag) => {
