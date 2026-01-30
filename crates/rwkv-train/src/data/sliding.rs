@@ -67,21 +67,16 @@ impl<T: TokenUnit> MmapBinReader<T> {
 
 pub struct SlidingDataset<T: TokenUnit> {
     pub context_length: u64,
-
     pub bin: Arc<MmapBinReader<T>>,
     pub samplers: Vec<Sampler>,
     pub mini_epoch_index: Arc<AtomicUsize>,
-
-    profile_rank0: bool,
 }
 
 impl<T: TokenUnit> SlidingDataset<T> {
     pub fn new(
         context_length: u64,
-
         bin: Arc<MmapBinReader<T>>,
         samplers: Vec<Sampler>,
-        profile_rank0: bool,
     ) -> Self {
         let mini_epoch_index = Arc::new(AtomicUsize::new(0));
 
@@ -90,7 +85,6 @@ impl<T: TokenUnit> SlidingDataset<T> {
             samplers,
             mini_epoch_index,
             context_length,
-            profile_rank0,
         }
     }
 }

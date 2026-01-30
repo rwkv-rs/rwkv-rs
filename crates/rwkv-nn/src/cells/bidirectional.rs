@@ -75,7 +75,6 @@ impl<B: Backend> BidirectionalCell<B> {
         x: Tensor<B, 3>,
         v_first: Tensor<B, 3>,
         state: BidirectionalCellState<B>,
-        device: &B::Device,
     ) -> (Tensor<B, 3>, Tensor<B, 3>, BidirectionalCellState<B>)
     where
         B: Wkv7Backend,

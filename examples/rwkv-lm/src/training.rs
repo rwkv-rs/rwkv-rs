@@ -85,14 +85,12 @@ pub fn train<B: AutodiffBackend>(
         train_cfg_builder.get_context_length().unwrap() as u64,
         bin.clone(),
         samplers,
-        true,
     ));
 
     let batcher = AutoRegressiveBatcher::<B, u16>::new(
         train_cfg_builder.get_mmap_num_units_per_token().unwrap(),
         train_cfg_builder.get_batch_size_per_device().unwrap(),
         train_cfg_builder.get_context_length().unwrap(),
-        true,
     );
 
     let dataloader_train = DataLoaderBuilder::new(batcher)
@@ -104,7 +102,6 @@ pub fn train<B: AutodiffBackend>(
         train_cfg_builder.get_mmap_num_units_per_token().unwrap(),
         train_cfg_builder.get_batch_size_per_device().unwrap(),
         train_cfg_builder.get_context_length().unwrap(),
-        true,
     );
     let dataloader_valid = DataLoaderBuilder::new(batcher_valid)
         .batch_size(train_cfg_builder.get_batch_size_per_device().unwrap())

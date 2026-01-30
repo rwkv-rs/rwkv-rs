@@ -5,10 +5,6 @@ use burn::{
 use rwkv_nn::kernels::{l2wrap::L2WrapBackend, wkv7::Wkv7Backend};
 
 pub mod common;
-#[cfg(feature = "collective")]
-pub mod custom;
-#[cfg(feature = "collective")]
-pub mod ddp;
 
 type RwkvAutodiff<B, C> = Autodiff<B, C>;
 

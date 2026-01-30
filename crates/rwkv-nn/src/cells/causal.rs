@@ -5,7 +5,7 @@ use crate::{
         time_mixer::{TimeMixer, TimeMixerConfig},
     },
 };
-use burn::prelude::{Float, Int};
+use burn::prelude::Float;
 use burn::{
     config::Config,
     module::Module,
