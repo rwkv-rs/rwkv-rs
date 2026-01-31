@@ -8,12 +8,12 @@ use rwkv::custom::module::Module;
 use rwkv::custom::nn::{Embedding, EmbeddingConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig};
 use rwkv::custom::nn::loss::CrossEntropyLossConfig;
 use rwkv::custom::tensor::backend::{AutodiffBackend, Backend};
-use rwkv::custom::train::{ClassificationOutput, InferenceStep, TrainOutput, TrainStep};
+use rwkv::custom::train::{InferenceStep, TrainOutput, TrainStep};
 use rwkv::nn::cells::causal::{MultiCausalCells, MultiCausalCellsConfig};
 use rwkv::nn::functions::init_weights::{orthogonal_init, uniform_init};
 use rwkv::nn::kernels::l2wrap::{l2wrap, L2WrapBackend};
 use rwkv::nn::kernels::wkv7::Wkv7Backend;
-
+use rwkv::train::learner::next_token_prediction::NextTokenPredictionOutput;
 use crate::data::batcher::AutoRegressiveBatch;
 
 rwkv::custom_mode!();
@@ -84,7 +84,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
     pub fn forward(
         &self,
         item: AutoRegressiveBatch<B>,
-    ) -> ClassificationOutput<B>
+    ) -> NextTokenPredictionOutput<B>
     where
         B: Wkv7Backend + L2WrapBackend,
     {
@@ -100,26 +100,22 @@ impl<B: Backend> AutoRegressiveModel<B> {
         let x = self.layer_norm_for_unembed.forward(x);
         let logits = self.unembed.forward(x);
 
-        let logits_classification = logits.reshape([
+        let logits_flat = logits.reshape([
             batch_size * context_length, self.vocabulary_size
         ]);
-        let targets_classification = targets.reshape([
+        let targets_flat = targets.reshape([
             batch_size * context_length,
         ]);
 
         let loss = l2wrap(
             CrossEntropyLossConfig::new()
-                .init(&logits_classification.device())
-                .forward(logits_classification.clone(), targets_classification.clone()),
-            logits_classification.clone(),
+                .init(&logits_flat.device())
+                .forward(logits_flat.clone(), targets_flat),
+            logits_flat,
         );
 
         // Return the output and loss
-        ClassificationOutput {
-            loss,
-            output: logits_classification,
-            targets: targets_classification,
-        }
+        NextTokenPredictionOutput { loss }
     }
 }
 
@@ -127,12 +123,12 @@ impl<B: Backend> AutoRegressiveModel<B> {
 /// Define training step
 impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegressiveModel<B> {
     type Input = AutoRegressiveBatch<B>;
-    type Output = ClassificationOutput<B>;
+    type Output = NextTokenPredictionOutput<B>;
 
     fn step(
         &self,
         item: AutoRegressiveBatch<B>,
-    ) -> TrainOutput<ClassificationOutput<B>> {
+    ) -> TrainOutput<NextTokenPredictionOutput<B>> {
         // Run forward pass, calculate gradients and return them along with the output
         let item = self.forward(item);
         let grads = item.loss.backward();
@@ -144,9 +140,9 @@ impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegress
 /// Define validation step
 impl<B: Backend + Wkv7Backend + L2WrapBackend> InferenceStep for AutoRegressiveModel<B> {
     type Input = AutoRegressiveBatch<B>;
-    type Output = ClassificationOutput<B>;
+    type Output = NextTokenPredictionOutput<B>;
 
-    fn step(&self, item: AutoRegressiveBatch<B>) -> ClassificationOutput<B> {
+    fn step(&self, item: AutoRegressiveBatch<B>) -> NextTokenPredictionOutput<B> {
         // Run forward pass and return the output
         self.forward(item)
     }

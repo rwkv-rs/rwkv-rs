@@ -72,6 +72,11 @@ pub struct SlidingDataset<T: TokenUnit> {
     pub mini_epoch_index: Arc<AtomicUsize>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct SlidingSample {
+    pub base_offset: u64,
+}
+
 impl<T: TokenUnit> SlidingDataset<T> {
     pub fn new(
         context_length: u64,
@@ -89,8 +94,8 @@ impl<T: TokenUnit> SlidingDataset<T> {
     }
 }
 
-impl<T: TokenUnit> Dataset<Vec<T>> for SlidingDataset<T> {
-    fn get(&self, index: usize) -> Option<Vec<T>> {
+impl<T: TokenUnit> Dataset<SlidingSample> for SlidingDataset<T> {
+    fn get(&self, index: usize) -> Option<SlidingSample> {
         assert!(!self.samplers.is_empty());
 
         let num_samples_per_mini_epoch_per_device =
@@ -105,13 +110,7 @@ impl<T: TokenUnit> Dataset<Vec<T>> for SlidingDataset<T> {
 
         let sampler = &self.samplers[device_index];
         let base_offset = sampler.get_base_offset(local_index as u64, mini_epoch_index);
-
-        let token_units = self
-            .bin
-            .get(base_offset * self.context_length, self.context_length + 1)
-            .into_owned();
-
-        Some(token_units)
+        Some(SlidingSample { base_offset })
     }
 
     fn len(&self) -> usize {

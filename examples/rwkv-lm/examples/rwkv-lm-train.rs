@@ -3,7 +3,7 @@
 use rwkv::custom::tensor::backend::AutodiffBackend;
 use rwkv::nn::kernels::l2wrap::L2WrapBackend;
 use rwkv::nn::kernels::wkv7::Wkv7Backend;
-use rwkv::train::trainer::common::{BackendDeviceInit, init_cfg, init_devices, init_log};
+use rwkv::train::learner::init::{BackendDeviceInit, init_cfg, init_devices, init_log};
 
 #[cfg(not(any(feature = "f32", feature = "flex32", feature = "f16")))]
 #[allow(unused)]
@@ -17,7 +17,7 @@ type ElemType = rwkv::custom::tensor::f16;
 
 pub fn launch<B: AutodiffBackend + BackendDeviceInit + Wkv7Backend + L2WrapBackend>()
 where
-    <B as AutodiffBackend>::InnerBackend: Wkv7Backend + L2WrapBackend,
+    <B as AutodiffBackend>::InnerBackend: BackendDeviceInit + Wkv7Backend + L2WrapBackend,
 {
     let (model_cfg_builder, mut train_cfg_builder) = init_cfg(
         "examples/rwkv-lm/config/model.toml",

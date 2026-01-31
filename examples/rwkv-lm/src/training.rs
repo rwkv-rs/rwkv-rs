@@ -15,14 +15,14 @@ use rwkv::config::{DatasetFormatOptions, validated::model::{FinalModelConfigBuil
 use rwkv::config::validated::train::{FinalTrainConfigBuilder, TRAIN_CFG};
 #[cfg(feature = "ddp")]
 use rwkv::custom::collective::{AllReduceStrategy, CollectiveConfig};
-use rwkv::custom::data::dataloader::DataLoaderBuilder;
+use rwkv::custom::data::dataloader::{DataLoader, DataLoaderBuilder};
 use rwkv::custom::record::{CompactRecorder, Recorder};
 use rwkv::custom::tensor::backend::AutodiffBackend;
 use rwkv::custom::prelude::Module;
 use rwkv::custom::train::{
     Interrupter, Learner, SupervisedTraining,
     logger::FileMetricLogger,
-    metric::{CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric, PerplexityMetric},
+    metric::{CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric},
 };
 #[cfg(not(feature = "ddp"))]
 use rwkv::custom::train::MultiDeviceOptim;
@@ -34,7 +34,7 @@ use rwkv::train::data::sliding::{MmapBinReader, SlidingDataset};
 use rwkv::train::optim::lr_scheduler::WsdLrSchedulerConfig;
 use rwkv::train::optim::optimizer::GroupedOptimizerConfig;
 use rwkv::train::renderer::BarMetricsRenderer;
-use rwkv::train::trainer::common::init_wandb_metric_logger;
+use rwkv::train::learner::init::init_wandb_metric_logger;
 use crate::data::batcher::AutoRegressiveBatcher;
 use crate::model::AutoRegressiveModelConfig;
 
@@ -88,6 +88,7 @@ pub fn train<B: AutodiffBackend>(
     ));
 
     let batcher = AutoRegressiveBatcher::<B, u16>::new(
+        bin.clone(),
         train_cfg_builder.get_mmap_num_units_per_token().unwrap(),
         train_cfg_builder.get_batch_size_per_device().unwrap(),
         train_cfg_builder.get_context_length().unwrap(),
@@ -99,6 +100,7 @@ pub fn train<B: AutodiffBackend>(
         .build(dataset.clone());
 
     let batcher_valid = AutoRegressiveBatcher::<B::InnerBackend, u16>::new(
+        bin.clone(),
         train_cfg_builder.get_mmap_num_units_per_token().unwrap(),
         train_cfg_builder.get_batch_size_per_device().unwrap(),
         train_cfg_builder.get_context_length().unwrap(),
@@ -108,6 +110,7 @@ pub fn train<B: AutodiffBackend>(
         .num_workers(1)
         .set_device(devices[0].clone())
         .build(dataset.clone());
+    let dataloader_valid = dataloader_valid.slice(0, 0);
 
     model_cfg_builder.build();
     train_cfg_builder.build();
@@ -145,12 +148,8 @@ pub fn train<B: AutodiffBackend>(
 
     let mut training = SupervisedTraining::new(exp_log_path, dataloader_train, dataloader_valid)
         .metric_train(CudaMetric::new())
-        .metric_valid(CudaMetric::new())
-        .metric_train(IterationSpeedMetric::new())
+        .metric_train_numeric(IterationSpeedMetric::new())
         .metric_train_numeric(LossMetric::new())
-        .metric_valid_numeric(LossMetric::new())
-        .metric_train_numeric(PerplexityMetric::new())
-        .metric_valid_numeric(PerplexityMetric::new())
         .metric_train_numeric(LearningRateMetric::new())
         .with_file_checkpointer(CompactRecorder::new())
         .num_epochs(TRAIN_CFG.get().unwrap().num_mini_epochs_auto)
@@ -209,8 +208,8 @@ pub fn train<B: AutodiffBackend>(
     fs::write(
         exp_log_path.join("config.json"),
         sonic_rs::to_string_pretty(&config_json).unwrap(),
-    )
-    .unwrap();
+    ).unwrap();
+
     CompactRecorder::new()
         .record(result.model.into_record(), exp_log_path.join("model"))
         .unwrap();
