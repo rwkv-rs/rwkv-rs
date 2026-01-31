@@ -10,6 +10,7 @@ default = ["std", "train"]
 std = ["burn/std", "burn-optim/std"]
 train = [
     "dep:burn-train",
+    "dep:burn-ndarray",
     "burn/train",
     "autodiff",
     "dataset",
@@ -65,6 +66,7 @@ burn-train = { workspace = true, default-features = false, features = [], option
 burn-optim = { workspace = true, default-features = false, features = [] }
 burn-fusion = { workspace = true, default-features = false, optional = true }
 burn-cubecl = { workspace = true, default-features = false, optional = true }
+burn-ndarray = { workspace = true, default-features = false, optional = true }
 
 # === Serialization ===
 serde = { workspace = true }
@@ -93,6 +95,7 @@ redis = { workspace = true }
 # === Utilities ===
 primes = { workspace = true }
 dialoguer = { workspace = true }
+derive-new = { workspace = true }
 
 # === Monitoring ===
 wandb = { workspace = true }
