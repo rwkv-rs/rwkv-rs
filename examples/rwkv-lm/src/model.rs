@@ -12,7 +12,7 @@ use rwkv::custom::train::{InferenceStep, TrainOutput, TrainStep};
 use rwkv::nn::cells::causal::{MultiCausalCells, MultiCausalCellsConfig};
 use rwkv::nn::functions::init_weights::{orthogonal_init, uniform_init};
 use rwkv::nn::kernels::l2wrap::{l2wrap, L2WrapBackend};
-use rwkv::nn::kernels::wkv7::Wkv7Backend;
+use rwkv::nn::kernels::wkv7_pretrain::Wkv7PretrainBackend;
 use rwkv::train::learner::next_token_prediction::NextTokenPredictionOutput;
 use crate::data::batcher::AutoRegressiveBatch;
 
@@ -86,7 +86,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
         item: AutoRegressiveBatch<B>,
     ) -> NextTokenPredictionOutput<B>
     where
-        B: Wkv7Backend + L2WrapBackend,
+        B: Wkv7PretrainBackend + L2WrapBackend,
     {
         let [batch_size, context_length] = item.inputs.dims();
         let device = &self.embed.devices()[0];
@@ -121,7 +121,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
 
 
 /// Define training step
-impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegressiveModel<B> {
+impl<B: AutodiffBackend + Wkv7PretrainBackend + L2WrapBackend> TrainStep for AutoRegressiveModel<B> {
     type Input = AutoRegressiveBatch<B>;
     type Output = NextTokenPredictionOutput<B>;
 
@@ -138,7 +138,7 @@ impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegress
 }
 
 /// Define validation step
-impl<B: Backend + Wkv7Backend + L2WrapBackend> InferenceStep for AutoRegressiveModel<B> {
+impl<B: Backend + Wkv7PretrainBackend + L2WrapBackend> InferenceStep for AutoRegressiveModel<B> {
     type Input = AutoRegressiveBatch<B>;
     type Output = NextTokenPredictionOutput<B>;
 

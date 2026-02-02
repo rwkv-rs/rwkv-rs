@@ -29,7 +29,7 @@ use rwkv::custom::train::MultiDeviceOptim;
 use rwkv::custom::optim::LearningRate;
 use rwkv::data::mmap::sample::Sampler;
 use rwkv::nn::kernels::l2wrap::L2WrapBackend;
-use rwkv::nn::kernels::wkv7::Wkv7Backend;
+use rwkv::nn::kernels::wkv7_pretrain::Wkv7PretrainBackend;
 use rwkv::train::data::sliding::{MmapBinReader, SlidingDataset};
 use rwkv::train::optim::lr_scheduler::WsdLrSchedulerConfig;
 use rwkv::train::optim::optimizer::GroupedOptimizerConfig;
@@ -48,8 +48,8 @@ pub fn train<B: AutodiffBackend>(
     mut train_cfg_builder: FinalTrainConfigBuilder,
     exp_log_path: &Path, // Experiment log directory (also used for artifacts)
 ) where
-    B: Wkv7Backend + L2WrapBackend,
-    B::InnerBackend: Wkv7Backend + L2WrapBackend,
+    B: Wkv7PretrainBackend + L2WrapBackend,
+    B::InnerBackend: Wkv7PretrainBackend + L2WrapBackend,
 {
     let bin_path = PathBuf::from(train_cfg_builder.get_dataset_base_path().unwrap())
         .join(train_cfg_builder.get_filename_without_extensions().unwrap())

@@ -1,5 +1,5 @@
 use crate::{
-    kernels::wkv7::Wkv7Backend,
+    kernels::wkv7_pretrain::Wkv7PretrainBackend,
     modules::{
         channel_mixer::{ChannelMixer, ChannelMixerConfig},
         time_mixer::{TimeMixer, TimeMixerConfig},
@@ -67,7 +67,7 @@ impl<B: Backend> MultiCausalCells<B> {
         s: Option<Vec<CausalCellState<B>>>,
     ) -> (Tensor<B, 3>, Vec<CausalCellState<B>>)
     where
-        B: Wkv7Backend,
+        B: Wkv7PretrainBackend,
     {
         let mut states = s.unwrap_or_else(|| self.init_states(x.dims()[0], &x.device()));
 
@@ -155,7 +155,7 @@ impl<B: Backend> CausalCell<B> {
         state: CausalCellState<B>,
     ) -> (Tensor<B, 3>, Tensor<B, 3>, CausalCellState<B>)
     where
-        B: Wkv7Backend,
+        B: Wkv7PretrainBackend,
     {
         let x = x;
 

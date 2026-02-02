@@ -5,14 +5,16 @@ const W_SCALE: f32 = -0.6065306597; // -exp(-0.5), matches RWKV7 clampw CUDA ker
 
 #[cube(launch)]
 pub fn wkv7_forward_kernel<F: Float>(
-    inputs: &Wkv7Inputs<F>,
-    outputs: &mut Wkv7Outputs<F>,
+    inputs: &Wkv7ForwardInputs<F>,
+    outputs: &mut Wkv7ForwardOutputs<F>,
     #[comptime] config: Wkv7Config,
 ) {
     let sequence_length = comptime![config.sequence_length];
     let num_heads = comptime![config.num_heads];
     let head_size = comptime![config.head_size];
     let chunk_length = comptime![config.chunk_length];
+    let use_initial_state = comptime![config.use_initial_state] != 0;
+    let return_final_state = comptime![config.return_final_state] != 0;
 
     let batch_index = CUBE_POS_Y as usize;
     let head_index = CUBE_POS_X as usize;
@@ -24,12 +26,19 @@ pub fn wkv7_forward_kernel<F: Float>(
 
     let mut state = Array::<F>::new(head_size);
 
-    let initial_state_base =
-        (batch_index * num_heads + head_index) * head_size * head_size + head_dim_index * head_size;
+    if use_initial_state {
+        let initial_state_base = (batch_index * num_heads + head_index) * head_size * head_size
+            + head_dim_index * head_size;
 
-    #[unroll(true)]
-    for i in 0..head_size {
-        state[i] = inputs.initial_state[initial_state_base + i];
+        #[unroll(true)]
+        for i in 0..head_size {
+            state[i] = inputs.initial_state[initial_state_base + i];
+        }
+    } else {
+        #[unroll(true)]
+        for i in 0..head_size {
+            state[i] = F::new(0.0);
+        }
     }
 
     let mut shared_receptance = SharedMemory::<F>::new(head_size);
@@ -92,6 +101,16 @@ pub fn wkv7_forward_kernel<F: Float>(
             }
         }
     }
+
+    if return_final_state {
+        let final_state_base = (batch_index * num_heads + head_index) * head_size * head_size
+            + head_dim_index * head_size;
+
+        #[unroll(true)]
+        for i in 0..head_size {
+            outputs.final_state[final_state_base + i] = state[i];
+        }
+    }
 }
 
 #[cube(launch)]
@@ -104,6 +123,9 @@ pub fn wkv7_backward_kernel<F: Float>(
     let num_heads = comptime![config.num_heads];
     let head_size = comptime![config.head_size];
     let chunk_length = comptime![config.chunk_length];
+    let state_line_size = comptime![config.state_line_size];
+    let use_final_state_grad = comptime![config.use_final_state_grad] != 0;
+    let write_initial_state_grad = comptime![config.write_initial_state_grad] != 0;
 
     let batch_index = CUBE_POS_Y as usize;
     let head_index = CUBE_POS_X as usize;
@@ -120,8 +142,25 @@ pub fn wkv7_backward_kernel<F: Float>(
     #[unroll(true)]
     for i in 0..head_size {
         state_transposed[i] = F::new(0.0);
-        state_grad[i] = F::new(0.0);
-        state_transposed_grad[i] = F::new(0.0);
+    }
+
+    if use_final_state_grad {
+        let final_state_base =
+            (batch_index * num_heads + head_index) * head_size * head_size;
+        let row_base = final_state_base + head_dim_index * head_size;
+        let col_base = final_state_base + head_dim_index;
+
+        #[unroll(true)]
+        for i in 0..head_size {
+            state_grad[i] = inputs.final_state_grad[row_base + i];
+            state_transposed_grad[i] = inputs.final_state_grad[col_base + i * head_size];
+        }
+    } else {
+        #[unroll(true)]
+        for i in 0..head_size {
+            state_grad[i] = F::new(0.0);
+            state_transposed_grad[i] = F::new(0.0);
+        }
     }
 
     let mut shared_receptance = SharedMemory::<F>::new(head_size);
@@ -134,12 +173,6 @@ pub fn wkv7_backward_kernel<F: Float>(
     let mut shared_removed_state = SharedMemory::<F>::new(head_size);
     let mut shared_replaced_state_grad = SharedMemory::<F>::new(head_size);
 
-    // let mut receptance_indexed: F = F::new(0.0);
-    // let mut weight_decay_indexed: F = F::new(0.0);
-    // let mut key_indexed: F = F::new(0.0);
-    // let mut removal_indexed: F = F::new(0.0);
-    // let mut replacement_indexed: F = F::new(0.0);
-    // let mut output_grad_indexed: F = F::new(0.0);
     let t = RuntimeCell::<usize>::new(sequence_length);
 
     while t.read() > 0 {
@@ -182,10 +215,16 @@ pub fn wkv7_backward_kernel<F: Float>(
                 * head_size
                 + (t.read() / chunk_length) * head_size * head_size
                 + head_dim_index * head_size;
+            let line_base = base / state_line_size;
 
             #[unroll(true)]
-            for i in 0..head_size {
-                state_transposed[i] = inputs.state[base + i];
+            for j in 0..(head_size / state_line_size) {
+                let line = inputs.state[line_base + j];
+                #[unroll(true)]
+                for k in 0..state_line_size {
+                    let idx = j * state_line_size + k;
+                    state_transposed[idx] = line[k];
+                }
             }
         }
 
@@ -258,17 +297,19 @@ pub fn wkv7_backward_kernel<F: Float>(
         }
     }
 
-    let initial_state_base =
-        (batch_index * num_heads + head_index) * head_size * head_size + head_dim_index * head_size;
+    if write_initial_state_grad {
+        let initial_state_base = (batch_index * num_heads + head_index) * head_size * head_size
+            + head_dim_index * head_size;
 
-    #[unroll(true)]
-    for i in 0..head_size {
-        outputs.initial_state_grad[initial_state_base + i] = state_grad[i];
+        #[unroll(true)]
+        for i in 0..head_size {
+            outputs.initial_state_grad[initial_state_base + i] = state_grad[i];
+        }
     }
 }
 
 #[derive(CubeLaunch, CubeType)]
-pub struct Wkv7Inputs<F: Float> {
+pub struct Wkv7ForwardInputs<F: Float> {
     pub weight_decay: Tensor<F>,
     pub receptance: Tensor<F>,
     pub key: Tensor<F>,
@@ -279,10 +320,11 @@ pub struct Wkv7Inputs<F: Float> {
 }
 
 #[derive(CubeLaunch, CubeType)]
-pub struct Wkv7Outputs<F: Float> {
+pub struct Wkv7ForwardOutputs<F: Float> {
     pub state: Tensor<F>,
     pub removal_state: Tensor<F>,
     pub output: Tensor<F>,
+    pub final_state: Tensor<F>,
 }
 
 #[derive(CubeLaunch, CubeType)]
@@ -293,9 +335,10 @@ pub struct Wkv7BackwardInputs<F: Float> {
     pub value: Tensor<F>,
     pub removal: Tensor<F>,
     pub replacement: Tensor<F>,
-    pub state: Tensor<F>,
+    pub state: Tensor<Line<F>>,
     pub removal_state: Tensor<F>,
     pub output_grad: Tensor<F>,
+    pub final_state_grad: Tensor<F>,
 }
 
 #[derive(CubeLaunch, CubeType)]
@@ -311,9 +354,14 @@ pub struct Wkv7BackwardOutputs<F: Float> {
 
 #[derive(CubeLaunch, CubeType, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Wkv7Config {
-    pub _batch_size: usize,
     pub sequence_length: usize,
     pub num_heads: usize,
     pub head_size: usize,
     pub chunk_length: usize,
+    pub state_line_size: LineSize,
+    // CubeCL does not allow bool as a launchable scalar; use u32 flags for comptime.
+    pub use_initial_state: u32,
+    pub return_final_state: u32,
+    pub use_final_state_grad: u32,
+    pub write_initial_state_grad: u32,
 }

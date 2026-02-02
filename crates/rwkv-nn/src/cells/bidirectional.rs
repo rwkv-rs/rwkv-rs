@@ -9,7 +9,7 @@ use burn::{
 use crate::{
     cells::causal::{CausalCell, CausalCellConfig, CausalCellState},
     functions::lerp::lerp,
-    kernels::wkv7::Wkv7Backend,
+    kernels::wkv7_pretrain::Wkv7PretrainBackend,
 };
 
 #[derive(Config, Debug)]
@@ -77,7 +77,7 @@ impl<B: Backend> BidirectionalCell<B> {
         state: BidirectionalCellState<B>,
     ) -> (Tensor<B, 3>, Tensor<B, 3>, BidirectionalCellState<B>)
     where
-        B: Wkv7Backend,
+        B: Wkv7PretrainBackend,
     {
         let (x_past2future, new_v_first_past2future, new_state_past2future) = self
             .causal_past2future

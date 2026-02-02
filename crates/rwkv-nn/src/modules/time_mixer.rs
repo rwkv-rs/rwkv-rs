@@ -15,7 +15,7 @@ use crate::{
         normalize::normalize,
         token_shift::token_shift,
     },
-    kernels::wkv7::{Wkv7Backend, wkv7_forward},
+    kernels::wkv7_pretrain::{Wkv7PretrainBackend, wkv7_pretrain_forward},
     layers::lora::{ActivationFn, LoRA, LoRAConfig, LoRARanks, LoRAType},
 };
 
@@ -291,7 +291,7 @@ impl<B: Backend> TimeMixer<B> {
         state: Tensor<B, 4>,
     ) -> (Tensor<B, 3>, Tensor<B, 3>, Tensor<B, 2>, Tensor<B, 4>)
     where
-        B: Wkv7Backend,
+        B: Wkv7PretrainBackend,
     {
         let [batch_size_per_device, context_length, embedded_dim] = x.dims();
 
@@ -342,20 +342,21 @@ impl<B: Backend> TimeMixer<B> {
 
         let gate = self.param_output_gate_lora.forward(x_gate);
 
-        let (final_state, _sa, y_out) = wkv7_forward(
+        let wkv_out = wkv7_pretrain_forward(
             wkv_weight_decay_input.clone(),
             wkv_receptance_input.clone(),
             wkv_key_input.clone(),
             wkv_value_input.clone(),
             wkv_removal_input.clone(),
             wkv_replacement_input.clone(),
-            Some(state),
             16,
         );
 
-        let out = y_out.reshape([batch_size_per_device, context_length, embedded_dim]);
+        let out = wkv_out
+            .output
+            .reshape([batch_size_per_device, context_length, embedded_dim]);
 
-        let _current_vk_state = final_state.clone();
+        let _current_vk_state = state.clone();
 
         let out: Tensor<B, 2> = out.reshape([batch_size_per_device * context_length, embedded_dim]);
 
@@ -381,7 +382,7 @@ impl<B: Backend> TimeMixer<B> {
 
         let out = self.projection_output.forward(out_gated);
 
-        (out, v_first, x_state_out, final_state)
+        (out, v_first, x_state_out, state)
     }
 
     pub fn weight_prepare(
