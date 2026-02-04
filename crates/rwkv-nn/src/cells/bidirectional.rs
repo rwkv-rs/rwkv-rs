@@ -7,8 +7,9 @@ use burn::{
 };
 
 use crate::{
-    cells::causal::{CausalCell, CausalCellConfig, CausalCellState},
+    cells::causal::{CausalCell, CausalCellConfig, CausalCellIO, CausalCellState},
     functions::lerp::lerp,
+    kernels::wkv7_kernel::KernelPretrain,
     kernels::wkv7_pretrain::Wkv7PretrainBackend,
 };
 
@@ -21,7 +22,11 @@ pub struct BidirectionalCellConfig {
 }
 
 impl BidirectionalCellConfig {
-    pub fn init<B: Backend>(&self, cell_id: usize, device: &B::Device) -> BidirectionalCell<B> {
+    pub fn init<B: Backend>(
+        &self,
+        cell_id: usize,
+        device: &B::Device,
+    ) -> BidirectionalCell<B> {
         BidirectionalCell {
             causal_past2future: CausalCellConfig::new(
                 self.num_cells,
@@ -79,16 +84,54 @@ impl<B: Backend> BidirectionalCell<B> {
     where
         B: Wkv7PretrainBackend,
     {
-        let (x_past2future, new_v_first_past2future, new_state_past2future) = self
-            .causal_past2future
-            .forward(x.clone(), v_first.clone(), state.causal_past2future);
+        let BidirectionalCellState {
+            causal_past2future,
+            causal_future2past,
+        } = state;
 
-        let (x_future2past, new_v_first_future2past, new_state_future2past) =
-            self.causal_future2past.forward(
-                x.flip([1]),
-                v_first.clone(),
-                state.causal_future2past,
-            );
+        let CausalCellState {
+            wkv_state: past_wkv_state,
+            embedded_token_shift_for_time_mix: past_time_shift,
+            embedded_token_shift_for_channel_mix: past_channel_shift,
+        } = causal_past2future;
+
+        let past_output = self.causal_past2future.forward::<KernelPretrain>(CausalCellIO {
+            embedded_context: x.clone(),
+            value_from_first_cell: v_first.clone(),
+            wkv_state: past_wkv_state,
+            embedded_token_shift_for_time_mix: past_time_shift,
+            embedded_token_shift_for_channel_mix: past_channel_shift,
+        });
+
+        let x_past2future = past_output.embedded_context;
+        let new_v_first_past2future = past_output.value_from_first_cell;
+        let new_state_past2future = CausalCellState {
+            wkv_state: past_output.wkv_state,
+            embedded_token_shift_for_time_mix: past_output.embedded_token_shift_for_time_mix,
+            embedded_token_shift_for_channel_mix: past_output.embedded_token_shift_for_channel_mix,
+        };
+
+        let CausalCellState {
+            wkv_state: future_wkv_state,
+            embedded_token_shift_for_time_mix: future_time_shift,
+            embedded_token_shift_for_channel_mix: future_channel_shift,
+        } = causal_future2past;
+
+        let future_output = self.causal_future2past.forward::<KernelPretrain>(CausalCellIO {
+            embedded_context: x.flip([1]),
+            value_from_first_cell: v_first.clone(),
+            wkv_state: future_wkv_state,
+            embedded_token_shift_for_time_mix: future_time_shift,
+            embedded_token_shift_for_channel_mix: future_channel_shift,
+        });
+
+        let x_future2past = future_output.embedded_context;
+        let new_v_first_future2past = future_output.value_from_first_cell;
+        let new_state_future2past = CausalCellState {
+            wkv_state: future_output.wkv_state,
+            embedded_token_shift_for_time_mix: future_output.embedded_token_shift_for_time_mix,
+            embedded_token_shift_for_channel_mix: future_output.embedded_token_shift_for_channel_mix,
+        };
 
         let x_future2past_rev = x_future2past.flip([1]);
 

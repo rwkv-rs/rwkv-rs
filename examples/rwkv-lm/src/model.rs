@@ -9,9 +9,10 @@ use rwkv::custom::nn::{Embedding, EmbeddingConfig, LayerNorm, LayerNormConfig, L
 use rwkv::custom::nn::loss::CrossEntropyLossConfig;
 use rwkv::custom::tensor::backend::{AutodiffBackend, Backend};
 use rwkv::custom::train::{InferenceStep, TrainOutput, TrainStep};
-use rwkv::nn::cells::causal::{MultiCausalCells, MultiCausalCellsConfig};
+use rwkv::nn::cells::causal::{MultiCausalCells, MultiCausalCellsConfig, MultiCausalCellsIO};
 use rwkv::nn::functions::init_weights::{orthogonal_init, uniform_init};
 use rwkv::nn::kernels::l2wrap::{l2wrap, L2WrapBackend};
+use rwkv::nn::kernels::wkv7_kernel::KernelPretrain;
 use rwkv::nn::kernels::wkv7_pretrain::Wkv7PretrainBackend;
 use rwkv::train::learner::next_token_prediction::NextTokenPredictionOutput;
 use crate::data::batcher::AutoRegressiveBatch;
@@ -34,8 +35,12 @@ impl AutoRegressiveModelConfig {
             embed: EmbeddingConfig::new(self.vocabulary_size, self.embedded_dim).init(device),
             layer_norm_for_first_cell: LayerNormConfig::new(self.embedded_dim).init(device),
             cells: MultiCausalCellsConfig::new(
-                self.num_cells, self.embedded_dim, self.num_heads, self.head_size
-            ).init(device),
+                self.num_cells,
+                self.embedded_dim,
+                self.num_heads,
+                self.head_size,
+            )
+            .init(device),
             layer_norm_for_unembed: LayerNormConfig::new(self.embedded_dim).init(device),
             unembed: LinearConfig::new(self.embedded_dim, self.vocabulary_size)
                 .with_bias(false)
@@ -94,11 +99,19 @@ impl<B: Backend> AutoRegressiveModel<B> {
         let inputs = item.inputs.to_device(device);
         let targets = item.targets.to_device(device);
 
-        let x = self.embed.forward(inputs);
-        let x = self.layer_norm_for_first_cell.forward(x);
-        let (x, _states) = self.cells.forward(x, None);
-        let x = self.layer_norm_for_unembed.forward(x);
-        let logits = self.unembed.forward(x);
+        let embedded_context = self.embed.forward(inputs);
+        let embedded_context_normalized = self.layer_norm_for_first_cell.forward(embedded_context);
+        let state = self.cells.init_state_tensors(batch_size, device);
+        let multi_causal_cells_input = MultiCausalCellsIO {
+            embedded_context: embedded_context_normalized,
+            wkv_state: state.wkv_state,
+            embedded_token_shift_for_time_mix: state.embedded_token_shift_for_time_mix,
+            embedded_token_shift_for_channel_mix: state.embedded_token_shift_for_channel_mix,
+        };
+        let multi_causal_cells_output = self.cells.forward::<KernelPretrain>(multi_causal_cells_input);
+        let embedded_context = multi_causal_cells_output.embedded_context;
+        let embedded_context_normalized = self.layer_norm_for_unembed.forward(embedded_context);
+        let logits = self.unembed.forward(embedded_context_normalized);
 
         let logits_flat = logits.reshape([
             batch_size * context_length, self.vocabulary_size

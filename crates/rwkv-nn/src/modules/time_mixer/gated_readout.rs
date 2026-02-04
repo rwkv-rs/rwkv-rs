@@ -103,44 +103,52 @@ impl<B: Backend> GatedReadout<B> {
         }
     }
 
-    pub fn forward(
-        &self,
-        x: Tensor<B, 3>,
-        time_shifted_diff: Tensor<B, 3>,
-        wkv_output: Tensor<B, 4>,
-        wkv_receptance_input: Tensor<B, 4>,
-        wkv_key_input: Tensor<B, 4>,
-        wkv_value_input: Tensor<B, 4>,
-    ) -> Tensor<B, 3> {
-        let [batch_size_per_device, context_length, embedded_dim] = x.dims();
+    pub fn forward(&self, gated_readout_input: GatedReadoutInput<B>) -> Tensor<B, 3> {
+        let GatedReadoutInput {
+            embedded_context,
+            token_shifted_diff,
+            wkv7_forward_output,
+            wkv7_forward_input_receptance,
+            wkv7_forward_input_replacement_key,
+            wkv7_forward_input_value,
+        } = gated_readout_input;
 
-        let x_gate = x + time_shifted_diff * self.param_gate.val();
+        let [batch_size_per_device, context_length, embedded_dim] = embedded_context.dims();
 
-        let gate = self.param_output_gate_lora.forward(x_gate);
+        let embedded_context_gate = embedded_context + token_shifted_diff * self.param_gate.val();
 
-        let out = wkv_output.reshape([batch_size_per_device, context_length, embedded_dim]);
+        let gate = self.param_output_gate_lora.forward(embedded_context_gate);
 
-        let out: Tensor<B, 2> = out.reshape([batch_size_per_device * context_length, embedded_dim]);
+        let wkv7_forward_output_normalized = self
+            .group_norm
+            .forward(
+                wkv7_forward_output.reshape([batch_size_per_device * context_length, embedded_dim]),
+            )
+            .reshape([batch_size_per_device, context_length, embedded_dim]);
 
-        let out_normalized = self.group_norm.forward(out).reshape([
-            batch_size_per_device,
-            context_length,
-            embedded_dim,
-        ]);
-
-        let bonus: Tensor<B, 4> = (wkv_receptance_input
-            * wkv_key_input
+        let bonus: Tensor<B, 4> = (wkv7_forward_input_receptance
+            * wkv7_forward_input_replacement_key
             * self
                 .param_receptance_key_bonus
                 .val()
                 .unsqueeze_dims(&[0, 1]))
         .sum_dim(3)
-            * wkv_value_input;
+            * wkv7_forward_input_value;
 
-        let bonus: Tensor<B, 3> = bonus.reshape([batch_size_per_device, context_length, embedded_dim]);
+        let bonus: Tensor<B, 3> =
+            bonus.reshape([batch_size_per_device, context_length, embedded_dim]);
 
-        let out_gated = (out_normalized + bonus) * gate;
+        let out_gated = (wkv7_forward_output_normalized + bonus) * gate;
 
         self.projection_output.forward(out_gated)
     }
+}
+
+pub struct GatedReadoutInput<B: Backend> {
+    pub embedded_context: Tensor<B, 3>,
+    pub token_shifted_diff: Tensor<B, 3>,
+    pub wkv7_forward_output: Tensor<B, 4>,
+    pub wkv7_forward_input_receptance: Tensor<B, 4>,
+    pub wkv7_forward_input_replacement_key: Tensor<B, 4>,
+    pub wkv7_forward_input_value: Tensor<B, 4>,
 }

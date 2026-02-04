@@ -1,11 +1,10 @@
-use crate::{
-    kernels::wkv7_pretrain::Wkv7PretrainBackend,
-    modules::{
-        channel_mixer::{ChannelMixer, ChannelMixerConfig},
-        time_mixer::{TimeMixer, TimeMixerConfig},
-    },
+use crate::kernels::wkv7_kernel::Wkv7Kernel;
+use crate::modules::channel_mixer::ChannelMixerIO;
+use crate::modules::time_mixer::TimeMixerIO;
+use crate::modules::{
+    channel_mixer::{ChannelMixer, ChannelMixerConfig},
+    time_mixer::{TimeMixer, TimeMixerConfig},
 };
-use burn::prelude::Float;
 use burn::{
     config::Config,
     module::Module,
@@ -61,46 +60,127 @@ impl<B: Backend> MultiCausalCells<B> {
             .for_each(|cell| cell.init_weights(device));
     }
 
-    pub fn forward(
+    pub fn init_state_tensors(
         &self,
-        x: Tensor<B, 3, Float>,
-        s: Option<Vec<CausalCellState<B>>>,
-    ) -> (Tensor<B, 3>, Vec<CausalCellState<B>>)
-    where
-        B: Wkv7PretrainBackend,
-    {
-        let mut states = s.unwrap_or_else(|| self.init_states(x.dims()[0], &x.device()));
+        batch_size: usize,
+        device: &B::Device,
+    ) -> MultiCausalCellsState<B> {
+        MultiCausalCellsState {
+            wkv_state: Tensor::<B, 5>::zeros(
+                [
+                    batch_size,
+                    self.num_cells,
+                    self.num_heads,
+                    self.head_size,
+                    self.head_size,
+                ],
+                device,
+            ),
+            embedded_token_shift_for_time_mix: Tensor::<B, 3>::zeros(
+                [batch_size, self.num_cells, self.embedded_dim],
+                device,
+            ),
+            embedded_token_shift_for_channel_mix: Tensor::<B, 3>::zeros(
+                [batch_size, self.num_cells, self.embedded_dim],
+                device,
+            ),
+        }
+    }
 
-        let mut x = x;
-        let mut v_first = Tensor::zeros_like(&x);
+    pub fn forward<K: Wkv7Kernel<B>>(
+        &self,
+        multi_causal_cells_input: MultiCausalCellsIO<B>,
+    ) -> MultiCausalCellsIO<B> {
+        let [batch_size, _context_length, _embedded_dim] =
+            multi_causal_cells_input.embedded_context.dims();
+
+        let mut embedded_context = multi_causal_cells_input.embedded_context;
+        let mut value_from_first_cell = Tensor::zeros_like(&embedded_context);
+
+        let mut wkv_state = multi_causal_cells_input.wkv_state;
+        let mut embedded_token_shift_for_time_mix =
+            multi_causal_cells_input.embedded_token_shift_for_time_mix;
+        let mut embedded_token_shift_for_channel_mix =
+            multi_causal_cells_input.embedded_token_shift_for_channel_mix;
 
         for (cell_id, cell) in self.cells.iter().enumerate() {
-            let (new_x, new_v_first, new_state) = cell.forward(x, v_first, states[cell_id].clone());
+            let cell_wkv_state = wkv_state
+                .clone()
+                .slice([
+                    0..batch_size,
+                    cell_id..cell_id + 1,
+                    0..self.num_heads,
+                    0..self.head_size,
+                    0..self.head_size,
+                ])
+                .squeeze_dim(1);
 
-            x = new_x;
+            let cell_time_shift = embedded_token_shift_for_time_mix
+                .clone()
+                .slice([0..batch_size, cell_id..cell_id + 1, 0..self.embedded_dim])
+                .squeeze_dim(1);
 
-            v_first = new_v_first;
+            let cell_channel_shift = embedded_token_shift_for_channel_mix
+                .clone()
+                .slice([0..batch_size, cell_id..cell_id + 1, 0..self.embedded_dim])
+                .squeeze_dim(1);
 
-            states[cell_id] = new_state;
+            let cell_output = cell.forward::<K>(CausalCellIO {
+                embedded_context,
+                value_from_first_cell,
+                wkv_state: cell_wkv_state,
+                embedded_token_shift_for_time_mix: cell_time_shift,
+                embedded_token_shift_for_channel_mix: cell_channel_shift,
+            });
+
+            embedded_context = cell_output.embedded_context;
+            value_from_first_cell = cell_output.value_from_first_cell;
+
+            wkv_state = wkv_state.slice_assign(
+                [
+                    0..batch_size,
+                    cell_id..cell_id + 1,
+                    0..self.num_heads,
+                    0..self.head_size,
+                    0..self.head_size,
+                ],
+                cell_output.wkv_state.unsqueeze_dim(1),
+            );
+
+            embedded_token_shift_for_time_mix = embedded_token_shift_for_time_mix.slice_assign(
+                [0..batch_size, cell_id..cell_id + 1, 0..self.embedded_dim],
+                cell_output.embedded_token_shift_for_time_mix.unsqueeze_dim(1),
+            );
+
+            embedded_token_shift_for_channel_mix =
+                embedded_token_shift_for_channel_mix.slice_assign(
+                    [0..batch_size, cell_id..cell_id + 1, 0..self.embedded_dim],
+                    cell_output
+                        .embedded_token_shift_for_channel_mix
+                        .unsqueeze_dim(1),
+                );
         }
-        (x, states)
-    }
 
-    fn init_states(&self, batch_size: usize, device: &B::Device) -> Vec<CausalCellState<B>> {
-        (0..self.num_cells)
-            .map(|_| CausalCellState {
-                time_shift_embedded: Tensor::<B, 2>::zeros([batch_size, self.embedded_dim], device),
-                time_mix_state: Tensor::<B, 4, Float>::zeros(
-                    [batch_size, self.num_heads, self.head_size, self.head_size],
-                    device,
-                ),
-                channel_shift_embedded: Tensor::<B, 2>::zeros(
-                    [batch_size, self.embedded_dim],
-                    device,
-                ),
-            })
-            .collect::<Vec<_>>()
+        MultiCausalCellsIO {
+            embedded_context,
+            wkv_state,
+            embedded_token_shift_for_time_mix,
+            embedded_token_shift_for_channel_mix,
+        }
     }
+}
+
+pub struct MultiCausalCellsState<B: Backend> {
+    pub wkv_state: Tensor<B, 5>,
+    pub embedded_token_shift_for_time_mix: Tensor<B, 3>,
+    pub embedded_token_shift_for_channel_mix: Tensor<B, 3>,
+}
+
+pub struct MultiCausalCellsIO<B: Backend> {
+    pub embedded_context: Tensor<B, 3>,  // [batch_size, context_length, embedded_dim]
+    pub wkv_state: Tensor<B, 5>,  // [batch_size, num_cells, num_heads, head_size, head_size]
+    pub embedded_token_shift_for_time_mix: Tensor<B, 3>,  // [batch_size, num_cells, embedded_dim]
+    pub embedded_token_shift_for_channel_mix: Tensor<B, 3>,  // [batch_size, num_cells, embedded_dim]
 }
 
 #[derive(Config, Debug)]
@@ -144,54 +224,60 @@ pub struct CausalCell<B: Backend> {
 impl<B: Backend> CausalCell<B> {
     pub fn init_weights(&mut self, device: &B::Device) {
         self.time_mixer.init_weights(device);
-
         self.channel_mixer.init_weights(device);
     }
 
-    pub fn forward(
-        &self,
-        x: Tensor<B, 3>,
-        v_first: Tensor<B, 3>,
-        state: CausalCellState<B>,
-    ) -> (Tensor<B, 3>, Tensor<B, 3>, CausalCellState<B>)
-    where
-        B: Wkv7PretrainBackend,
-    {
-        let x = x;
+    pub fn forward<K: Wkv7Kernel<B>>(&self, causal_cell_input: CausalCellIO<B>) -> CausalCellIO<B> {
+        let embedded_context = causal_cell_input.embedded_context;
 
-        let x_time_mix_input = self.pre_layer_norm_for_time_mix.forward(x.clone());
-
-        let (x_time_mix_output, v_first, time_shift_embedded, time_mix_state) =
-            self.time_mixer.forward(
-                x_time_mix_input,
-                v_first,
-                state.time_shift_embedded,
-                state.time_mix_state,
-            );
-
-        let x = x + x_time_mix_output;
-
-        let x_channel_mix_input = self.pre_layer_norm_for_channel_mix.forward(x.clone());
-
-        let (x_channel_mix_output, channel_shift_embedded) = self
-            .channel_mixer
-            .forward(x_channel_mix_input, state.channel_shift_embedded);
-
-        let x = x + x_channel_mix_output;
-
-        let causal_cell_state = CausalCellState {
-            time_shift_embedded,
-            time_mix_state,
-            channel_shift_embedded,
+        let embedded_context_normalized = self
+            .pre_layer_norm_for_time_mix
+            .forward(embedded_context.clone());
+        let time_mixer_input = TimeMixerIO {
+            embedded_context: embedded_context_normalized,
+            value_from_first_cell: causal_cell_input.value_from_first_cell.clone(),
+            embedded_token_shift: causal_cell_input.embedded_token_shift_for_time_mix,
+            state: causal_cell_input.wkv_state,
         };
 
-        (x, v_first, causal_cell_state)
+        let time_mixer_output = self.time_mixer.forward::<K>(time_mixer_input);
+
+        let embedded_context = embedded_context + time_mixer_output.embedded_context;
+
+        let embedded_context_normalized = self
+            .pre_layer_norm_for_channel_mix
+            .forward(embedded_context.clone());
+
+        let channel_mixer_input = ChannelMixerIO {
+            embedded_context: embedded_context_normalized,
+            embedded_token_shift: causal_cell_input.embedded_token_shift_for_channel_mix,
+        };
+
+        let channel_mixer_output = self.channel_mixer.forward(channel_mixer_input);
+
+        let embedded_context = embedded_context + channel_mixer_output.embedded_context;
+
+        CausalCellIO {
+            embedded_context,
+            value_from_first_cell: time_mixer_output.value_from_first_cell,
+            wkv_state: time_mixer_output.state,
+            embedded_token_shift_for_time_mix: time_mixer_output.embedded_token_shift,
+            embedded_token_shift_for_channel_mix: channel_mixer_output.embedded_token_shift,
+        }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct CausalCellState<B: Backend> {
-    pub time_shift_embedded: Tensor<B, 2>,
-    pub time_mix_state: Tensor<B, 4>,
-    pub channel_shift_embedded: Tensor<B, 2>,
+    pub wkv_state: Tensor<B, 4>,  // [batch_size, num_heads, head_size, head_size]
+    pub embedded_token_shift_for_time_mix: Tensor<B, 2>,  // [batch_size, embedded_dim]
+    pub embedded_token_shift_for_channel_mix: Tensor<B, 2>,  // [batch_size, embedded_dim]
+}
+
+pub struct CausalCellIO<B: Backend> {
+    pub embedded_context: Tensor<B, 3>,  // [batch_size, context_len, embedded_dim]
+    pub value_from_first_cell: Tensor<B, 3>,  // [batch_size, context_len, embedded_dim]
+    pub wkv_state: Tensor<B, 4>,  // [batch_size, num_heads, head_size, head_size]
+    pub embedded_token_shift_for_time_mix: Tensor<B, 2>,  // [batch_size, embedded_dim]
+    pub embedded_token_shift_for_channel_mix: Tensor<B, 2>,  // [batch_size, embedded_dim]
 }

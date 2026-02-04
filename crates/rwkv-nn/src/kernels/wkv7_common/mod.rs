@@ -1,5 +1,18 @@
+use burn::prelude::Backend;
+use burn::Tensor;
+
 pub mod host;
 pub mod kernel;
+
+#[derive(Clone, Debug)]
+pub struct Wkv7ForwardInput<B: Backend> {
+    pub receptance: Tensor<B, 4>,
+    pub weight_decay: Tensor<B, 4>,
+    pub replacement_key: Tensor<B, 4>,
+    pub value: Tensor<B, 4>,
+    pub removal_key_normalized: Tensor<B, 4>,
+    pub replacement: Tensor<B, 4>,
+}
 
 #[derive(Clone, Debug)]
 pub struct Wkv7ForwardOutput<T> {

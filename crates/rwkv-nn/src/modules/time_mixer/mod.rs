@@ -1,19 +1,18 @@
 mod gated_readout;
+pub mod param_state;
 mod weight_prepare;
 
-use burn::{
-    config::Config,
-    module::Module,
-    prelude::*,
-};
+use burn::{config::Config, module::Module, prelude::*};
 
 use crate::{
-    kernels::wkv7_pretrain::{wkv7_pretrain_forward, Wkv7PretrainBackend},
+    kernels::wkv7_kernel::Wkv7Kernel,
     layers::lora::LoRARanks,
 };
 
+use crate::functions::token_shift::get_embedded_token_shift;
+use crate::modules::time_mixer::gated_readout::GatedReadoutInput;
 use gated_readout::{GatedReadout, GatedReadoutConfig};
-use weight_prepare::{WeightPrepare, WeightPrepareConfig, WeightPrepareOutput};
+use weight_prepare::{WeightPrepare, WeightPrepareConfig};
 
 #[derive(Config, Debug)]
 pub struct TimeMixerConfig {
@@ -112,84 +111,52 @@ impl<B: Backend> TimeMixer<B> {
         self.gated_readout.init_weights(device);
     }
 
-    pub fn forward(
-        &self,
-        embedded_context: Tensor<B, 3>,
-        value_first_layer: Tensor<B, 3>,
-        embedded_token_shift: Tensor<B, 2>,
-        state: Tensor<B, 4>,
-    ) -> (Tensor<B, 3>, Tensor<B, 3>, Tensor<B, 2>, Tensor<B, 4>)
-    where
-        B: Wkv7PretrainBackend,
-    {
+    pub fn forward<K: Wkv7Kernel<B>>(&self, time_mixer_input: TimeMixerIO<B>) -> TimeMixerIO<B> {
+        let TimeMixerIO {
+            embedded_context,
+            value_from_first_cell,
+            embedded_token_shift,
+            state,
+        } = time_mixer_input;
+
         let [batch_size_per_device, context_length, _embedded_dim] = embedded_context.dims();
 
         let (num_heads, head_size) = (self.num_heads, self.head_size);
 
-        let output_embedded_token_shift = embedded_context
-            .clone()
-            .slice([
-                0..batch_size_per_device,
-                (context_length - 1)..context_length,
-            ])
-            .squeeze_dim(1);
+        let output_embedded_token_shift = get_embedded_token_shift(embedded_context.clone());
 
-        let WeightPrepareOutput {
-            token_shifted_diff,
-            value_first_layer,
-            receptance,
-            weight_decay,
-            replacement_key,
-            value,
-            removal_key_normalized,
-            replacement,
-        } = self
-            .weight_prepare
-            .forward(embedded_context.clone(), value_first_layer.clone(), embedded_token_shift.clone());
-
-        let wkv_receptance_input: Tensor<B, 4> =
-            receptance.reshape([batch_size_per_device, context_length, num_heads, head_size]);
-
-        let wkv_weight_decay_input: Tensor<B, 4> =
-            weight_decay.reshape([batch_size_per_device, context_length, num_heads, head_size]);
-
-        let wkv_key_input: Tensor<B, 4> =
-            replacement_key.reshape([batch_size_per_device, context_length, num_heads, head_size]);
-
-        let wkv_value_input: Tensor<B, 4> =
-            value.reshape([batch_size_per_device, context_length, num_heads, head_size]);
-
-        let wkv_removal_input: Tensor<B, 4> = removal_key_normalized.reshape([
-            batch_size_per_device,
-            context_length,
-            num_heads,
-            head_size,
-        ]);
-
-        let wkv_replacement_input: Tensor<B, 4> =
-            replacement.reshape([batch_size_per_device, context_length, num_heads, head_size]);
-
-        let wkv_out = wkv7_pretrain_forward(
-            wkv_weight_decay_input.clone(),
-            wkv_receptance_input.clone(),
-            wkv_key_input.clone(),
-            wkv_value_input.clone(),
-            wkv_removal_input.clone(),
-            wkv_replacement_input.clone(),
-            16,
+        let weight_prepare_output = self.weight_prepare.forward(
+            embedded_context.clone(),
+            value_from_first_cell.clone(),
+            embedded_token_shift.clone(),
         );
 
-        let _current_vk_state = state.clone();
-
-        let output_embedded_context = self.gated_readout.forward(
+        let shape = [batch_size_per_device, context_length, num_heads, head_size];
+        let wkv7_forward_input = weight_prepare_output.reshape_to_wkv7_input(shape);
+        let wkv7_forward_output = K::forward(wkv7_forward_input.clone(), state, 16);
+        let gated_readout_input = GatedReadoutInput {
             embedded_context,
-            token_shifted_diff,
-            wkv_out.output,
-            wkv_receptance_input,
-            wkv_key_input,
-            wkv_value_input,
-        );
+            token_shifted_diff: weight_prepare_output.token_shifted_diff,
+            wkv7_forward_output: wkv7_forward_output.output,
+            wkv7_forward_input_receptance: wkv7_forward_input.receptance,
+            wkv7_forward_input_replacement_key: wkv7_forward_input.replacement_key,
+            wkv7_forward_input_value: wkv7_forward_input.value,
+        };
 
-        (output_embedded_context, value_first_layer, output_embedded_token_shift, state)
+        let output_embedded_context = self.gated_readout.forward(gated_readout_input);
+
+        TimeMixerIO {
+            embedded_context: output_embedded_context,
+            value_from_first_cell: weight_prepare_output.value_from_first_cell,
+            embedded_token_shift: output_embedded_token_shift,
+            state: wkv7_forward_output.next_state,
+        }
     }
+}
+
+pub struct TimeMixerIO<B: Backend> {
+    pub embedded_context: Tensor<B, 3>,
+    pub value_from_first_cell: Tensor<B, 3>,
+    pub embedded_token_shift: Tensor<B, 2>,
+    pub state: Tensor<B, 4>,
 }

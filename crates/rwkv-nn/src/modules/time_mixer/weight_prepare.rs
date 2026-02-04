@@ -18,18 +18,7 @@ use crate::{
     },
     layers::lora::{ActivationFn, LoRA, LoRAConfig, LoRAType},
 };
-
-#[derive(Debug)]
-pub struct WeightPrepareOutput<B: Backend> {
-    pub token_shifted_diff: Tensor<B, 3>,
-    pub value_first_layer: Tensor<B, 3>,
-    pub receptance: Tensor<B, 3>,
-    pub weight_decay: Tensor<B, 3>,
-    pub replacement_key: Tensor<B, 3>,
-    pub value: Tensor<B, 3>,
-    pub removal_key_normalized: Tensor<B, 3>,
-    pub replacement: Tensor<B, 3>,
-}
+use crate::kernels::wkv7_common::Wkv7ForwardInput;
 
 #[derive(Config, Debug)]
 pub struct WeightPrepareConfig {
@@ -231,19 +220,19 @@ impl<B: Backend> WeightPrepare<B> {
 
         let (num_heads, head_size) = (self.num_heads, self.head_size);
 
-        let time_shifted_diff = token_shift(x.clone(), x_state) - x.clone();
+        let token_shifted_diff = token_shift(x.clone(), x_state) - x.clone();
 
-        let receptance_input = x.clone() + time_shifted_diff.clone() * self.param_receptance.val();
+        let receptance_input = x.clone() + token_shifted_diff.clone() * self.param_receptance.val();
 
         let weight_decay_input =
-            x.clone() + time_shifted_diff.clone() * self.param_weight_decay.val();
+            x.clone() + token_shifted_diff.clone() * self.param_weight_decay.val();
 
-        let key_input = x.clone() + time_shifted_diff.clone() * self.param_key.val();
+        let key_input = x.clone() + token_shifted_diff.clone() * self.param_key.val();
 
-        let value_input = x.clone() + time_shifted_diff.clone() * self.param_value.val();
+        let value_input = x.clone() + token_shifted_diff.clone() * self.param_value.val();
 
         let learning_rate_input =
-            x.clone() + time_shifted_diff.clone() * self.param_learning_rate.val();
+            x.clone() + token_shifted_diff.clone() * self.param_learning_rate.val();
 
         let receptance = self.projection_receptance.forward(receptance_input);
 
@@ -251,7 +240,7 @@ impl<B: Backend> WeightPrepare<B> {
 
         let value_precursor = self.projection_value.forward(value_input.clone());
 
-        let v_first = if self.cell_id == 0 {
+        let value_from_first_cell = if self.cell_id == 0 {
             value_precursor.clone()
         } else {
             v_first
@@ -274,7 +263,7 @@ impl<B: Backend> WeightPrepare<B> {
                     .forward(value_input),
             );
 
-            lerp(value_precursor, v_first.clone(), nu_t)
+            lerp(value_precursor, value_from_first_cell.clone(), nu_t)
         } else {
             value_precursor
         };
@@ -288,23 +277,49 @@ impl<B: Backend> WeightPrepare<B> {
         let removal_key_reshaped =
             removal_key.reshape([batch_size, sequence_length, num_heads, head_size]);
 
-        let removal_key_normalized = normalize(removal_key_reshaped, 2.0, -1, 1e-12).reshape([
+        let neg_removal_key_normalized = normalize(removal_key_reshaped, 2.0, -1, 1e-12).reshape([
             batch_size,
             sequence_length,
             channel_dim,
         ]);
+        let removal_key_normalized = -neg_removal_key_normalized.clone();
 
-        let replacement = removal_key_normalized.clone() * learning_rate;
+        let replacement = neg_removal_key_normalized.clone() * learning_rate;
 
         WeightPrepareOutput {
-            token_shifted_diff: time_shifted_diff,
-            value_first_layer: v_first,
+            token_shifted_diff,
+            value_from_first_cell,
             receptance,
             weight_decay,
             replacement_key,
             value,
-            removal_key_normalized: -removal_key_normalized,
+            removal_key_normalized,
             replacement,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct WeightPrepareOutput<B: Backend> {
+    pub token_shifted_diff: Tensor<B, 3>,
+    pub value_from_first_cell: Tensor<B, 3>,
+    pub receptance: Tensor<B, 3>,
+    pub weight_decay: Tensor<B, 3>,
+    pub replacement_key: Tensor<B, 3>,
+    pub value: Tensor<B, 3>,
+    pub removal_key_normalized: Tensor<B, 3>,
+    pub replacement: Tensor<B, 3>,
+}
+
+impl<B: Backend> WeightPrepareOutput<B> {
+    pub fn reshape_to_wkv7_input(&self, shape: [usize; 4]) -> Wkv7ForwardInput<B> {
+        Wkv7ForwardInput {
+            receptance: self.receptance.clone().reshape(shape),
+            weight_decay: self.weight_decay.clone().reshape(shape),
+            replacement_key: self.replacement_key.clone().reshape(shape),
+            value: self.value.clone().reshape(shape),
+            removal_key_normalized: self.removal_key_normalized.clone().reshape(shape),
+            replacement: self.replacement.clone().reshape(shape),
         }
     }
 }

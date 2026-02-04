@@ -6,7 +6,7 @@ use burn::{
     tensor::{Tensor, TensorPrimitive, backend::AutodiffBackend, ops::FloatTensor},
 };
 
-use crate::kernels::wkv7_common::Wkv7ForwardOutput;
+use crate::kernels::wkv7_common::{Wkv7ForwardInput, Wkv7ForwardOutput};
 use crate::kernels::wkv7_common::Wkv7BackwardOutput;
 
 pub type Wkv7PretrainForwardOutput<B> = Wkv7ForwardOutput<Tensor<B, 4>>;
@@ -45,21 +45,16 @@ pub trait Wkv7PretrainAutodiffBackend: Wkv7PretrainBackend + AutodiffBackend {}
 
 #[allow(clippy::too_many_arguments)]
 pub fn wkv7_pretrain_forward<B: Wkv7PretrainBackend>(
-    weight_decay: Tensor<B, 4>,
-    receptance: Tensor<B, 4>,
-    key: Tensor<B, 4>,
-    value: Tensor<B, 4>,
-    removal: Tensor<B, 4>,
-    replacement: Tensor<B, 4>,
+    wkv7_forward_input: Wkv7ForwardInput<B>,
     chunk_len: usize,
 ) -> Wkv7PretrainForwardOutput<B> {
     let output = B::wkv7_pretrain_forward(
-        weight_decay.into_primitive().tensor(),
-        receptance.into_primitive().tensor(),
-        key.into_primitive().tensor(),
-        value.into_primitive().tensor(),
-        removal.into_primitive().tensor(),
-        replacement.into_primitive().tensor(),
+        wkv7_forward_input.weight_decay.into_primitive().tensor(),
+        wkv7_forward_input.receptance.into_primitive().tensor(),
+        wkv7_forward_input.replacement_key.into_primitive().tensor(),
+        wkv7_forward_input.value.into_primitive().tensor(),
+        wkv7_forward_input.removal_key_normalized.into_primitive().tensor(),
+        wkv7_forward_input.replacement.into_primitive().tensor(),
         chunk_len,
     );
 
