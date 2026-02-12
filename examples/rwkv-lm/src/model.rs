@@ -3,7 +3,6 @@
 // The model is then trained using Cross-Entropy loss. It contains methods for model initialization
 // (both with and without pre-trained weights), forward pass, inference, training, and validation.
 
-use crate::data::batcher::AutoRegressiveBatch;
 use rwkv::custom::Tensor;
 use rwkv::custom::config::Config;
 use rwkv::custom::module::Module;
@@ -16,9 +15,11 @@ use rwkv::custom::train::{InferenceStep, TrainOutput, TrainStep};
 use rwkv::nn::cells::causal::{MultiCausalCells, MultiCausalCellsConfig, MultiCausalCellsIO};
 use rwkv::nn::functions::init_weights::{orthogonal_init, uniform_init};
 use rwkv::nn::kernels::l2wrap::{L2WrapBackend, l2wrap};
-use rwkv::nn::kernels::wkv7_common::{KernelPretrain, KernelStateTune, Wkv7Backend, Wkv7Kernel};
+use rwkv::nn::kernels::wkv7_common::{Wkv7Backend, Wkv7Kernel};
 use rwkv::nn::modules::time_mixer::param_state::{StateModule, StateModuleConfig};
 use rwkv::train::learner::next_token_prediction::NextTokenPredictionOutput;
+
+use crate::data::batcher::AutoRegressiveBatch;
 
 rwkv::custom_mode!();
 
@@ -97,7 +98,12 @@ impl<B: Backend> AutoRegressiveModel<B> {
         embedded_token_shift_for_time_mix: Option<Tensor<B, 3>>,
         state: Option<Tensor<B, 5>>,
         embedded_token_shift_for_channel_mix: Option<Tensor<B, 3>>,
-    ) -> NextTokenPredictionOutput<B>
+    ) -> (
+        Option<Tensor<B, 3>>,
+        Option<Tensor<B, 5>>,
+        Option<Tensor<B, 3>>,
+        NextTokenPredictionOutput<B>,
+    )
     where
         B: L2WrapBackend,
     {
@@ -133,7 +139,12 @@ impl<B: Backend> AutoRegressiveModel<B> {
         );
 
         // Return the output and loss
-        NextTokenPredictionOutput { loss }
+        (
+            multi_causal_cells_output.embedded_token_shift_for_time_mix,
+            multi_causal_cells_output.state,
+            multi_causal_cells_output.embedded_token_shift_for_channel_mix,
+            NextTokenPredictionOutput { loss },
+        )
     }
 }
 
@@ -145,7 +156,9 @@ impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegress
     #[allow(unused)]
     fn step(&self, item: AutoRegressiveBatch<B>) -> TrainOutput<NextTokenPredictionOutput<B>> {
         // Run forward pass, calculate gradients and return them along with the output
-        let item = self.forward::<KernelPretrain>(item, None, None, None);
+        use rwkv::nn::kernels::wkv7_common::KernelPretrain;
+
+        let (_, _, _, item) = self.forward::<KernelPretrain>(item, None, None, None);
         let grads = item.loss.backward();
 
         TrainOutput::new(self, grads, item)
@@ -154,12 +167,81 @@ impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegress
     #[cfg(feature = "statetune")]
     fn step(&self, item: AutoRegressiveBatch<B>) -> TrainOutput<NextTokenPredictionOutput<B>> {
         // Run forward pass, calculate gradients and return them along with the output
+        use rwkv::nn::kernels::wkv7_common::KernelStateTune;
+
         let [batch_size, _] = item.inputs.dims();
         let state = self.state.get_state(batch_size);
-        let item = self.forward::<KernelStateTune>(item, None, Some(state), None);
+        let (_, _, _, item) = self.forward::<KernelStateTune>(item, None, Some(state), None);
         let grads = item.loss.backward();
 
         TrainOutput::new(self, grads, item)
+    }
+
+    #[cfg(feature = "statepass")]
+    fn step(&self, item: AutoRegressiveBatch<B>) -> TrainOutput<NextTokenPredictionOutput<B>> {
+        // Run forward pass, calculate gradients and return them along with the output
+        use rwkv::config::validated::train::TRAIN_CFG;
+        use rwkv::nn::kernels::wkv7_common::KernelStatePass;
+
+        let [batch_size, context_length] = item.inputs.dims();
+        let device = &item.inputs.device();
+
+        let paragraph_length = TRAIN_CFG.get().unwrap().paragraph_length;
+
+        let mut embedded_token_shift_for_time_mix =
+            Tensor::zeros([batch_size, self.num_cells, self.embedded_dim], device);
+        let mut state = Tensor::zeros(
+            [
+                batch_size,
+                self.num_cells,
+                self.num_heads,
+                self.head_size,
+                self.head_size,
+            ],
+            device,
+        );
+        let mut embedded_token_shift_for_channel_mix =
+            Tensor::zeros([batch_size, self.num_cells, self.embedded_dim], device);
+        let mut sum_loss: Tensor<B, 1> = Tensor::zeros([1], device);
+
+        for paragraph_index in 0..context_length / paragraph_length {
+            let paragraph_item = AutoRegressiveBatch {
+                inputs: item.inputs.clone().slice([
+                    0..batch_size,
+                    paragraph_index * paragraph_length..(paragraph_index + 1) * paragraph_length,
+                ]),
+                targets: item.targets.clone().slice([
+                    0..batch_size,
+                    paragraph_index * paragraph_length..(paragraph_index + 1) * paragraph_length,
+                ]),
+            };
+
+            let (
+                output_embedded_token_shift_for_time_mix,
+                output_state,
+                output_embedded_token_shift_for_channel_mix,
+                item,
+            ) = self.forward::<KernelStatePass>(
+                paragraph_item,
+                Some(embedded_token_shift_for_time_mix),
+                Some(state),
+                Some(embedded_token_shift_for_channel_mix),
+            );
+
+            embedded_token_shift_for_time_mix =
+                output_embedded_token_shift_for_time_mix.unwrap().detach();
+            state = output_state.unwrap().detach();
+            embedded_token_shift_for_channel_mix = output_embedded_token_shift_for_channel_mix
+                .unwrap()
+                .detach();
+
+            sum_loss = sum_loss + item.loss.mul_scalar(paragraph_length as i32);
+        }
+
+        let loss = sum_loss.div_scalar(context_length as i32);
+        let grads = loss.backward();
+
+        TrainOutput::new(self, grads, NextTokenPredictionOutput { loss })
     }
 }
 
@@ -170,6 +252,8 @@ impl<B: Backend + Wkv7Backend + L2WrapBackend> InferenceStep for AutoRegressiveM
 
     fn step(&self, item: AutoRegressiveBatch<B>) -> NextTokenPredictionOutput<B> {
         // Run forward pass and return the output
-        self.forward::<KernelPretrain>(item, None, None, None)
+        NextTokenPredictionOutput {
+            loss: Tensor::zeros([1], &item.inputs.device()),
+        }
     }
 }

@@ -4,7 +4,7 @@ use once_cell::sync::OnceCell;
 use rwkv_derive::ConfigBuilder;
 use serde::Serialize;
 
-use crate::{DatasetFormatOptions, OptimizerOptions, TokenUnitDType, TrainStageOptions};
+use crate::{DatasetFormatOptions, OptimizerOptions, TokenUnitDType};
 
 #[derive(Clone, Debug, Serialize, ConfigBuilder)]
 #[config_builder(raw = "crate::raw::train::RawTrainConfig", cell = "TRAIN_CFG")]
@@ -27,8 +27,6 @@ pub struct FinalTrainConfig {
     #[skip_raw]
     pub mmap_token_dtype_auto: TokenUnitDType,
 
-    pub train_stage: TrainStageOptions,
-
     pub num_nodes: usize,
     pub num_devices_per_node: usize,
     pub batch_size_per_device: usize,
@@ -38,6 +36,7 @@ pub struct FinalTrainConfig {
 
     pub num_dataset_repeats: usize,
     pub context_length: usize,
+    pub paragraph_length: usize,
 
     #[skip_raw]
     pub num_mini_epochs_auto: usize,
@@ -110,6 +109,10 @@ impl FinalTrainConfigBuilder {
         if self.get_num_nodes().unwrap() > 1 {
             panic!("Multiple nodes training are not supported yet");
         }
+        assert!(
+            self.get_paragraph_length().unwrap() <= self.get_context_length().unwrap()
+                && self.get_context_length().unwrap() % self.get_paragraph_length().unwrap() == 0
+        );
     }
 }
 

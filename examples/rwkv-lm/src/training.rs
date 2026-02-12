@@ -113,7 +113,9 @@ pub fn train<B: AutodiffBackend>(
         .set_device(devices[0].clone())
         .build(dataset.clone());
     let dataloader_valid = dataloader_valid.slice(0, 0);
-
+    
+    train_cfg_builder.check();
+    
     model_cfg_builder.build();
     train_cfg_builder.build();
 

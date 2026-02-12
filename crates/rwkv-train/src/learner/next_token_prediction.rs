@@ -5,10 +5,9 @@ use burn_train::ItemLazy;
 use burn_train::metric::{Adaptor, LossInput};
 use burn_ndarray::NdArray;
 
-/// Simple classification output adapted for multiple metrics.
+
 #[derive(new)]
 pub struct NextTokenPredictionOutput<B: Backend> {
-    /// The loss.
     pub loss: Tensor<B, 1>,
 }
 

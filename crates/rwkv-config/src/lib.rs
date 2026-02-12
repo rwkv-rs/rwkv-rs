@@ -41,21 +41,9 @@ pub enum ModelTypeOptions {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TrainStageOptions {
-    #[default]
-    Pretrain,
-    Distillation,
-    StateTuning,
-    SftMiss,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub enum OptimizerOptions {
     #[default]
     AdamW,
-    Muon,
-    Adopt,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
