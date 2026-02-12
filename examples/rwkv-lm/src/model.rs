@@ -3,23 +3,24 @@
 // The model is then trained using Cross-Entropy loss. It contains methods for model initialization
 // (both with and without pre-trained weights), forward pass, inference, training, and validation.
 
+use crate::data::batcher::AutoRegressiveBatch;
+use rwkv::custom::Tensor;
 use rwkv::custom::config::Config;
 use rwkv::custom::module::Module;
-use rwkv::custom::nn::{Embedding, EmbeddingConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig};
 use rwkv::custom::nn::loss::CrossEntropyLossConfig;
-use rwkv::custom::Tensor;
+use rwkv::custom::nn::{
+    Embedding, EmbeddingConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig,
+};
 use rwkv::custom::tensor::backend::{AutodiffBackend, Backend};
 use rwkv::custom::train::{InferenceStep, TrainOutput, TrainStep};
 use rwkv::nn::cells::causal::{MultiCausalCells, MultiCausalCellsConfig, MultiCausalCellsIO};
 use rwkv::nn::functions::init_weights::{orthogonal_init, uniform_init};
-use rwkv::nn::kernels::l2wrap::{l2wrap, L2WrapBackend};
-use rwkv::nn::kernels::wkv7_common::{KernelPretrain, Wkv7Backend, Wkv7Kernel};
+use rwkv::nn::kernels::l2wrap::{L2WrapBackend, l2wrap};
+use rwkv::nn::kernels::wkv7_common::{KernelPretrain, KernelStateTune, Wkv7Backend, Wkv7Kernel};
 use rwkv::nn::modules::time_mixer::param_state::{StateModule, StateModuleConfig};
 use rwkv::train::learner::next_token_prediction::NextTokenPredictionOutput;
-use crate::data::batcher::AutoRegressiveBatch;
 
 rwkv::custom_mode!();
-
 
 #[derive(Config, Debug)]
 pub struct AutoRegressiveModelConfig {
@@ -121,12 +122,8 @@ impl<B: Backend> AutoRegressiveModel<B> {
         let logits = self.unembed.forward(embedded_context_normalized);
 
         let num_tokens_per_batch = batch_size * context_length;
-        let logits_flat = logits.reshape([
-            num_tokens_per_batch, self.vocabulary_size
-        ]);
-        let targets_flat = targets.reshape([
-            num_tokens_per_batch,
-        ]);
+        let logits_flat = logits.reshape([num_tokens_per_batch, self.vocabulary_size]);
+        let targets_flat = targets.reshape([num_tokens_per_batch]);
         let loss = l2wrap(
             CrossEntropyLossConfig::new()
                 .init(&logits_flat.device())
@@ -140,24 +137,31 @@ impl<B: Backend> AutoRegressiveModel<B> {
     }
 }
 
-
-
 impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegressiveModel<B> {
     type Input = AutoRegressiveBatch<B>;
     type Output = NextTokenPredictionOutput<B>;
 
-    fn step(
-        &self,
-        item: AutoRegressiveBatch<B>,
-    ) -> TrainOutput<NextTokenPredictionOutput<B>> {
+    #[cfg(not(any(feature = "statetune", feature = "statepass")))]
+    #[allow(unused)]
+    fn step(&self, item: AutoRegressiveBatch<B>) -> TrainOutput<NextTokenPredictionOutput<B>> {
         // Run forward pass, calculate gradients and return them along with the output
         let item = self.forward::<KernelPretrain>(item, None, None, None);
         let grads = item.loss.backward();
 
         TrainOutput::new(self, grads, item)
     }
-}
 
+    #[cfg(feature = "statetune")]
+    fn step(&self, item: AutoRegressiveBatch<B>) -> TrainOutput<NextTokenPredictionOutput<B>> {
+        // Run forward pass, calculate gradients and return them along with the output
+        let [batch_size, _] = item.inputs.dims();
+        let state = self.state.get_state(batch_size);
+        let item = self.forward::<KernelStateTune>(item, None, Some(state), None);
+        let grads = item.loss.backward();
+
+        TrainOutput::new(self, grads, item)
+    }
+}
 
 /// Define validation step
 impl<B: Backend + Wkv7Backend + L2WrapBackend> InferenceStep for AutoRegressiveModel<B> {

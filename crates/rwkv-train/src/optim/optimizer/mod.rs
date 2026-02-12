@@ -3,9 +3,10 @@ mod splitter;
 
 use burn::{config::Config, module::AutodiffModule, tensor::backend::AutodiffBackend};
 use burn_optim::{
-    AdamW, AdamWConfig, GradientsParams, LearningRate, MultiGradientsParams, Optimizer,
-    adaptor::OptimizerAdaptor, grad_clipping::GradientClippingConfig,
+    adaptor::OptimizerAdaptor, grad_clipping::GradientClippingConfig, AdamW, AdamWConfig,
+    GradientsParams, LearningRate, MultiGradientsParams, Optimizer,
 };
+pub use grouping::ParamGroupingMode;
 use grouping::{ParamGrouperVisitor, ParamGroups};
 use splitter::{split_grads, split_grads_multi};
 
@@ -24,9 +25,10 @@ impl GroupedOptimizerConfig {
     pub fn init<B: AutodiffBackend, M: AutodiffModule<B>>(
         &self,
         model: &M,
+        grouping_mode: ParamGroupingMode,
     ) -> GroupedOptimizer<B, M> {
         // Automatically group parameters based on their names and ranks
-        let param_groups = ParamGrouperVisitor::group_params(model);
+        let param_groups = ParamGrouperVisitor::group_params(model, grouping_mode);
 
         // Optimizer with weight decay for weight matrices
         let optim_with_wd = AdamWConfig::new()

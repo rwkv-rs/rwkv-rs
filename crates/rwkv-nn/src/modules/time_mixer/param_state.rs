@@ -15,7 +15,7 @@ impl StateModuleConfig {
         );
 
         StateModule {
-            initial_state: Param::from_tensor(initial_state),
+            state: Param::from_tensor(initial_state),
             num_cells: self.num_cells,
             num_heads: self.num_heads,
             head_size: self.head_size,
@@ -25,7 +25,7 @@ impl StateModuleConfig {
 
 #[derive(Module, Debug)]
 pub struct StateModule<B: Backend> {
-    pub initial_state: Param<Tensor<B, 4>>,
+    pub state: Param<Tensor<B, 4>>,
 
     num_cells: usize,
     num_heads: usize,
@@ -33,14 +33,14 @@ pub struct StateModule<B: Backend> {
 }
 
 impl<B: Backend> StateModule<B> {
-    pub fn init_state(&self, batch_size: usize) -> Tensor<B, 5> {
-        let base: Tensor<B, 5> = self.initial_state.val().unsqueeze_dim(0);
-        let mut states = Vec::with_capacity(batch_size);
+    pub fn get_state(&self, batch_size: usize) -> Tensor<B, 5> {
+        let state_batch_size_one: Tensor<B, 5> = self.state.val().unsqueeze_dim(0);
+        let mut state = Vec::with_capacity(batch_size);
 
         for _ in 0..batch_size {
-            states.push(base.clone());
+            state.push(state_batch_size_one.clone());
         }
 
-        Tensor::cat(states, 0)
+        Tensor::cat(state, 0)
     }
 }

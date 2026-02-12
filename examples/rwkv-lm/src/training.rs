@@ -5,41 +5,43 @@
 // to build a learner, which is used to train the model. The trained model and the configuration are
 // then saved to the specified directory.
 
+use crate::data::batcher::AutoRegressiveBatcher;
+use crate::model::AutoRegressiveModelConfig;
 use log::info;
 #[cfg(not(feature = "tui"))]
 use log::warn;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use rwkv::config::{DatasetFormatOptions, validated::model::{FinalModelConfigBuilder, MODEL_CFG}};
 use rwkv::config::validated::train::{FinalTrainConfigBuilder, TRAIN_CFG};
+use rwkv::config::{
+    validated::model::{FinalModelConfigBuilder, MODEL_CFG},
+    DatasetFormatOptions,
+};
 #[cfg(feature = "ddp")]
 use rwkv::custom::collective::{AllReduceStrategy, CollectiveConfig};
 use rwkv::custom::data::dataloader::DataLoaderBuilder;
+use rwkv::custom::optim::LearningRate;
+use rwkv::custom::prelude::Module;
 use rwkv::custom::record::{CompactRecorder, Recorder};
 use rwkv::custom::tensor::backend::AutodiffBackend;
-use rwkv::custom::prelude::Module;
-use rwkv::custom::train::{
-    Interrupter, Learner, SupervisedTraining,
-    logger::FileMetricLogger,
-    metric::{CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric},
-};
 #[cfg(not(feature = "ddp"))]
 use rwkv::custom::train::MultiDeviceOptim;
-use rwkv::custom::optim::LearningRate;
+use rwkv::custom::train::{
+    logger::FileMetricLogger,
+    metric::{CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric},
+    Interrupter, Learner, SupervisedTraining,
+};
 use rwkv::data::mmap::sample::Sampler;
 use rwkv::nn::kernels::l2wrap::L2WrapBackend;
 use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
 use rwkv::train::data::sliding::{MmapBinReader, SlidingDataset};
-use rwkv::train::optim::lr_scheduler::WsdLrSchedulerConfig;
-use rwkv::train::optim::optimizer::GroupedOptimizerConfig;
-use rwkv::train::renderer::BarMetricsRenderer;
 use rwkv::train::learner::init::init_wandb_metric_logger;
-use crate::data::batcher::AutoRegressiveBatcher;
-use crate::model::AutoRegressiveModelConfig;
+use rwkv::train::optim::lr_scheduler::WsdLrSchedulerConfig;
+use rwkv::train::optim::optimizer::{GroupedOptimizerConfig, ParamGroupingMode};
+use rwkv::train::renderer::BarMetricsRenderer;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 rwkv::custom_mode!();
-
 
 // Define train function
 pub fn train<B: AutodiffBackend>(
@@ -122,7 +124,8 @@ pub fn train<B: AutodiffBackend>(
         MODEL_CFG.get().unwrap().embedded_dim,
         MODEL_CFG.get().unwrap().num_heads,
         MODEL_CFG.get().unwrap().head_size_auto,
-    ).init::<B>(&devices[0]);
+    )
+    .init::<B>(&devices[0]);
 
     if TRAIN_CFG.get().unwrap().need_init_weight_auto {
         model.init_weights(&devices[0]);
@@ -130,9 +133,15 @@ pub fn train<B: AutodiffBackend>(
     }
 
     // Initialize optimizer
-    let optim = GroupedOptimizerConfig::new(
-        0.9, 0.99, 1e-16, TRAIN_CFG.get().unwrap().weight_decay
-    ).init(&model);
+    #[cfg(not(any(feature = "statetune")))]
+    let optim =
+        GroupedOptimizerConfig::new(0.9, 0.99, 1e-16, TRAIN_CFG.get().unwrap().weight_decay)
+            .init(&model, ParamGroupingMode::Default);
+
+    #[cfg(feature = "statetune")]
+    let optim =
+        GroupedOptimizerConfig::new(0.9, 0.99, 1e-16, TRAIN_CFG.get().unwrap().weight_decay)
+            .init(&model, ParamGroupingMode::StateTune);
 
     // Initialize learning rate scheduler
     let lr_scheduler = WsdLrSchedulerConfig::new(
@@ -141,7 +150,8 @@ pub fn train<B: AutodiffBackend>(
         TRAIN_CFG.get().unwrap().warmup_steps,
         TRAIN_CFG.get().unwrap().num_mini_epochs_auto
             * TRAIN_CFG.get().unwrap().num_steps_per_mini_epoch_auto,
-    ).init();
+    )
+    .init();
 
     // Initialize learner
     let interrupter = Interrupter::new();
@@ -193,9 +203,8 @@ pub fn train<B: AutodiffBackend>(
     let collective_config =
         CollectiveConfig::default().with_local_all_reduce_strategy(AllReduceStrategy::Tree(2));
     #[cfg(feature = "ddp")]
-    let training = training.with_training_strategy(
-        rwkv::custom::train::ddp(devices, collective_config)
-    );
+    let training =
+        training.with_training_strategy(rwkv::custom::train::ddp(devices, collective_config));
 
     // Train the model
     let result = training.launch(Learner::new(model, optim, lr_scheduler));
@@ -208,7 +217,8 @@ pub fn train<B: AutodiffBackend>(
     fs::write(
         exp_log_path.join("config.json"),
         sonic_rs::to_string_pretty(&config_json).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     CompactRecorder::new()
         .record(result.model.into_record(), exp_log_path.join("model"))

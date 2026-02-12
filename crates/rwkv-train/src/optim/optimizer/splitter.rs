@@ -1,12 +1,55 @@
 use std::marker::PhantomData;
 
 use burn::{
-    module::{AutodiffModule, ModuleVisitor, Param},
-    tensor::{Tensor, backend::AutodiffBackend},
+    module::{AutodiffModule, ModuleVisitor, Param, ParamId},
+    tensor::{backend::AutodiffBackend, Tensor},
 };
 use burn_optim::{GradientsParams, MultiGradientsParams};
 
 use super::grouping::ParamGroups;
+
+#[derive(Clone, Copy)]
+enum ParamGroup {
+    HighLr,
+    WithWd,
+    NoWd,
+}
+
+fn get_param_group(param_id: ParamId, groups: &ParamGroups) -> Option<ParamGroup> {
+    if groups.high_lr.contains(&param_id) {
+        Some(ParamGroup::HighLr)
+    } else if groups.with_wd.contains(&param_id) {
+        Some(ParamGroup::WithWd)
+    } else if groups.no_wd.contains(&param_id) {
+        Some(ParamGroup::NoWd)
+    } else {
+        None
+    }
+}
+
+fn register_grad<const D: usize, B: AutodiffBackend>(
+    target_group: Option<ParamGroup>,
+    param_id: ParamId,
+    grad: Tensor<B::InnerBackend, D>,
+    high_lr_grads: &mut GradientsParams,
+    with_wd_grads: &mut GradientsParams,
+    no_wd_grads: &mut GradientsParams,
+) {
+    match target_group {
+        Some(ParamGroup::HighLr) => {
+            high_lr_grads.register::<B::InnerBackend, D>(param_id, grad);
+        }
+        Some(ParamGroup::WithWd) => {
+            with_wd_grads.register::<B::InnerBackend, D>(param_id, grad);
+        }
+        Some(ParamGroup::NoWd) => {
+            no_wd_grads.register::<B::InnerBackend, D>(param_id, grad);
+        }
+        None => {
+            // Parameters not in any group are frozen in the current training mode.
+        }
+    }
+}
 
 pub fn split_grads<B, M>(
     model: &M,
@@ -100,15 +143,14 @@ impl<B: AutodiffBackend> ModuleVisitor<B> for GradsSplitter<'_, B> {
         // Try to remove the gradient from source. If it doesn't exist, skip this
         // parameter.
         if let Some(grad) = self.source.remove::<B::InnerBackend, D>(param.id) {
-            // Determine which group this parameter belongs to and register accordingly.
-            // Priority: high_lr > with_wd > no_wd (same as rwkv-burn)
-            if self.groups.high_lr.contains(&param.id) {
-                self.high_lr.register::<B::InnerBackend, D>(param.id, grad);
-            } else if self.groups.with_wd.contains(&param.id) {
-                self.with_wd.register::<B::InnerBackend, D>(param.id, grad);
-            } else {
-                self.no_wd.register::<B::InnerBackend, D>(param.id, grad);
-            }
+            register_grad::<D, B>(
+                get_param_group(param.id, self.groups),
+                param.id,
+                grad,
+                self.high_lr,
+                self.with_wd,
+                self.no_wd,
+            );
         }
     }
 }
@@ -131,19 +173,14 @@ impl<B: AutodiffBackend> ModuleVisitor<B> for MultiGradsSplitter<'_, B> {
                 .0
                 .remove::<B::InnerBackend, D>(param.id)
             {
-                if self.groups.high_lr.contains(&param.id) {
-                    self.high_lr.grads[source_index]
-                        .0
-                        .register::<B::InnerBackend, D>(param.id, grad);
-                } else if self.groups.with_wd.contains(&param.id) {
-                    self.with_wd.grads[source_index]
-                        .0
-                        .register::<B::InnerBackend, D>(param.id, grad);
-                } else {
-                    self.no_wd.grads[source_index]
-                        .0
-                        .register::<B::InnerBackend, D>(param.id, grad);
-                }
+                register_grad::<D, B>(
+                    get_param_group(param.id, self.groups),
+                    param.id,
+                    grad,
+                    &mut self.high_lr.grads[source_index].0,
+                    &mut self.with_wd.grads[source_index].0,
+                    &mut self.no_wd.grads[source_index].0,
+                );
             }
         }
     }
