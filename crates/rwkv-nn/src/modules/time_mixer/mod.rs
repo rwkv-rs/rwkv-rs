@@ -5,7 +5,7 @@ mod weight_prepare;
 use burn::{config::Config, module::Module, prelude::*};
 
 use crate::{
-    kernels::wkv7_kernel::Wkv7Kernel,
+    kernels::wkv7_common::Wkv7Kernel,
     layers::lora::LoRARanks,
 };
 
@@ -123,7 +123,10 @@ impl<B: Backend> TimeMixer<B> {
 
         let (num_heads, head_size) = (self.num_heads, self.head_size);
 
-        let output_embedded_token_shift = get_embedded_token_shift(embedded_context.clone());
+        let output_embedded_token_shift = match embedded_token_shift {
+            Some(_) => Some(get_embedded_token_shift(embedded_context.clone())),
+            None => None,
+        };
 
         let weight_prepare_output = self.weight_prepare.forward(
             embedded_context.clone(),
@@ -157,6 +160,6 @@ impl<B: Backend> TimeMixer<B> {
 pub struct TimeMixerIO<B: Backend> {
     pub embedded_context: Tensor<B, 3>,
     pub value_from_first_cell: Tensor<B, 3>,
-    pub embedded_token_shift: Tensor<B, 2>,
-    pub state: Tensor<B, 4>,
+    pub embedded_token_shift: Option<Tensor<B, 2>>,
+    pub state: Option<Tensor<B, 4>>,
 }

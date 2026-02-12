@@ -200,9 +200,9 @@ impl<B: Backend> WeightPrepare<B> {
 
     pub fn forward(
         &self,
-        x: Tensor<B, 3>,
-        v_first: Tensor<B, 3>,
-        x_state: Tensor<B, 2>,
+        embedded_context: Tensor<B, 3>,
+        value_from_first_cell: Tensor<B, 3>,
+        embedded_token_shift: Option<Tensor<B, 2>>,
     ) -> WeightPrepareOutput<B> {
         // Paper equations implemented:
         // 355: x^{square}_t = lerp(x_t, x_{t-1}, mu_{square})  -- Time shifting
@@ -216,23 +216,23 @@ impl<B: Backend> WeightPrepare<B> {
         // 368: w_t = exp(-e^{-0.5} sigmoid(d_t))  -- Decay
         // 369: r_t = x^r_t W_r  -- Receptance
         // 370: g_t = loramlp_g(sigmoid, x^g_t, bias=False)  -- RWKV gate
-        let [batch_size, sequence_length, channel_dim] = x.dims();
+        let [batch_size, context_len, embedded_dim] = embedded_context.dims();
 
         let (num_heads, head_size) = (self.num_heads, self.head_size);
 
-        let token_shifted_diff = token_shift(x.clone(), x_state) - x.clone();
+        let token_shifted_diff = token_shift(embedded_context.clone(), embedded_token_shift) - embedded_context.clone();
 
-        let receptance_input = x.clone() + token_shifted_diff.clone() * self.param_receptance.val();
+        let receptance_input = embedded_context.clone() + token_shifted_diff.clone() * self.param_receptance.val();
 
         let weight_decay_input =
-            x.clone() + token_shifted_diff.clone() * self.param_weight_decay.val();
+            embedded_context.clone() + token_shifted_diff.clone() * self.param_weight_decay.val();
 
-        let key_input = x.clone() + token_shifted_diff.clone() * self.param_key.val();
+        let key_input = embedded_context.clone() + token_shifted_diff.clone() * self.param_key.val();
 
-        let value_input = x.clone() + token_shifted_diff.clone() * self.param_value.val();
+        let value_input = embedded_context.clone() + token_shifted_diff.clone() * self.param_value.val();
 
         let learning_rate_input =
-            x.clone() + token_shifted_diff.clone() * self.param_learning_rate.val();
+            embedded_context.clone() + token_shifted_diff.clone() * self.param_learning_rate.val();
 
         let receptance = self.projection_receptance.forward(receptance_input);
 
@@ -243,7 +243,7 @@ impl<B: Backend> WeightPrepare<B> {
         let value_from_first_cell = if self.cell_id == 0 {
             value_precursor.clone()
         } else {
-            v_first
+            value_from_first_cell
         };
 
         let learning_rate = sigmoid(self.param_learning_rate_lora.forward(learning_rate_input));
@@ -275,12 +275,12 @@ impl<B: Backend> WeightPrepare<B> {
         let removal_key = key_precursor * self.param_key_removal.val();
 
         let removal_key_reshaped =
-            removal_key.reshape([batch_size, sequence_length, num_heads, head_size]);
+            removal_key.reshape([batch_size, context_len, num_heads, head_size]);
 
         let neg_removal_key_normalized = normalize(removal_key_reshaped, 2.0, -1, 1e-12).reshape([
             batch_size,
-            sequence_length,
-            channel_dim,
+            context_len,
+            embedded_dim,
         ]);
         let removal_key_normalized = -neg_removal_key_normalized.clone();
 

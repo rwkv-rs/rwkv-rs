@@ -13,7 +13,6 @@ use crate::functions::{
 };
 
 #[derive(Config, Debug)]
-
 pub struct ChannelMixerConfig {
     num_cells: usize,
     embedded_dim: usize,
@@ -75,7 +74,10 @@ impl<B: Backend> ChannelMixer<B> {
             embedded_context,
             embedded_token_shift,
         } = channel_mixer_input;
-        let output_embedded_token_shift = get_embedded_token_shift(embedded_context.clone());
+        let output_embedded_token_shift = match embedded_token_shift {
+            Some(_) => Some(get_embedded_token_shift(embedded_context.clone())),
+            None => None,
+        };
 
         let time_shifted_diff =
             token_shift(embedded_context.clone(), embedded_token_shift) - embedded_context.clone();
@@ -96,5 +98,5 @@ impl<B: Backend> ChannelMixer<B> {
 
 pub struct ChannelMixerIO<B: Backend> {
     pub embedded_context: Tensor<B, 3>,
-    pub embedded_token_shift: Tensor<B, 2>,
+    pub embedded_token_shift: Option<Tensor<B, 2>>,
 }

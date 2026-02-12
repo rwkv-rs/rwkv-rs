@@ -1,8 +1,95 @@
-use burn::prelude::Backend;
+use crate::kernels::wkv7_pretrain::{Wkv7PretrainBackend, wkv7_pretrain_forward};
+use crate::kernels::wkv7_statepass::{Wkv7StatePassBackend, wkv7_statepass_forward};
+use crate::kernels::wkv7_statetune::{Wkv7StateTuneBackend, wkv7_statetune_forward};
 use burn::Tensor;
+use burn::prelude::Backend;
 
 pub mod host;
 pub mod kernel;
+
+pub trait Wkv7Backend: Wkv7PretrainBackend + Wkv7StateTuneBackend + Wkv7StatePassBackend {}
+impl<B> Wkv7Backend for B where B: Wkv7PretrainBackend + Wkv7StateTuneBackend + Wkv7StatePassBackend {}
+
+pub trait Wkv7Kernel<B: Backend> {
+    fn forward(
+        input: Wkv7ForwardInput<B>,
+        state: Option<Tensor<B, 4>>,
+        chunk_len: usize,
+    ) -> KernelOutput<B>;
+}
+
+pub struct KernelPretrain;
+
+impl<B: Wkv7PretrainBackend> Wkv7Kernel<B> for KernelPretrain {
+    fn forward(
+        input: Wkv7ForwardInput<B>,
+        state: Option<Tensor<B, 4>>,
+        chunk_len: usize,
+    ) -> KernelOutput<B> {
+        let output = wkv7_pretrain_forward(input, chunk_len);
+        KernelOutput {
+            output: output.output,
+            next_state: state,
+        }
+    }
+}
+
+pub struct KernelStatePass;
+
+impl<B: Wkv7StatePassBackend> Wkv7Kernel<B> for KernelStatePass {
+    fn forward(
+        input: Wkv7ForwardInput<B>,
+        state: Option<Tensor<B, 4>>,
+        chunk_len: usize,
+    ) -> KernelOutput<B> {
+        let output = wkv7_statepass_forward(
+            input.weight_decay,
+            input.receptance,
+            input.replacement_key,
+            input.value,
+            input.removal_key_normalized,
+            input.replacement,
+            state.unwrap(),
+            chunk_len,
+        );
+
+        KernelOutput {
+            output: output.output,
+            next_state: Some(output.final_state),
+        }
+    }
+}
+
+pub struct KernelStateTune;
+
+impl<B: Wkv7StateTuneBackend> Wkv7Kernel<B> for KernelStateTune {
+    fn forward(
+        input: Wkv7ForwardInput<B>,
+        state: Option<Tensor<B, 4>>,
+        chunk_len: usize,
+    ) -> KernelOutput<B> {
+        let output = wkv7_statetune_forward(
+            input.weight_decay,
+            input.receptance,
+            input.replacement_key,
+            input.value,
+            input.removal_key_normalized,
+            input.replacement,
+            state.unwrap(),
+            chunk_len,
+        );
+
+        KernelOutput {
+            output: output.output,
+            next_state: Some(output.state),
+        }
+    }
+}
+
+pub struct KernelOutput<B: Backend> {
+    pub output: Tensor<B, 4>,
+    pub next_state: Option<Tensor<B, 4>>,
+}
 
 #[derive(Clone, Debug)]
 pub struct Wkv7ForwardInput<B: Backend> {

@@ -15,12 +15,11 @@ use burn::{
 use burn_cubecl::{BoolElement, CubeBackend, CubeRuntime, FloatElement, IntElement};
 #[cfg(feature = "fusion")]
 use burn_fusion::{Fusion, FusionBackend};
-use rwkv_config::validated::train::TRAIN_CFG;
-
 pub trait L2WrapBackend: Backend {
     fn apply_l2wrap(
         loss: <Self as Backend>::FloatTensorPrimitive,
         logits: <Self as Backend>::FloatTensorPrimitive,
+        num_tokens_per_batch: usize,
     ) -> <Self as Backend>::FloatTensorPrimitive;
 }
 
@@ -28,13 +27,14 @@ impl<B: Backend, C: CheckpointStrategy> L2WrapBackend for Autodiff<B, C> {
     fn apply_l2wrap(
         loss: <Self as Backend>::FloatTensorPrimitive,
         logits: <Self as Backend>::FloatTensorPrimitive,
+        num_tokens_per_batch: usize,
     ) -> <Self as Backend>::FloatTensorPrimitive {
         #[derive(Debug)]
 
         struct L2WrapBackward;
 
         impl<B: Backend> Backward<B, 2> for L2WrapBackward {
-            type State = B::FloatTensorPrimitive;
+            type State = (B::FloatTensorPrimitive, usize);
 
             fn backward(
                 self,
@@ -46,20 +46,17 @@ impl<B: Backend, C: CheckpointStrategy> L2WrapBackend for Autodiff<B, C> {
 
                 let grad_output = grads.consume::<B>(&ops.node);
 
-                let saved_logits = ops.state;
+                let (saved_logits, num_tokens_per_batch) = ops.state;
 
                 if let Some(node) = node_loss {
                     grads.register::<B>(node.id, grad_output.clone());
                 }
 
                 if let Some(node) = node_logits {
-                    let batch_size_per_device =
-                        TRAIN_CFG.get().unwrap().batch_size_per_device as f64;
-
-                    let context_length = TRAIN_CFG.get().unwrap().context_length as f64;
-
-                    let factor =
-                        B::FloatElem::from_elem(1e-4 / (batch_size_per_device * context_length));
+                    if num_tokens_per_batch == 0 {
+                        return;
+                    }
+                    let factor = B::FloatElem::from_elem(1e-4 / num_tokens_per_batch as f64);
 
                     // Upcast to f32 for numerically stable max/scatter, then downcast back
                     // Determine original dtype and device
@@ -101,7 +98,7 @@ impl<B: Backend, C: CheckpointStrategy> L2WrapBackend for Autodiff<B, C> {
 
                 let output = loss.primitive.clone();
 
-                prep.finish(logits_state, output)
+                prep.finish((logits_state, num_tokens_per_batch), output)
             }
             OpsKind::UnTracked(prep) => prep.finish(loss.primitive),
         }
@@ -118,6 +115,7 @@ where
     fn apply_l2wrap(
         loss: <Self as Backend>::FloatTensorPrimitive,
         _logits: <Self as Backend>::FloatTensorPrimitive,
+        _num_tokens_per_batch: usize,
     ) -> <Self as Backend>::FloatTensorPrimitive {
         loss
     }
@@ -128,16 +126,22 @@ impl<B: FusionBackend> L2WrapBackend for Fusion<B> {
     fn apply_l2wrap(
         loss: <Self as Backend>::FloatTensorPrimitive,
         _logits: <Self as Backend>::FloatTensorPrimitive,
+        _num_tokens_per_batch: usize,
     ) -> <Self as Backend>::FloatTensorPrimitive {
         loss
     }
 }
 
 /// High-level API for L2Wrap application
-pub fn l2wrap<B: L2WrapBackend>(loss: Tensor<B, 1>, logits: Tensor<B, 2>) -> Tensor<B, 1> {
+pub fn l2wrap<B: L2WrapBackend>(
+    loss: Tensor<B, 1>,
+    logits: Tensor<B, 2>,
+    num_tokens_per_batch: usize,
+) -> Tensor<B, 1> {
     let output = B::apply_l2wrap(
         loss.into_primitive().tensor(),
         logits.into_primitive().tensor(),
+        num_tokens_per_batch,
     );
 
     Tensor::from_primitive(TensorPrimitive::Float(output))

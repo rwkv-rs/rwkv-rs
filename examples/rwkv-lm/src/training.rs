@@ -15,7 +15,7 @@ use rwkv::config::{DatasetFormatOptions, validated::model::{FinalModelConfigBuil
 use rwkv::config::validated::train::{FinalTrainConfigBuilder, TRAIN_CFG};
 #[cfg(feature = "ddp")]
 use rwkv::custom::collective::{AllReduceStrategy, CollectiveConfig};
-use rwkv::custom::data::dataloader::{DataLoader, DataLoaderBuilder};
+use rwkv::custom::data::dataloader::DataLoaderBuilder;
 use rwkv::custom::record::{CompactRecorder, Recorder};
 use rwkv::custom::tensor::backend::AutodiffBackend;
 use rwkv::custom::prelude::Module;
@@ -29,7 +29,7 @@ use rwkv::custom::train::MultiDeviceOptim;
 use rwkv::custom::optim::LearningRate;
 use rwkv::data::mmap::sample::Sampler;
 use rwkv::nn::kernels::l2wrap::L2WrapBackend;
-use rwkv::nn::kernels::wkv7_pretrain::Wkv7PretrainBackend;
+use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
 use rwkv::train::data::sliding::{MmapBinReader, SlidingDataset};
 use rwkv::train::optim::lr_scheduler::WsdLrSchedulerConfig;
 use rwkv::train::optim::optimizer::GroupedOptimizerConfig;
@@ -48,8 +48,8 @@ pub fn train<B: AutodiffBackend>(
     mut train_cfg_builder: FinalTrainConfigBuilder,
     exp_log_path: &Path, // Experiment log directory (also used for artifacts)
 ) where
-    B: Wkv7PretrainBackend + L2WrapBackend,
-    B::InnerBackend: Wkv7PretrainBackend + L2WrapBackend,
+    B: Wkv7Backend + L2WrapBackend,
+    B::InnerBackend: Wkv7Backend + L2WrapBackend,
 {
     let bin_path = PathBuf::from(train_cfg_builder.get_dataset_base_path().unwrap())
         .join(train_cfg_builder.get_filename_without_extensions().unwrap())

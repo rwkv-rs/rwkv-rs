@@ -18,6 +18,9 @@ default = [
     "pth2mpk",
     "std"
 ]
+pretrain = []
+statetune = []
+statepass = []
 f32 = []
 flex32 = []
 f16 = []
