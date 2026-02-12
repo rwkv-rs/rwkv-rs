@@ -1,4 +1,5 @@
 use burn::backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement};
+use burn::tensor::ops::FloatTensor;
 use burn_cubecl::{CubeElement, CubeRuntime};
 
 use crate::kernels::wkv7_common::{
@@ -14,15 +15,15 @@ where
     F: CubeElement,
 {
     fn wkv7_statetune_forward(
-        weight_decay: burn::tensor::ops::FloatTensor<Self>,
-        receptance: burn::tensor::ops::FloatTensor<Self>,
-        key: burn::tensor::ops::FloatTensor<Self>,
-        value: burn::tensor::ops::FloatTensor<Self>,
-        removal: burn::tensor::ops::FloatTensor<Self>,
-        replacement: burn::tensor::ops::FloatTensor<Self>,
-        initial_state: burn::tensor::ops::FloatTensor<Self>,
+        weight_decay: FloatTensor<Self>,
+        receptance: FloatTensor<Self>,
+        key: FloatTensor<Self>,
+        value: FloatTensor<Self>,
+        removal: FloatTensor<Self>,
+        replacement: FloatTensor<Self>,
+        initial_state: FloatTensor<Self>,
         chunk_len: usize,
-    ) -> Wkv7ForwardOutput<burn::tensor::ops::FloatTensor<Self>> {
+    ) -> Wkv7ForwardOutput<FloatTensor<Self>> {
         let output = wkv7_forward_impl::<R, F, I, BT>(
             weight_decay,
             receptance,
@@ -44,17 +45,17 @@ where
     }
 
     fn wkv7_statetune_backward(
-        weight_decay: burn::tensor::ops::FloatTensor<Self>,
-        receptance: burn::tensor::ops::FloatTensor<Self>,
-        key: burn::tensor::ops::FloatTensor<Self>,
-        value: burn::tensor::ops::FloatTensor<Self>,
-        removal: burn::tensor::ops::FloatTensor<Self>,
-        replacement: burn::tensor::ops::FloatTensor<Self>,
-        state: burn::tensor::ops::FloatTensor<Self>,
-        removal_state: burn::tensor::ops::FloatTensor<Self>,
-        output_grad: burn::tensor::ops::FloatTensor<Self>,
+        weight_decay: FloatTensor<Self>,
+        receptance: FloatTensor<Self>,
+        key: FloatTensor<Self>,
+        value: FloatTensor<Self>,
+        removal: FloatTensor<Self>,
+        replacement: FloatTensor<Self>,
+        state: FloatTensor<Self>,
+        removal_state: FloatTensor<Self>,
+        output_grad: FloatTensor<Self>,
         chunk_len: usize,
-    ) -> Wkv7StateBackwardOutput<burn::tensor::ops::FloatTensor<Self>> {
+    ) -> Wkv7StateBackwardOutput<FloatTensor<Self>> {
         wkv7_backward_impl::<R, F, I, BT>(
             weight_decay,
             receptance,
