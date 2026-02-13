@@ -127,7 +127,7 @@ fn wkv7_forward_impl_inner<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: 
     };
 
     let config = Wkv7Config {
-        sequence_length: seq_len,
+        context_len: seq_len,
         num_heads,
         head_size: dim,
         chunk_length: chunk_len,
@@ -299,7 +299,7 @@ fn wkv7_backward_impl_inner<R: CubeRuntime, FE: FloatElement, I: IntElement, BT:
     );
 
     let config = Wkv7Config {
-        sequence_length: seq_len,
+        context_len: seq_len,
         num_heads,
         head_size: dim,
         chunk_length: chunk_len,

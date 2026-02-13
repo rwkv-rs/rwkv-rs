@@ -20,6 +20,7 @@ where
         removal: FloatTensor<Self>,
         replacement: FloatTensor<Self>,
         initial_state: FloatTensor<Self>,
+        context_mask: FloatTensor<Self>,
     ) -> Wkv7InferenceForwardOutput<FloatTensor<Self>> {
         wkv7_inference_forward_impl::<R, F, I, BT>(
             weight_decay,
@@ -29,7 +30,7 @@ where
             removal,
             replacement,
             initial_state,
+            context_mask,
         )
     }
 }
-

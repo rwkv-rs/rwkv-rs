@@ -8,7 +8,7 @@ pub struct RawModelConfig {
     pub model_type: ModelTypeOptions,
 
     pub num_cells: usize,
-    pub vocabulary_size: usize,
+    pub vocab_size: usize,
     pub embedded_dim: usize,
     pub num_heads: usize,
     pub channel_mix_dim_scale: Option<usize>,

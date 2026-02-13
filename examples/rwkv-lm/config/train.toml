@@ -5,13 +5,11 @@ filename_without_extensions = "your_dataset_filename"
 dataset_format = "rwkv_legacy"
 random_seed = 42
 
-train_stage = "pretrain"
-
 num_nodes = 1
 num_devices_per_node = 1
 batch_size_per_device = 16
 num_dataset_repeats = 1
-context_length = 512
+context_len = 512
 
 optimizer = "adam_w"
 learning_rate_start = 6e-4

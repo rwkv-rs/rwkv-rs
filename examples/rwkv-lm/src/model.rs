@@ -26,7 +26,7 @@ rwkv::custom_mode!();
 #[derive(Config, Debug)]
 pub struct AutoRegressiveModelConfig {
     num_cells: usize,
-    vocabulary_size: usize,
+    vocab_size: usize,
     embedded_dim: usize,
     num_heads: usize,
     head_size: usize,
@@ -35,7 +35,7 @@ pub struct AutoRegressiveModelConfig {
 impl AutoRegressiveModelConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> AutoRegressiveModel<B> {
         AutoRegressiveModel {
-            embed: EmbeddingConfig::new(self.vocabulary_size, self.embedded_dim).init(device),
+            embed: EmbeddingConfig::new(self.vocab_size, self.embedded_dim).init(device),
             layer_norm_for_first_cell: LayerNormConfig::new(self.embedded_dim).init(device),
             cells: MultiCausalCellsConfig::new(
                 self.num_cells,
@@ -45,14 +45,14 @@ impl AutoRegressiveModelConfig {
             )
             .init(device),
             layer_norm_for_unembed: LayerNormConfig::new(self.embedded_dim).init(device),
-            unembed: LinearConfig::new(self.embedded_dim, self.vocabulary_size)
+            unembed: LinearConfig::new(self.embedded_dim, self.vocab_size)
                 .with_bias(false)
                 .init(device),
             state: StateModuleConfig::new(self.num_cells, self.num_heads, self.head_size)
                 .init(device),
 
             num_cells: self.num_cells,
-            vocabulary_size: self.vocabulary_size,
+            vocab_size: self.vocab_size,
             embedded_dim: self.embedded_dim,
             num_heads: self.num_heads,
             head_size: self.head_size,
@@ -70,7 +70,7 @@ pub struct AutoRegressiveModel<B: Backend> {
     pub state: StateModule<B>,
 
     num_cells: usize,
-    vocabulary_size: usize,
+    vocab_size: usize,
     embedded_dim: usize,
     num_heads: usize,
     head_size: usize,
@@ -80,10 +80,10 @@ impl<B: Backend> AutoRegressiveModel<B> {
     pub fn init_weights(&mut self, device: &B::Device) {
         uniform_init(&mut self.embed.weight, -1e-4, 1e-4);
 
-        if self.vocabulary_size > self.embedded_dim {
+        if self.vocab_size > self.embedded_dim {
             orthogonal_init(
                 &mut self.unembed.weight,
-                Some(0.5 * (self.vocabulary_size as f32 / self.embedded_dim as f32).sqrt()),
+                Some(0.5 * (self.vocab_size as f32 / self.embedded_dim as f32).sqrt()),
             );
         } else {
             orthogonal_init(&mut self.unembed.weight, Some(0.5));
@@ -128,7 +128,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
         let logits = self.unembed.forward(embedded_context_normalized);
 
         let num_tokens_per_batch = batch_size * context_length;
-        let logits_flat = logits.reshape([num_tokens_per_batch, self.vocabulary_size]);
+        let logits_flat = logits.reshape([num_tokens_per_batch, self.vocab_size]);
         let targets_flat = targets.reshape([num_tokens_per_batch]);
         let loss = l2wrap(
             CrossEntropyLossConfig::new()

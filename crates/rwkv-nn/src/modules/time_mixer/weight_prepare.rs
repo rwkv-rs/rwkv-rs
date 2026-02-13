@@ -14,7 +14,7 @@ use crate::{
         },
         lerp::lerp,
         normalize::normalize,
-        token_shift::token_shift,
+        token_shift::{token_shift, token_shifted_diff_with_context_mask},
     },
     layers::lora::{ActivationFn, LoRA, LoRAConfig, LoRAType},
 };
@@ -203,6 +203,37 @@ impl<B: Backend> WeightPrepare<B> {
         embedded_context: Tensor<B, 3>,
         value_from_first_cell: Tensor<B, 3>,
         embedded_token_shift: Option<Tensor<B, 2>>,
+        context_mask: Option<Tensor<B, 2>>,
+    ) -> WeightPrepareOutput<B> {
+        let token_shifted_diff = match context_mask {
+            Some(context_mask) => {
+                let [batch_size, _context_length, embedded_dim] = embedded_context.dims();
+                let embedded_token_shift = embedded_token_shift.unwrap_or(Tensor::zeros(
+                    [batch_size, embedded_dim],
+                    &embedded_context.device(),
+                ));
+
+                token_shifted_diff_with_context_mask(
+                    embedded_context.clone(),
+                    embedded_token_shift,
+                    context_mask,
+                )
+            }
+            None => token_shift(embedded_context.clone(), embedded_token_shift) - embedded_context.clone(),
+        };
+
+        self.forward_with_token_shifted_diff(
+            embedded_context,
+            value_from_first_cell,
+            token_shifted_diff,
+        )
+    }
+
+    fn forward_with_token_shifted_diff(
+        &self,
+        embedded_context: Tensor<B, 3>,
+        value_from_first_cell: Tensor<B, 3>,
+        token_shifted_diff: Tensor<B, 3>,
     ) -> WeightPrepareOutput<B> {
         // Paper equations implemented:
         // 355: x^{square}_t = lerp(x_t, x_{t-1}, mu_{square})  -- Time shifting
@@ -216,20 +247,20 @@ impl<B: Backend> WeightPrepare<B> {
         // 368: w_t = exp(-e^{-0.5} sigmoid(d_t))  -- Decay
         // 369: r_t = x^r_t W_r  -- Receptance
         // 370: g_t = loramlp_g(sigmoid, x^g_t, bias=False)  -- RWKV gate
-        let [batch_size, context_len, embedded_dim] = embedded_context.dims();
+        let [batch_size, context_length, embedded_dim] = embedded_context.dims();
 
         let (num_heads, head_size) = (self.num_heads, self.head_size);
 
-        let token_shifted_diff = token_shift(embedded_context.clone(), embedded_token_shift) - embedded_context.clone();
-
-        let receptance_input = embedded_context.clone() + token_shifted_diff.clone() * self.param_receptance.val();
+        let receptance_input =
+            embedded_context.clone() + token_shifted_diff.clone() * self.param_receptance.val();
 
         let weight_decay_input =
             embedded_context.clone() + token_shifted_diff.clone() * self.param_weight_decay.val();
 
         let key_input = embedded_context.clone() + token_shifted_diff.clone() * self.param_key.val();
 
-        let value_input = embedded_context.clone() + token_shifted_diff.clone() * self.param_value.val();
+        let value_input =
+            embedded_context.clone() + token_shifted_diff.clone() * self.param_value.val();
 
         let learning_rate_input =
             embedded_context.clone() + token_shifted_diff.clone() * self.param_learning_rate.val();
@@ -275,11 +306,11 @@ impl<B: Backend> WeightPrepare<B> {
         let removal_key = key_precursor * self.param_key_removal.val();
 
         let removal_key_reshaped =
-            removal_key.reshape([batch_size, context_len, num_heads, head_size]);
+            removal_key.reshape([batch_size, context_length, num_heads, head_size]);
 
         let neg_removal_key_normalized = normalize(removal_key_reshaped, 2.0, -1, 1e-12).reshape([
             batch_size,
-            context_len,
+            context_length,
             embedded_dim,
         ]);
         let removal_key_normalized = -neg_removal_key_normalized.clone();

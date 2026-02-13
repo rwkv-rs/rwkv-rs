@@ -9,8 +9,9 @@ use burn::{
 use crate::functions::token_shift::get_embedded_token_shift;
 use crate::functions::{
     init_weights::{get_token_shift_diff_scale, uniform_init, zeros_init},
-    token_shift::token_shift,
+    token_shift::{token_shift, token_shifted_diff_with_context_mask},
 };
+use crate::functions::context_mask::{apply_context_mask, get_context_mask_last};
 
 #[derive(Config, Debug)]
 pub struct ChannelMixerConfig {
@@ -73,25 +74,65 @@ impl<B: Backend> ChannelMixer<B> {
         let ChannelMixerIO {
             embedded_context,
             embedded_token_shift,
+            context_mask,
         } = channel_mixer_input;
-        let output_embedded_token_shift = match embedded_token_shift {
-            Some(_) => Some(get_embedded_token_shift(embedded_context.clone())),
+
+        // `context_mask` handles physical left padding (and inactive lanes for batching).
+        // Padding timesteps must be strict no-ops for the token-shift state; otherwise the
+        // first real token would see an incorrect previous token.
+        let embedded_context = match context_mask.clone() {
+            Some(context_mask) => apply_context_mask(embedded_context, context_mask),
+            None => embedded_context,
+        };
+
+        let output_embedded_token_shift = match embedded_token_shift.clone() {
+            Some(embedded_token_shift) => {
+                let last_token = get_embedded_token_shift(embedded_context.clone());
+                match context_mask.clone() {
+                    Some(context_mask) => {
+                        let last_mask = get_context_mask_last(context_mask); // [batch_size, 1]
+                        Some(
+                            embedded_token_shift.clone()
+                                + (last_token - embedded_token_shift) * last_mask,
+                        )
+                    }
+                    None => Some(last_token),
+                }
+            }
             None => None,
         };
 
-        let time_shifted_diff =
-            token_shift(embedded_context.clone(), embedded_token_shift) - embedded_context.clone();
+        let token_shifted_diff = match context_mask.clone() {
+            Some(context_mask) => {
+                let [batch_size, _context_length, embedded_dim] = embedded_context.dims();
+                let embedded_token_shift = embedded_token_shift.unwrap_or(Tensor::zeros(
+                    [batch_size, embedded_dim],
+                    &embedded_context.device(),
+                ));
+
+                token_shifted_diff_with_context_mask(
+                    embedded_context.clone(),
+                    embedded_token_shift,
+                    context_mask,
+                )
+            }
+            None => token_shift(embedded_context.clone(), embedded_token_shift) - embedded_context.clone(),
+        };
 
         let embedded_context_shift =
-            embedded_context.clone() + time_shifted_diff * self.token_shift_diff_scale.val();
+            embedded_context.clone() + token_shifted_diff * self.token_shift_diff_scale.val();
 
         let activated_key = relu(self.key.forward(embedded_context_shift)).powf_scalar(2.0);
 
         let value = self.value.forward(activated_key);
 
         ChannelMixerIO {
-            embedded_context: value,
+            embedded_context: match context_mask.clone() {
+                Some(context_mask) => apply_context_mask(value, context_mask),
+                None => value,
+            },
             embedded_token_shift: output_embedded_token_shift,
+            context_mask,
         }
     }
 }
@@ -99,4 +140,5 @@ impl<B: Backend> ChannelMixer<B> {
 pub struct ChannelMixerIO<B: Backend> {
     pub embedded_context: Tensor<B, 3>,
     pub embedded_token_shift: Option<Tensor<B, 2>>,
+    pub context_mask: Option<Tensor<B, 2>>, // [batch_size, context_length]
 }

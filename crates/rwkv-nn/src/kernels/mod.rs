@@ -1,4 +1,5 @@
 pub mod l2wrap;
+pub mod rapid_sample;
 pub mod wkv7_common;
 pub mod wkv7_inference;
 pub mod wkv7_pretrain;

@@ -122,7 +122,7 @@ pub fn train<B: AutodiffBackend>(
     // Initialize model
     let mut model = AutoRegressiveModelConfig::new(
         MODEL_CFG.get().unwrap().num_cells,
-        MODEL_CFG.get().unwrap().vocabulary_size,
+        MODEL_CFG.get().unwrap().vocab_size,
         MODEL_CFG.get().unwrap().embedded_dim,
         MODEL_CFG.get().unwrap().num_heads,
         MODEL_CFG.get().unwrap().head_size_auto,

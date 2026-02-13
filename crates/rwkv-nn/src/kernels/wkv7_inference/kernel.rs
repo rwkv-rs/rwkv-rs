@@ -9,7 +9,7 @@ pub fn wkv7_inference_forward_kernel<F: Float>(
     outputs: &mut Wkv7InferenceForwardOutputs<F>,
     #[comptime] config: Wkv7InferenceConfig,
 ) {
-    let sequence_length = comptime![config.sequence_length];
+    let context_length = comptime![config.context_length];
     let num_heads = comptime![config.num_heads];
     let head_size = comptime![config.head_size];
 
@@ -37,43 +37,16 @@ pub fn wkv7_inference_forward_kernel<F: Float>(
     let mut shared_removal = SharedMemory::<F>::new(head_size);
     let mut shared_replacement = SharedMemory::<F>::new(head_size);
 
-    let batch_head_base = (batch_index * sequence_length * num_heads + head_index) * head_size;
+    let batch_head_base = (batch_index * context_length * num_heads + head_index) * head_size;
+    let context_mask_base = batch_index * context_length;
 
-    if sequence_length == 1 {
-        let flat_index = batch_head_base + head_dim_index;
-        sync_cube();
+    for t in 0..context_length {
+        let flat_index = batch_head_base + t * num_heads * head_size + head_dim_index;
+        let context_mask = inputs.context_mask[context_mask_base + t];
 
-        shared_receptance[head_dim_index] = inputs.receptance[flat_index];
-        shared_key[head_dim_index] = inputs.key[flat_index];
-        shared_removal[head_dim_index] = inputs.removal[flat_index];
-        shared_replacement[head_dim_index] = inputs.replacement[flat_index];
-        shared_value[head_dim_index] = inputs.value[flat_index];
-        let w_raw = inputs.weight_decay[flat_index];
-        let w_sig = F::new(1.0) / (F::new(1.0) + F::exp(-w_raw));
-        shared_weight_decay[head_dim_index] = F::exp(F::new(W_SCALE) * w_sig);
-        sync_cube();
-
-        let mut removal_state = F::new(0.0);
-        #[unroll(true)]
-        for i in 0..head_size {
-            removal_state += shared_removal[i] * state[i];
-        }
-
-        let v = shared_value[head_dim_index];
-        let mut y = F::new(0.0);
-
-        #[unroll(true)]
-        for i in 0..head_size {
-            state[i] = state[i] * shared_weight_decay[i]
-                + removal_state * shared_replacement[i]
-                + shared_key[i] * v;
-            y += state[i] * shared_receptance[i];
-        }
-
-        outputs.output[flat_index] = y;
-    } else {
-        for t in 0..sequence_length {
-            let flat_index = batch_head_base + t * num_heads * head_size + head_dim_index;
+        if context_mask == F::new(0.0) {
+            outputs.output[flat_index] = F::new(0.0);
+        } else {
             sync_cube();
 
             shared_receptance[head_dim_index] = inputs.receptance[flat_index];
@@ -87,7 +60,6 @@ pub fn wkv7_inference_forward_kernel<F: Float>(
             sync_cube();
 
             let mut removal_state = F::new(0.0);
-
             #[unroll(true)]
             for i in 0..head_size {
                 removal_state += shared_removal[i] * state[i];
@@ -126,6 +98,7 @@ pub struct Wkv7InferenceForwardInputs<F: Float> {
     pub removal: Tensor<F>,
     pub replacement: Tensor<F>,
     pub initial_state: Tensor<F>,
+    pub context_mask: Tensor<F>,
 }
 
 #[derive(CubeLaunch, CubeType)]
@@ -136,8 +109,7 @@ pub struct Wkv7InferenceForwardOutputs<F: Float> {
 
 #[derive(CubeLaunch, CubeType, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Wkv7InferenceConfig {
-    pub sequence_length: usize,
+    pub context_length: usize,
     pub num_heads: usize,
     pub head_size: usize,
 }
-

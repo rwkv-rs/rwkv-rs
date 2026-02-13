@@ -42,7 +42,7 @@ impl Tokenizer {
         //     .join("../../../assets")
         //     .join("vocab_v20230424.txt");
         // 加载词汇表
-        tokenizer.load_vocabulary(vocab_filepath)?;
+        tokenizer.load_vocab(vocab_filepath)?;
 
         Ok(tokenizer)
     }
@@ -54,7 +54,7 @@ impl Tokenizer {
     ///
     /// # 返回
     /// * 成功或IO错误
-    fn load_vocabulary<P: AsRef<Path>>(&mut self, vocab_path: P) -> io::Result<()> {
+    fn load_vocab<P: AsRef<Path>>(&mut self, vocab_path: P) -> io::Result<()> {
         let file = File::open(vocab_path)?;
 
         let reader = BufReader::new(file);

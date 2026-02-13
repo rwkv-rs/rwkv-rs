@@ -28,6 +28,34 @@ pub(crate) fn wkv7_inference_forward_impl<
     removal: FloatTensor<CubeBackend<R, F, I, BT>>,
     replacement: FloatTensor<CubeBackend<R, F, I, BT>>,
     initial_state: FloatTensor<CubeBackend<R, F, I, BT>>,
+    context_mask: FloatTensor<CubeBackend<R, F, I, BT>>,
+) -> Wkv7InferenceForwardOutput<FloatTensor<CubeBackend<R, F, I, BT>>> {
+    wkv7_inference_forward_impl_inner::<R, F, I, BT>(
+        weight_decay,
+        receptance,
+        key,
+        value,
+        removal,
+        replacement,
+        initial_state,
+        context_mask,
+    )
+}
+
+fn wkv7_inference_forward_impl_inner<
+    R: CubeRuntime,
+    F: FloatElement + CubeElement,
+    I: IntElement,
+    BT: BoolElement,
+>(
+    weight_decay: FloatTensor<CubeBackend<R, F, I, BT>>,
+    receptance: FloatTensor<CubeBackend<R, F, I, BT>>,
+    key: FloatTensor<CubeBackend<R, F, I, BT>>,
+    value: FloatTensor<CubeBackend<R, F, I, BT>>,
+    removal: FloatTensor<CubeBackend<R, F, I, BT>>,
+    replacement: FloatTensor<CubeBackend<R, F, I, BT>>,
+    initial_state: FloatTensor<CubeBackend<R, F, I, BT>>,
+    context_mask: FloatTensor<CubeBackend<R, F, I, BT>>,
 ) -> Wkv7InferenceForwardOutput<FloatTensor<CubeBackend<R, F, I, BT>>> {
     let weight_decay = into_contiguous(weight_decay);
     let receptance = into_contiguous(receptance);
@@ -36,18 +64,24 @@ pub(crate) fn wkv7_inference_forward_impl<
     let removal = into_contiguous(removal);
     let replacement = into_contiguous(replacement);
     let initial_state = into_contiguous(initial_state);
+    let context_mask = into_contiguous(context_mask);
 
     let client = weight_decay.client.clone();
     let device = weight_decay.device.clone();
     let shape = weight_decay.shape.clone();
 
     let batch_size = shape.dims[0];
-    let seq_len = shape.dims[1];
+    let context_length = shape.dims[1];
     let num_heads = shape.dims[2];
     let dim = shape.dims[3];
 
+    assert!(
+        context_length == 256 || context_length == 1,
+        "wkv7_inference_forward requires context_length == 256 or context_length == 1"
+    );
+
     assert!(batch_size > 0, "batch size must be > 0");
-    assert!(seq_len > 0, "sequence length must be > 0");
+    assert!(context_length > 0, "context length must be > 0");
     assert!(num_heads > 0, "num_heads must be > 0");
     assert!(dim > 0, "head size must be > 0");
 
@@ -71,12 +105,18 @@ pub(crate) fn wkv7_inference_forward_impl<
         "replacement shape mismatch with weight_decay"
     );
 
+    let expected_context_mask_shape = Shape::new([batch_size, context_length]);
+    assert_eq!(
+        context_mask.shape, expected_context_mask_shape,
+        "context_mask shape must be [batch_size, context_length]"
+    );
+
     let output = empty_device::<R, F>(client.clone(), device.clone(), shape);
     let final_state =
         empty_device::<R, F>(client.clone(), device.clone(), expected_initial_state_shape);
 
     let config = Wkv7InferenceConfig {
-        sequence_length: seq_len,
+        context_length,
         num_heads,
         head_size: dim,
     };
@@ -96,6 +136,7 @@ pub(crate) fn wkv7_inference_forward_impl<
             removal.as_tensor_arg(1),
             replacement.as_tensor_arg(1),
             initial_state.as_tensor_arg(1),
+            context_mask.as_tensor_arg(1),
         ),
         Wkv7InferenceForwardOutputsLaunch::new(output.as_tensor_arg(1), final_state.as_tensor_arg(1)),
         config,
@@ -107,4 +148,3 @@ pub(crate) fn wkv7_inference_forward_impl<
         final_state,
     }
 }
-

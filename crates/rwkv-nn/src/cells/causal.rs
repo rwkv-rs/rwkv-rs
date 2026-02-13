@@ -1,10 +1,13 @@
 use crate::kernels::wkv7_common::Wkv7Kernel;
+use crate::kernels::wkv7_inference::Wkv7InferenceBackend;
+use crate::functions::context_mask::apply_context_mask;
 use crate::modules::channel_mixer::ChannelMixerIO;
 use crate::modules::time_mixer::TimeMixerIO;
 use crate::modules::{
     channel_mixer::{ChannelMixer, ChannelMixerConfig},
-    time_mixer::{TimeMixer, TimeMixerConfig},
+    time_mixer::{TimeMixer, TimeMixerConfig, TimeMixerInferIO},
 };
+use crate::cells::causal_infer_state::MultiCausalCellsInferenceState;
 use burn::{
     config::Config,
     module::Module,
@@ -174,6 +177,57 @@ impl<B: Backend> MultiCausalCells<B> {
             embedded_token_shift_for_channel_mix,
         }
     }
+
+    pub fn infer(
+        &self,
+        embedded_context: Tensor<B, 3>,
+        context_mask: Tensor<B, 2>,
+        inference_state: &mut MultiCausalCellsInferenceState<B>,
+    ) -> Tensor<B, 3>
+    where
+        B: Wkv7InferenceBackend,
+    {
+        let mut embedded_context = apply_context_mask(embedded_context, context_mask.clone());
+        let mut value_from_first_cell = Tensor::zeros_like(&embedded_context);
+
+        for (cell_id, cell) in self.cells.iter().enumerate() {
+            let embedded_context_normalized = cell
+                .pre_layer_norm_for_time_mix
+                .forward(embedded_context.clone());
+
+            let time_mixer_output = cell.time_mixer.infer(TimeMixerInferIO {
+                embedded_context: embedded_context_normalized,
+                value_from_first_cell: value_from_first_cell.clone(),
+                embedded_token_shift: inference_state.time_mix_shift[cell_id].clone(),
+                state: inference_state.time_mix_state[cell_id].clone(),
+                context_mask: context_mask.clone(),
+            });
+
+            inference_state.time_mix_shift[cell_id] = time_mixer_output.embedded_token_shift;
+            inference_state.time_mix_state[cell_id] = time_mixer_output.state;
+            value_from_first_cell = time_mixer_output.value_from_first_cell;
+
+            embedded_context = embedded_context + time_mixer_output.embedded_context;
+
+            let embedded_context_normalized = cell
+                .pre_layer_norm_for_channel_mix
+                .forward(embedded_context.clone());
+
+            let channel_mixer_output = cell.channel_mixer.forward(ChannelMixerIO {
+                embedded_context: embedded_context_normalized,
+                embedded_token_shift: Some(inference_state.channel_mix_shift[cell_id].clone()),
+                context_mask: Some(context_mask.clone()),
+            });
+
+            inference_state.channel_mix_shift[cell_id] = channel_mixer_output
+                .embedded_token_shift
+                .expect("channel mixer infer path always keeps token shift state");
+
+            embedded_context = embedded_context + channel_mixer_output.embedded_context;
+        }
+
+        embedded_context
+    }
 }
 
 pub struct MultiCausalCellsIO<B: Backend> {
@@ -251,6 +305,7 @@ impl<B: Backend> CausalCell<B> {
         let channel_mixer_input = ChannelMixerIO {
             embedded_context: embedded_context_normalized,
             embedded_token_shift: causal_cell_input.embedded_token_shift_for_channel_mix,
+            context_mask: None,
         };
 
         let channel_mixer_output = self.channel_mixer.forward(channel_mixer_input);
@@ -268,8 +323,8 @@ impl<B: Backend> CausalCell<B> {
 }
 
 pub struct CausalCellIO<B: Backend> {
-    pub embedded_context: Tensor<B, 3>, // [batch_size, context_len, embedded_dim]
-    pub value_from_first_cell: Tensor<B, 3>, // [batch_size, context_len, embedded_dim]
+    pub embedded_context: Tensor<B, 3>, // [batch_size, context_length, embedded_dim]
+    pub value_from_first_cell: Tensor<B, 3>, // [batch_size, context_length, embedded_dim]
     pub embedded_token_shift_for_time_mix: Option<Tensor<B, 2>>, // [batch_size, embedded_dim]
     pub state: Option<Tensor<B, 4>>,    // [batch_size, num_heads, head_size, head_size]
     pub embedded_token_shift_for_channel_mix: Option<Tensor<B, 2>>, // [batch_size, embedded_dim]

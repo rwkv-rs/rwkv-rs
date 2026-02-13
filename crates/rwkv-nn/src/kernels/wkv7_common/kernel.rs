@@ -9,7 +9,7 @@ pub fn wkv7_forward_kernel<F: Float>(
     outputs: &mut Wkv7ForwardOutputs<F>,
     #[comptime] config: Wkv7Config,
 ) {
-    let sequence_length = comptime![config.sequence_length];
+    let context_len = comptime![config.context_len];
     let num_heads = comptime![config.num_heads];
     let head_size = comptime![config.head_size];
     let chunk_length = comptime![config.chunk_length];
@@ -48,8 +48,8 @@ pub fn wkv7_forward_kernel<F: Float>(
     let mut shared_removal = SharedMemory::<F>::new(head_size);
     let mut shared_replacement = SharedMemory::<F>::new(head_size);
 
-    for t in 0..sequence_length {
-        let flat_index = batch_index * sequence_length * num_heads * head_size
+    for t in 0..context_len {
+        let flat_index = batch_index * context_len * num_heads * head_size
             + t * num_heads * head_size
             + head_index * head_size
             + head_dim_index;
@@ -89,7 +89,7 @@ pub fn wkv7_forward_kernel<F: Float>(
 
         if (t + 1) % chunk_length == 0 {
             let base = (batch_index * num_heads + head_index)
-                * (sequence_length / chunk_length)
+                * (context_len / chunk_length)
                 * head_size
                 * head_size
                 + (t / chunk_length) * head_size * head_size
@@ -119,7 +119,7 @@ pub fn wkv7_backward_kernel<F: Float>(
     outputs: &mut Wkv7BackwardOutputs<F>,
     #[comptime] config: Wkv7Config,
 ) {
-    let sequence_length = comptime![config.sequence_length];
+    let context_len = comptime![config.context_len];
     let num_heads = comptime![config.num_heads];
     let head_size = comptime![config.head_size];
     let chunk_length = comptime![config.chunk_length];
@@ -173,12 +173,12 @@ pub fn wkv7_backward_kernel<F: Float>(
     let mut shared_removed_state = SharedMemory::<F>::new(head_size);
     let mut shared_replaced_state_grad = SharedMemory::<F>::new(head_size);
 
-    let t = RuntimeCell::<usize>::new(sequence_length);
+    let t = RuntimeCell::<usize>::new(context_len);
 
     while t.read() > 0 {
         t.store(t.read() - 1);
 
-        let flat_index = batch_index * sequence_length * num_heads * head_size
+        let flat_index = batch_index * context_len * num_heads * head_size
             + t.read() * num_heads * head_size
             + head_index * head_size
             + head_dim_index;
@@ -210,7 +210,7 @@ pub fn wkv7_backward_kernel<F: Float>(
 
         if (t.read() + 1) % chunk_length == 0 {
             let base = (batch_index * num_heads + head_index)
-                * (sequence_length / chunk_length)
+                * (context_len / chunk_length)
                 * head_size
                 * head_size
                 + (t.read() / chunk_length) * head_size * head_size
@@ -354,7 +354,7 @@ pub struct Wkv7BackwardOutputs<F: Float> {
 
 #[derive(CubeLaunch, CubeType, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Wkv7Config {
-    pub sequence_length: usize,
+    pub context_len: usize,
     pub num_heads: usize,
     pub head_size: usize,
     pub chunk_length: usize,
