@@ -4,10 +4,10 @@ use cubecl::{cube, prelude::*};
 const W_SCALE: f32 = -0.6065306597; // -exp(-0.5), matches RWKV7 clampw CUDA kernel
 
 #[cube(launch)]
-pub fn wkv7_inference_forward_kernel<F: Float>(
-    inputs: &Wkv7InferenceForwardInputs<F>,
-    outputs: &mut Wkv7InferenceForwardOutputs<F>,
-    #[comptime] config: Wkv7InferenceConfig,
+pub fn wkv7_infer_forward_kernel<F: Float>(
+    inputs: &Wkv7InferForwardInputs<F>,
+    outputs: &mut Wkv7InferForwardOutputs<F>,
+    #[comptime] config: Wkv7InferConfig,
 ) {
     let context_length = comptime![config.context_length];
     let num_heads = comptime![config.num_heads];
@@ -90,7 +90,7 @@ pub fn wkv7_inference_forward_kernel<F: Float>(
 }
 
 #[derive(CubeLaunch, CubeType)]
-pub struct Wkv7InferenceForwardInputs<F: Float> {
+pub struct Wkv7InferForwardInputs<F: Float> {
     pub weight_decay: Tensor<F>,
     pub receptance: Tensor<F>,
     pub key: Tensor<F>,
@@ -102,13 +102,13 @@ pub struct Wkv7InferenceForwardInputs<F: Float> {
 }
 
 #[derive(CubeLaunch, CubeType)]
-pub struct Wkv7InferenceForwardOutputs<F: Float> {
+pub struct Wkv7InferForwardOutputs<F: Float> {
     pub output: Tensor<F>,
     pub final_state: Tensor<F>,
 }
 
 #[derive(CubeLaunch, CubeType, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct Wkv7InferenceConfig {
+pub struct Wkv7InferConfig {
     pub context_length: usize,
     pub num_heads: usize,
     pub head_size: usize,

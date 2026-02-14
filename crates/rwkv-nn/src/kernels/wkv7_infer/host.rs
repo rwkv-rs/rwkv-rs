@@ -7,15 +7,15 @@ use burn_cubecl::{
     ops::numeric::empty_device,
 };
 
-use crate::kernels::wkv7_inference::{
-    Wkv7InferenceForwardOutput,
+use crate::kernels::wkv7_infer::{
+    Wkv7InferForwardOutput,
     kernel::{
-        Wkv7InferenceConfig, Wkv7InferenceForwardInputsLaunch, Wkv7InferenceForwardOutputsLaunch,
-        wkv7_inference_forward_kernel,
+        Wkv7InferConfig, Wkv7InferForwardInputsLaunch, Wkv7InferForwardOutputsLaunch,
+        wkv7_infer_forward_kernel,
     },
 };
 
-pub(crate) fn wkv7_inference_forward_impl<
+pub(crate) fn wkv7_infer_forward_impl<
     R: CubeRuntime,
     F: FloatElement + CubeElement,
     I: IntElement,
@@ -29,8 +29,8 @@ pub(crate) fn wkv7_inference_forward_impl<
     replacement: FloatTensor<CubeBackend<R, F, I, BT>>,
     initial_state: FloatTensor<CubeBackend<R, F, I, BT>>,
     context_mask: FloatTensor<CubeBackend<R, F, I, BT>>,
-) -> Wkv7InferenceForwardOutput<FloatTensor<CubeBackend<R, F, I, BT>>> {
-    wkv7_inference_forward_impl_inner::<R, F, I, BT>(
+) -> Wkv7InferForwardOutput<FloatTensor<CubeBackend<R, F, I, BT>>> {
+    wkv7_infer_forward_impl_inner::<R, F, I, BT>(
         weight_decay,
         receptance,
         key,
@@ -42,7 +42,7 @@ pub(crate) fn wkv7_inference_forward_impl<
     )
 }
 
-fn wkv7_inference_forward_impl_inner<
+fn wkv7_infer_forward_impl_inner<
     R: CubeRuntime,
     F: FloatElement + CubeElement,
     I: IntElement,
@@ -56,7 +56,7 @@ fn wkv7_inference_forward_impl_inner<
     replacement: FloatTensor<CubeBackend<R, F, I, BT>>,
     initial_state: FloatTensor<CubeBackend<R, F, I, BT>>,
     context_mask: FloatTensor<CubeBackend<R, F, I, BT>>,
-) -> Wkv7InferenceForwardOutput<FloatTensor<CubeBackend<R, F, I, BT>>> {
+) -> Wkv7InferForwardOutput<FloatTensor<CubeBackend<R, F, I, BT>>> {
     let weight_decay = into_contiguous(weight_decay);
     let receptance = into_contiguous(receptance);
     let key = into_contiguous(key);
@@ -74,11 +74,6 @@ fn wkv7_inference_forward_impl_inner<
     let context_length = shape.dims[1];
     let num_heads = shape.dims[2];
     let dim = shape.dims[3];
-
-    assert!(
-        context_length == 256 || context_length == 1,
-        "wkv7_inference_forward requires context_length == 256 or context_length == 1"
-    );
 
     assert!(batch_size > 0, "batch size must be > 0");
     assert!(context_length > 0, "context length must be > 0");
@@ -115,7 +110,7 @@ fn wkv7_inference_forward_impl_inner<
     let final_state =
         empty_device::<R, F>(client.clone(), device.clone(), expected_initial_state_shape);
 
-    let config = Wkv7InferenceConfig {
+    let config = Wkv7InferConfig {
         context_length,
         num_heads,
         head_size: dim,
@@ -124,11 +119,11 @@ fn wkv7_inference_forward_impl_inner<
     let cube_count = CubeCount::Static(num_heads as u32, batch_size as u32, 1);
     let cube_dim = CubeDim::new_1d(dim as u32);
 
-    wkv7_inference_forward_kernel::launch::<F, R>(
+    wkv7_infer_forward_kernel::launch::<F, R>(
         &client,
         cube_count,
         cube_dim,
-        Wkv7InferenceForwardInputsLaunch::new(
+        Wkv7InferForwardInputsLaunch::new(
             weight_decay.as_tensor_arg(1),
             receptance.as_tensor_arg(1),
             key.as_tensor_arg(1),
@@ -138,12 +133,12 @@ fn wkv7_inference_forward_impl_inner<
             initial_state.as_tensor_arg(1),
             context_mask.as_tensor_arg(1),
         ),
-        Wkv7InferenceForwardOutputsLaunch::new(output.as_tensor_arg(1), final_state.as_tensor_arg(1)),
+        Wkv7InferForwardOutputsLaunch::new(output.as_tensor_arg(1), final_state.as_tensor_arg(1)),
         config,
     )
     .unwrap();
 
-    Wkv7InferenceForwardOutput {
+    Wkv7InferForwardOutput {
         output,
         final_state,
     }

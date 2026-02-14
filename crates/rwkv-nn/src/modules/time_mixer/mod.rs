@@ -6,12 +6,11 @@ use burn::{config::Config, module::Module, prelude::*};
 
 use crate::{
     kernels::wkv7_common::Wkv7Kernel,
-    kernels::wkv7_inference::{Wkv7InferenceBackend, wkv7_inference_forward},
     layers::lora::LoRARanks,
 };
 
 use crate::functions::token_shift::get_embedded_token_shift;
-use crate::functions::context_mask::{apply_context_mask, get_context_mask_last};
+use crate::functions::context_mask::apply_context_mask;
 use crate::modules::time_mixer::gated_readout::GatedReadoutInput;
 use gated_readout::{GatedReadout, GatedReadoutConfig};
 use weight_prepare::{WeightPrepare, WeightPrepareConfig};
@@ -116,6 +115,7 @@ impl<B: Backend> TimeMixer<B> {
     pub fn forward<K: Wkv7Kernel<B>>(&self, time_mixer_input: TimeMixerIO<B>) -> TimeMixerIO<B> {
         let TimeMixerIO {
             embedded_context,
+            context_mask,
             value_from_first_cell,
             embedded_token_shift,
             state,
@@ -124,6 +124,9 @@ impl<B: Backend> TimeMixer<B> {
         let [batch_size_per_device, context_length, _embedded_dim] = embedded_context.dims();
 
         let (num_heads, head_size) = (self.num_heads, self.head_size);
+        
+        let embedded_context = apply_context_mask(embedded_context, context_mask.clone());
+        let value_from_first_cell = apply_context_mask(value_from_first_cell, context_mask.clone());
 
         let output_embedded_token_shift = match embedded_token_shift {
             Some(_) => Some(get_embedded_token_shift(embedded_context.clone())),
@@ -134,7 +137,7 @@ impl<B: Backend> TimeMixer<B> {
             embedded_context.clone(),
             value_from_first_cell.clone(),
             embedded_token_shift.clone(),
-            None,
+            context_mask.clone(),
         );
 
         let shape = [batch_size_per_device, context_length, num_heads, head_size];
@@ -152,104 +155,25 @@ impl<B: Backend> TimeMixer<B> {
         let output_embedded_context = self.gated_readout.forward(gated_readout_input);
 
         TimeMixerIO {
-            embedded_context: output_embedded_context,
-            value_from_first_cell: weight_prepare_output.value_from_first_cell,
-            embedded_token_shift: output_embedded_token_shift,
-            state: wkv7_forward_output.next_state,
-        }
-    }
-
-    pub fn infer(&self, input: TimeMixerInferIO<B>) -> TimeMixerInferOutput<B>
-    where
-        B: Wkv7InferenceBackend,
-    {
-        let TimeMixerInferIO {
-            embedded_context,
-            value_from_first_cell,
-            embedded_token_shift,
-            state,
-            context_mask,
-        } = input;
-
-        let [batch_size, context_length, _embedded_dim] = embedded_context.dims();
-        assert!(
-            context_length == 256 || context_length == 1,
-            "infer requires context_length == 256 or context_length == 1"
-        );
-
-        let (num_heads, head_size) = (self.num_heads, self.head_size);
-
-        let embedded_context = apply_context_mask(embedded_context, context_mask.clone());
-        let value_from_first_cell = apply_context_mask(value_from_first_cell, context_mask.clone());
-
-        // Only update the token shift if the last timestep is valid.
-        let last_mask = get_context_mask_last(context_mask.clone()); // [batch_size, 1]
-        let last_token = get_embedded_token_shift(embedded_context.clone()); // [batch_size, embedded_dim]
-        let output_embedded_token_shift = embedded_token_shift.clone()
-            + (last_token - embedded_token_shift.clone()) * last_mask;
-
-        let weight_prepare_output = self.weight_prepare.forward(
-            embedded_context.clone(),
-            value_from_first_cell,
-            Some(embedded_token_shift),
-            Some(context_mask.clone()),
-        );
-
-        let shape = [batch_size, context_length, num_heads, head_size];
-        let wkv7_forward_input = weight_prepare_output.reshape_to_wkv7_input(shape);
-
-        let wkv7_forward_output = wkv7_inference_forward(
-            wkv7_forward_input.weight_decay.clone(),
-            wkv7_forward_input.receptance.clone(),
-            wkv7_forward_input.replacement_key.clone(),
-            wkv7_forward_input.value.clone(),
-            wkv7_forward_input.removal_key_normalized.clone(),
-            wkv7_forward_input.replacement.clone(),
-            state,
-            context_mask.clone(),
-        );
-
-        let gated_readout_input = GatedReadoutInput {
-            embedded_context,
-            token_shifted_diff: weight_prepare_output.token_shifted_diff,
-            wkv7_forward_output: wkv7_forward_output.output,
-            wkv7_forward_input_receptance: wkv7_forward_input.receptance,
-            wkv7_forward_input_replacement_key: wkv7_forward_input.replacement_key,
-            wkv7_forward_input_value: wkv7_forward_input.value,
-        };
-
-        let output_embedded_context = self.gated_readout.forward(gated_readout_input);
-
-        TimeMixerInferOutput {
-            embedded_context: apply_context_mask(output_embedded_context, context_mask.clone()),
+            embedded_context: apply_context_mask(
+                output_embedded_context,
+                context_mask.clone()
+            ),
+            context_mask: context_mask.clone(),
             value_from_first_cell: apply_context_mask(
                 weight_prepare_output.value_from_first_cell,
                 context_mask,
             ),
             embedded_token_shift: output_embedded_token_shift,
-            state: wkv7_forward_output.final_state,
+            state: wkv7_forward_output.next_state,
         }
     }
 }
 
 pub struct TimeMixerIO<B: Backend> {
     pub embedded_context: Tensor<B, 3>,
+    pub context_mask: Option<Tensor<B, 2>>,
     pub value_from_first_cell: Tensor<B, 3>,
     pub embedded_token_shift: Option<Tensor<B, 2>>,
     pub state: Option<Tensor<B, 4>>,
-}
-
-pub struct TimeMixerInferIO<B: Backend> {
-    pub embedded_context: Tensor<B, 3>,
-    pub value_from_first_cell: Tensor<B, 3>,
-    pub embedded_token_shift: Tensor<B, 2>,
-    pub state: Tensor<B, 4>,
-    pub context_mask: Tensor<B, 2>, // [batch_size, context_length]
-}
-
-pub struct TimeMixerInferOutput<B: Backend> {
-    pub embedded_context: Tensor<B, 3>,
-    pub value_from_first_cell: Tensor<B, 3>,
-    pub embedded_token_shift: Tensor<B, 2>,
-    pub state: Tensor<B, 4>,
 }

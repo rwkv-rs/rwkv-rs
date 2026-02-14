@@ -2,17 +2,17 @@ use burn::backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement};
 use burn::tensor::ops::FloatTensor;
 use burn_cubecl::{CubeElement, CubeRuntime};
 
-use crate::kernels::wkv7_inference::{
-    Wkv7InferenceBackend, Wkv7InferenceForwardOutput,
-    host::wkv7_inference_forward_impl,
+use crate::kernels::wkv7_infer::{
+    Wkv7InferBackend, Wkv7InferForwardOutput,
+    host::wkv7_infer_forward_impl,
 };
 
-impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> Wkv7InferenceBackend
+impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> Wkv7InferBackend
     for CubeBackend<R, F, I, BT>
 where
     F: CubeElement,
 {
-    fn wkv7_inference_forward(
+    fn wkv7_infer_forward(
         weight_decay: FloatTensor<Self>,
         receptance: FloatTensor<Self>,
         key: FloatTensor<Self>,
@@ -21,8 +21,8 @@ where
         replacement: FloatTensor<Self>,
         initial_state: FloatTensor<Self>,
         context_mask: FloatTensor<Self>,
-    ) -> Wkv7InferenceForwardOutput<FloatTensor<Self>> {
-        wkv7_inference_forward_impl::<R, F, I, BT>(
+    ) -> Wkv7InferForwardOutput<FloatTensor<Self>> {
+        wkv7_infer_forward_impl::<R, F, I, BT>(
             weight_decay,
             receptance,
             key,

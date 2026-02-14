@@ -1,15 +1,21 @@
+use crate::kernels::wkv7_infer::{Wkv7InferBackend, wkv7_infer_forward};
 use crate::kernels::wkv7_pretrain::{Wkv7PretrainBackend, wkv7_pretrain_forward};
 use crate::kernels::wkv7_statepass::{Wkv7StatePassBackend, wkv7_statepass_forward};
 use crate::kernels::wkv7_statetune::{Wkv7StateTuneBackend, wkv7_statetune_forward};
-use crate::kernels::wkv7_inference::{Wkv7InferenceBackend, wkv7_inference_forward};
 use burn::Tensor;
 use burn::prelude::Backend;
 
 pub mod host;
 pub mod kernel;
 
-pub trait Wkv7Backend: Wkv7PretrainBackend + Wkv7StateTuneBackend + Wkv7StatePassBackend {}
-impl<B> Wkv7Backend for B where B: Wkv7PretrainBackend + Wkv7StateTuneBackend + Wkv7StatePassBackend {}
+pub trait Wkv7Backend:
+    Wkv7PretrainBackend + Wkv7StateTuneBackend + Wkv7StatePassBackend + Wkv7InferBackend
+{
+}
+impl<B> Wkv7Backend for B where
+    B: Wkv7PretrainBackend + Wkv7StateTuneBackend + Wkv7StatePassBackend + Wkv7InferBackend
+{
+}
 
 pub trait Wkv7Kernel<B: Backend> {
     fn forward(
@@ -91,9 +97,9 @@ impl<B: Wkv7StateTuneBackend> Wkv7Kernel<B> for KernelStateTune {
 ///
 /// Uses the lightweight WKV7 inference implementation that returns only
 /// `output` and `final_state` (no chunk state snapshots, no backward).
-pub struct KernelInference;
+pub struct KernelInfer;
 
-impl<B: Wkv7InferenceBackend> Wkv7Kernel<B> for KernelInference {
+impl<B: Wkv7InferBackend> Wkv7Kernel<B> for KernelInfer {
     fn forward(
         input: Wkv7ForwardInput<B>,
         state: Option<Tensor<B, 4>>,
@@ -104,7 +110,7 @@ impl<B: Wkv7InferenceBackend> Wkv7Kernel<B> for KernelInference {
         let device = input.weight_decay.device();
         let context_mask = Tensor::ones([batch_size, context_length], &device);
 
-        let output = wkv7_inference_forward(
+        let output = wkv7_infer_forward(
             input.weight_decay,
             input.receptance,
             input.replacement_key,

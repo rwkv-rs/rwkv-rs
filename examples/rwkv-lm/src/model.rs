@@ -95,13 +95,13 @@ impl<B: Backend> AutoRegressiveModel<B> {
     pub fn forward<K: Wkv7Kernel<B>>(
         &self,
         item: AutoRegressiveBatch<B>,
-        embedded_token_shift_for_time_mix: Option<Tensor<B, 3>>,
-        state: Option<Tensor<B, 5>>,
-        embedded_token_shift_for_channel_mix: Option<Tensor<B, 3>>,
+        embedded_token_shift_for_time_mix: Option<Vec<Tensor<B, 2>>>,
+        state: Option<Vec<Tensor<B, 4>>>,
+        embedded_token_shift_for_channel_mix: Option<Vec<Tensor<B, 2>>>,
     ) -> (
-        Option<Tensor<B, 3>>,
-        Option<Tensor<B, 5>>,
-        Option<Tensor<B, 3>>,
+        Option<Vec<Tensor<B, 2>>>,
+        Option<Vec<Tensor<B, 4>>>,
+        Option<Vec<Tensor<B, 2>>>,
         NextTokenPredictionOutput<B>,
     )
     where
@@ -118,6 +118,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
 
         let multi_causal_cells_input = MultiCausalCellsIO {
             embedded_context: embedded_context_normalized,
+            context_mask: None,
             embedded_token_shift_for_time_mix,
             state,
             embedded_token_shift_for_channel_mix,
@@ -188,20 +189,20 @@ impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegress
 
         let paragraph_length = TRAIN_CFG.get().unwrap().paragraph_length;
 
-        let mut embedded_token_shift_for_time_mix =
-            Tensor::zeros([batch_size, self.num_cells, self.embedded_dim], device);
-        let mut state = Tensor::zeros(
-            [
-                batch_size,
-                self.num_cells,
-                self.num_heads,
-                self.head_size,
-                self.head_size,
-            ],
-            device,
-        );
-        let mut embedded_token_shift_for_channel_mix =
-            Tensor::zeros([batch_size, self.num_cells, self.embedded_dim], device);
+        let mut embedded_token_shift_for_time_mix: Vec<Tensor<B, 2>> = (0..self.num_cells)
+            .map(|_| Tensor::zeros([batch_size, self.embedded_dim], device))
+            .collect();
+        let mut state: Vec<Tensor<B, 4>> = (0..self.num_cells)
+            .map(|_| {
+                Tensor::zeros(
+                    [batch_size, self.num_heads, self.head_size, self.head_size],
+                    device,
+                )
+            })
+            .collect();
+        let mut embedded_token_shift_for_channel_mix: Vec<Tensor<B, 2>> = (0..self.num_cells)
+            .map(|_| Tensor::zeros([batch_size, self.embedded_dim], device))
+            .collect();
         let mut sum_loss: Tensor<B, 1> = Tensor::zeros([1], device);
 
         for paragraph_index in 0..context_length / paragraph_length {
@@ -228,12 +229,21 @@ impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegress
                 Some(embedded_token_shift_for_channel_mix),
             );
 
-            embedded_token_shift_for_time_mix =
-                output_embedded_token_shift_for_time_mix.unwrap().detach();
-            state = output_state.unwrap().detach();
+            embedded_token_shift_for_time_mix = output_embedded_token_shift_for_time_mix
+                .unwrap()
+                .into_iter()
+                .map(|t| t.detach())
+                .collect();
+            state = output_state
+                .unwrap()
+                .into_iter()
+                .map(|t| t.detach())
+                .collect();
             embedded_token_shift_for_channel_mix = output_embedded_token_shift_for_channel_mix
                 .unwrap()
-                .detach();
+                .into_iter()
+                .map(|t| t.detach())
+                .collect();
 
             sum_loss = sum_loss + item.loss.mul_scalar(paragraph_length as i32);
         }

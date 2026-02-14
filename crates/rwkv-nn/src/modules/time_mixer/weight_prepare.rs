@@ -14,7 +14,7 @@ use crate::{
         },
         lerp::lerp,
         normalize::normalize,
-        token_shift::{token_shift, token_shifted_diff_with_context_mask},
+        token_shift::token_shift,
     },
     layers::lora::{ActivationFn, LoRA, LoRAConfig, LoRAType},
 };
@@ -205,22 +205,15 @@ impl<B: Backend> WeightPrepare<B> {
         embedded_token_shift: Option<Tensor<B, 2>>,
         context_mask: Option<Tensor<B, 2>>,
     ) -> WeightPrepareOutput<B> {
-        let token_shifted_diff = match context_mask {
-            Some(context_mask) => {
-                let [batch_size, _context_length, embedded_dim] = embedded_context.dims();
-                let embedded_token_shift = embedded_token_shift.unwrap_or(Tensor::zeros(
-                    [batch_size, embedded_dim],
-                    &embedded_context.device(),
-                ));
-
-                token_shifted_diff_with_context_mask(
-                    embedded_context.clone(),
-                    embedded_token_shift,
-                    context_mask,
-                )
-            }
-            None => token_shift(embedded_context.clone(), embedded_token_shift) - embedded_context.clone(),
-        };
+        let prev = token_shift(
+            embedded_context.clone(),
+            embedded_token_shift,
+            context_mask.clone(),
+        );
+        let mut token_shifted_diff = prev - embedded_context.clone();
+        if let Some(mask) = context_mask {
+            token_shifted_diff = token_shifted_diff * mask.unsqueeze_dim(2);
+        }
 
         self.forward_with_token_shifted_diff(
             embedded_context,
