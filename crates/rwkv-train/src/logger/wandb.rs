@@ -5,6 +5,7 @@ use burn::train::{
     metric::store::{EpochSummary, MetricsUpdate, Split},
 };
 use log::warn;
+use rwkv_config::validated::train::TRAIN_CFG;
 use tokio::{runtime::Runtime, sync::Mutex};
 use wandb::{BackendOptions, LogData, Run, RunInfo, WandB};
 
@@ -109,6 +110,9 @@ pub struct WandbLogger {
     metric_definitions: HashMap<MetricId, MetricDefinition>,
     global_step: u64,
 }
+
+const ITERATION_SPEED_METRIC_NAME: &str = "Iteration Speed";
+const KILO_TOKENS_PER_SECOND_METRIC_NAME: &str = "Kilo Token per Second";
 
 struct CudaMetricEntry {
     index: usize,
@@ -242,6 +246,13 @@ impl MetricLogger for WandbLogger {
         log.insert("_step", self.global_step);
         // log.insert("epoch", epoch as u64);
 
+        let tokens_per_step = TRAIN_CFG
+            .get()
+            // burn-train counts iterations per device-local batch in multi-device mode.
+            // Iteration Speed already scales with number of devices, so we multiply by per-device tokens.
+            .map(|cfg| (cfg.context_length * cfg.batch_size_per_device) as f64)
+            .unwrap_or(0.0);
+
         let metric_prefix = match tag.as_deref() {
             Some(tag) => {
                 let tag = tag.trim().replace(' ', "-").to_lowercase();
@@ -288,20 +299,28 @@ impl MetricLogger for WandbLogger {
         }
 
         for entry in update.entries_numeric {
-            let name = self
+            let metric_name = self
                 .metric_definitions
                 .get(&entry.entry.metric_id)
                 .map(|definition| definition.name.as_str())
                 .unwrap_or("metric");
-            let name = format!("{metric_prefix}{name}");
+            let key = format!("{metric_prefix}{metric_name}");
 
-            match entry.numeric_entry {
-                NumericEntry::Value(value) => {
-                    log.insert(name, value);
-                }
-                NumericEntry::Aggregated { aggregated_value, .. } => {
-                    log.insert(name, aggregated_value);
-                }
+            let value = match entry.numeric_entry {
+                NumericEntry::Value(value) => value,
+                NumericEntry::Aggregated { aggregated_value, .. } => aggregated_value,
+            };
+            log.insert(key, value);
+
+            // Derive "kilo tokens per second" from the existing Iteration Speed metric.
+            // This mirrors the RWKV-LM v7 convention of logging Kt/s for throughput.
+            if split == Split::Train
+                && tokens_per_step > 0.0
+                && metric_name == ITERATION_SPEED_METRIC_NAME
+                && value > 0.0
+            {
+                let kt_s = value * tokens_per_step / 1000.0;
+                log.insert(format!("{metric_prefix}{KILO_TOKENS_PER_SECOND_METRIC_NAME}"), kt_s);
             }
         }
 
