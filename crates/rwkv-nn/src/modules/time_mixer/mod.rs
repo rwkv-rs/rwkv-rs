@@ -142,7 +142,8 @@ impl<B: Backend> TimeMixer<B> {
 
         let shape = [batch_size_per_device, context_length, num_heads, head_size];
         let wkv7_forward_input = weight_prepare_output.reshape_to_wkv7_input(shape);
-        let wkv7_forward_output = K::forward(wkv7_forward_input.clone(), state, 16);
+        let wkv7_forward_output =
+            K::forward(wkv7_forward_input.clone(), state, 16, context_mask.clone());
         let gated_readout_input = GatedReadoutInput {
             embedded_context,
             token_shifted_diff: weight_prepare_output.token_shifted_diff,
