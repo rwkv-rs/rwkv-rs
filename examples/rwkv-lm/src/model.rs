@@ -10,14 +10,16 @@ use rwkv::custom::nn::loss::CrossEntropyLossConfig;
 use rwkv::custom::nn::{
     Embedding, EmbeddingConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig,
 };
+use rwkv::custom::prelude::Int;
 use rwkv::custom::tensor::backend::{AutodiffBackend, Backend};
 use rwkv::custom::train::{InferenceStep, TrainOutput, TrainStep};
 use rwkv::nn::cells::causal::{MultiCausalCells, MultiCausalCellsConfig, MultiCausalCellsIO};
 use rwkv::nn::functions::init_weights::{orthogonal_init, uniform_init};
 use rwkv::nn::kernels::l2wrap::{L2WrapBackend, l2wrap};
-use rwkv::nn::kernels::wkv7_common::{Wkv7Backend, Wkv7Kernel};
+use rwkv::nn::kernels::wkv7_common::{KernelInfer, Wkv7Backend, Wkv7Kernel};
 use rwkv::nn::modules::time_mixer::param_state::{StateModule, StateModuleConfig};
 use rwkv::train::learner::next_token_prediction::NextTokenPredictionOutput;
+use std::mem::take;
 
 use crate::data::batcher::AutoRegressiveBatch;
 
@@ -146,6 +148,87 @@ impl<B: Backend> AutoRegressiveModel<B> {
             multi_causal_cells_output.embedded_token_shift_for_channel_mix,
             NextTokenPredictionOutput { loss },
         )
+    }
+
+    pub fn infer(
+        &self,
+        tokens: Tensor<B, 2, Int>,
+        context_mask: Option<Tensor<B, 2>>,
+        embedded_token_shift_for_time_mix: &mut Vec<Tensor<B, 2>>,
+        state: &mut Vec<Tensor<B, 4>>,
+        embedded_token_shift_for_channel_mix: &mut Vec<Tensor<B, 2>>,
+        need_full_logits: bool,
+    ) -> Tensor<B, 3>
+    where
+        B: Wkv7Backend,
+    {
+        debug_assert_eq!(
+            embedded_token_shift_for_time_mix.len(),
+            self.num_cells,
+            "embedded_token_shift_for_time_mix must have num_cells elements"
+        );
+        debug_assert_eq!(
+            state.len(),
+            self.num_cells,
+            "state must have num_cells elements"
+        );
+        debug_assert_eq!(
+            embedded_token_shift_for_channel_mix.len(),
+            self.num_cells,
+            "embedded_token_shift_for_channel_mix must have num_cells elements"
+        );
+
+        let device = &self.embed.devices()[0];
+
+        let tokens = tokens.to_device(device);
+        let context_mask = context_mask.map(|m| m.to_device(device));
+
+        let [batch_size, context_length] = tokens.dims();
+        assert!(context_length > 0, "tokens must be non-empty");
+
+        if let Some(mask) = context_mask.as_ref() {
+            let [mask_batch_size, mask_context_length] = mask.dims();
+            assert_eq!(
+                (batch_size, context_length),
+                (mask_batch_size, mask_context_length),
+                "context_mask shape mismatch with tokens"
+            );
+        }
+
+        let embedded_context = self.embed.forward(tokens);
+        let embedded_context = self.layer_norm_for_first_cell.forward(embedded_context);
+
+        let multi_causal_cells_input = MultiCausalCellsIO {
+            embedded_context,
+            context_mask: context_mask.clone(),
+            embedded_token_shift_for_time_mix: Some(take(embedded_token_shift_for_time_mix)),
+            state: Some(take(state)),
+            embedded_token_shift_for_channel_mix: Some(take(embedded_token_shift_for_channel_mix)),
+        };
+        let multi_causal_cells_output = self.cells.forward::<KernelInfer>(multi_causal_cells_input);
+
+        *embedded_token_shift_for_time_mix = multi_causal_cells_output
+            .embedded_token_shift_for_time_mix
+            .expect("infer requires embedded_token_shift_for_time_mix");
+        *state = multi_causal_cells_output
+            .state
+            .expect("infer requires state");
+        *embedded_token_shift_for_channel_mix = multi_causal_cells_output
+            .embedded_token_shift_for_channel_mix
+            .expect("infer requires embedded_token_shift_for_channel_mix");
+
+        let embedded_context = multi_causal_cells_output.embedded_context;
+
+        if need_full_logits {
+            let embedded_last_token = embedded_context.slice(
+                [0..batch_size, (context_length - 1)..context_length]
+            );
+            let embedded_last_token_normalized = self.layer_norm_for_unembed.forward(embedded_last_token);
+            self.unembed.forward(embedded_last_token_normalized)
+        } else {
+            let embedded_context_normalized = self.layer_norm_for_unembed.forward(embedded_context);
+            self.unembed.forward(embedded_context_normalized)
+        }
     }
 }
 
