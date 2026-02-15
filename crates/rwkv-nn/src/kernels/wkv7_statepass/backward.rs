@@ -1,5 +1,5 @@
-use burn::tensor::ops::FloatTensor;
 use burn::tensor::TensorMetadata;
+use burn::tensor::ops::FloatTensor;
 use burn::{
     backend::{
         Autodiff,
@@ -130,7 +130,6 @@ impl<B: Wkv7StatePassBackend, C: CheckpointStrategy> Wkv7StatePassBackend for Au
                 if let Some(node) = node_initial_state {
                     grads.register::<B>(node.id, grads_out.initial_state_grad);
                 }
-
             }
         }
 

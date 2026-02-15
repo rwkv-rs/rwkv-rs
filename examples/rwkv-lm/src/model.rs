@@ -219,10 +219,10 @@ impl<B: Backend> AutoRegressiveModel<B> {
         let embedded_context = multi_causal_cells_output.embedded_context;
 
         if need_full_logits {
-            let embedded_last_token = embedded_context.slice(
-                [0..batch_size, (context_length - 1)..context_length]
-            );
-            let embedded_last_token_normalized = self.layer_norm_for_unembed.forward(embedded_last_token);
+            let embedded_last_token =
+                embedded_context.slice([0..batch_size, (context_length - 1)..context_length]);
+            let embedded_last_token_normalized =
+                self.layer_norm_for_unembed.forward(embedded_last_token);
             self.unembed.forward(embedded_last_token_normalized)
         } else {
             let embedded_context_normalized = self.layer_norm_for_unembed.forward(embedded_context);

@@ -214,8 +214,8 @@ impl<B: Backend> CausalCell<B> {
         let embedded_context = embedded_context + time_mixer_output.embedded_context;
 
         let embedded_context_normalized = self
-        .pre_layer_norm_for_channel_mix
-        .forward(embedded_context.clone());
+            .pre_layer_norm_for_channel_mix
+            .forward(embedded_context.clone());
 
         let channel_mixer_input = ChannelMixerIO {
             embedded_context: embedded_context_normalized,

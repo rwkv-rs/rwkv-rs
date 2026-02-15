@@ -42,8 +42,7 @@ impl<T: TokenUnit> BinReader<T> {
         assert_eq!(
             &self.reader[0..8],
             b"RWKVBIN\0",
-            "Invalid file header. \
-            Are the bin file you provided exported by rwkv-rs."
+            "Invalid file header. Are the bin file you provided exported by rwkv-rs."
         );
 
         assert_eq!(&self.reader[8..16], MMAP_VERSION, "Unsupported version.");
@@ -88,8 +87,8 @@ impl<T: TokenUnit> BinReader<T> {
         let ratio = magic_prime as f64 / (self.num_tokens / ctx_len) as f64;
         assert!(
             ratio > 0.9 && ratio <= 1.0,
-            "Invalid magic_prime {magic_prime} \
-            because the value appears to be out of a reasonable range."
+            "Invalid magic_prime {magic_prime} because the value appears to be out of a \
+             reasonable range."
         );
         magic_prime
     }
@@ -257,8 +256,8 @@ impl<T: TokenUnit> Drop for BinWriter<T> {
     fn drop(&mut self) {
         if !self.is_metadata_updated {
             eprintln!(
-                "Warning: BinWriter dropped without updating metadata.\
-                So The generated binary file cannot be read properly."
+                "Warning: BinWriter dropped without updating metadata.So The generated binary \
+                 file cannot be read properly."
             );
         }
     }

@@ -1,7 +1,7 @@
 use rwkv::custom::backend::Cuda;
 use rwkv::custom::tensor::bf16;
 use rwkv_lm::model::AutoRegressiveModelConfig;
-use rwkv_lm::pth2mpk::{convert_pth_to_mpk, ConvertPthToMpkOptions};
+use rwkv_lm::pth2mpk::{ConvertPthToMpkOptions, convert_pth_to_mpk};
 
 fn main() {
     type MyBackend = Cuda<bf16, i32>;

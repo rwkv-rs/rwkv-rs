@@ -28,18 +28,13 @@ where
 
     let devices = init_devices::<B>(&train_cfg_builder);
 
-    rwkv_lm::training::train::<B>(
-        devices,
-        model_cfg_builder,
-        train_cfg_builder,
-        &exp_log_path,
-    );
+    rwkv_lm::training::train::<B>(devices, model_cfg_builder, train_cfg_builder, &exp_log_path);
 }
 
 #[cfg(feature = "wgpu")]
 mod wgpu {
+    use crate::{ElemType, launch};
     use rwkv::custom::backend::{Autodiff, Wgpu};
-    use crate::{launch, ElemType};
 
     pub fn run() {
         launch::<Autodiff<Wgpu<ElemType, i32>>>();
@@ -48,17 +43,19 @@ mod wgpu {
 
 #[cfg(feature = "vulkan")]
 mod vulkan {
-    use rwkv::custom::backend::{Autodiff, Vulkan};
+    use crate::{ElemType, launch};
     use rwkv::custom::backend::autodiff::checkpoint::strategy::BalancedCheckpointing;
-    use crate::{launch, ElemType};
+    use rwkv::custom::backend::{Autodiff, Vulkan};
 
-    pub fn run() { launch::<Autodiff<Vulkan<ElemType, i32>, BalancedCheckpointing>>(); }
+    pub fn run() {
+        launch::<Autodiff<Vulkan<ElemType, i32>, BalancedCheckpointing>>();
+    }
 }
 
 #[cfg(feature = "metal")]
 mod metal {
+    use crate::{ElemType, launch};
     use rwkv::custom::backend::{Autodiff, Metal};
-    use crate::{launch, ElemType};
 
     pub fn run() {
         launch::<Autodiff<Metal<ElemType, i32>>>();
@@ -67,9 +64,9 @@ mod metal {
 
 #[cfg(feature = "cuda")]
 mod cuda {
-    use rwkv::custom::backend::{Autodiff, Cuda};
+    use crate::{ElemType, launch};
     use rwkv::custom::backend::autodiff::checkpoint::strategy::BalancedCheckpointing;
-    use crate::{launch, ElemType};
+    use rwkv::custom::backend::{Autodiff, Cuda};
 
     pub fn run() {
         launch::<Autodiff<Cuda<ElemType, i32>, BalancedCheckpointing>>();
@@ -78,11 +75,13 @@ mod cuda {
 
 #[cfg(feature = "rocm")]
 mod rocm {
-    use rwkv::custom::backend::{Autodiff, Rocm};
+    use crate::{ElemType, launch};
     use rwkv::custom::backend::autodiff::checkpoint::strategy::BalancedCheckpointing;
-    use crate::{launch, ElemType};
+    use rwkv::custom::backend::{Autodiff, Rocm};
 
-    pub fn run() {launch::<Autodiff<Rocm<ElemType, i32>, BalancedCheckpointing>>(); }
+    pub fn run() {
+        launch::<Autodiff<Rocm<ElemType, i32>, BalancedCheckpointing>>();
+    }
 }
 
 fn main() {

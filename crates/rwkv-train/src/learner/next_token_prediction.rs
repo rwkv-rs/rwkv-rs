@@ -1,10 +1,9 @@
-use burn::prelude::Backend;
 use burn::Tensor;
+use burn::prelude::Backend;
 use burn::tensor::Transaction;
+use burn_ndarray::NdArray;
 use burn_train::ItemLazy;
 use burn_train::metric::{Adaptor, LossInput};
-use burn_ndarray::NdArray;
-
 
 #[derive(new)]
 pub struct NextTokenPredictionOutput<B: Backend> {

@@ -78,11 +78,7 @@ pub struct SlidingSample {
 }
 
 impl<T: TokenUnit> SlidingDataset<T> {
-    pub fn new(
-        context_length: u64,
-        bin: Arc<MmapBinReader<T>>,
-        samplers: Vec<Sampler>,
-    ) -> Self {
+    pub fn new(context_length: u64, bin: Arc<MmapBinReader<T>>, samplers: Vec<Sampler>) -> Self {
         let mini_epoch_index = Arc::new(AtomicUsize::new(0));
 
         Self {

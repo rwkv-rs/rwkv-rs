@@ -1,28 +1,28 @@
+#[cfg(feature = "wgpu")]
+use std::any::TypeId;
 use std::{
     any::Any,
     path::{Path, PathBuf},
 };
-#[cfg(feature = "wgpu")]
-use std::any::TypeId;
 
 use burn::backend::Autodiff;
 use burn::backend::autodiff::checkpoint::strategy::CheckpointStrategy;
-#[cfg(feature = "fusion")]
-use burn_fusion::{Fusion, FusionBackend};
-#[cfg(feature = "cubecl")]
-use burn_cubecl::{CubeBackend, CubeRuntime};
-#[cfg(feature = "cubecl")]
-use burn_cubecl::cubecl::device::{Device as CubeDevice, DeviceId};
 #[cfg(feature = "wgpu")]
 use burn::backend::wgpu::WgpuDevice;
 use burn::prelude::Backend;
+#[cfg(feature = "cubecl")]
+use burn_cubecl::cubecl::device::{Device as CubeDevice, DeviceId};
+#[cfg(feature = "cubecl")]
+use burn_cubecl::{CubeBackend, CubeRuntime};
+#[cfg(feature = "fusion")]
+use burn_fusion::{Fusion, FusionBackend};
+#[cfg(feature = "tui")]
+use burn_train::renderer::tui::TuiMetricsRenderer;
 use burn_train::{
     Interrupter,
     logger::{AsyncLogger, FileLogger, Logger},
     renderer::MetricsRenderer,
 };
-#[cfg(feature = "tui")]
-use burn_train::renderer::tui::TuiMetricsRenderer;
 use chrono::Local;
 use log::{info, warn};
 use rwkv_config::{
@@ -37,10 +37,7 @@ use wandb::LogData;
 
 use crate::{
     logger::wandb::{
-        WandbLogger,
-        WandbLoggerConfig,
-        init_logger_blocking,
-        init_metric_logger_blocking,
+        WandbLogger, WandbLoggerConfig, init_logger_blocking, init_metric_logger_blocking,
     },
     renderer::BarMetricsRenderer,
     utils::{auto_create_directory, read_record_file},
@@ -95,7 +92,6 @@ pub fn init_log(train_cfg_builder: &mut FinalTrainConfigBuilder) -> PathBuf {
 
     full_experiment_log_path
 }
-
 
 pub trait BackendDeviceInit: Backend {
     fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device>;
@@ -158,9 +154,10 @@ where
                     3
                 } else {
                     panic!(
-                        "Requested {requested} WGPU devices, but only found discrete={available_discrete}, \
-integrated={available_integrated}, virtual={available_virtual}, cpu={available_cpu}. \
-Reduce num_devices_per_node or change backend."
+                        "Requested {requested} WGPU devices, but only found \
+                         discrete={available_discrete}, integrated={available_integrated}, \
+                         virtual={available_virtual}, cpu={available_cpu}. Reduce \
+                         num_devices_per_node or change backend."
                     );
                 };
 

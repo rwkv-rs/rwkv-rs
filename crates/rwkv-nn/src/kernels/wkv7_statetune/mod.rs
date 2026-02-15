@@ -105,6 +105,8 @@ pub fn wkv7_statetune_backward<B: Wkv7StateTuneBackend>(
         value_grad: Tensor::from_primitive(TensorPrimitive::Float(output.value_grad)),
         removal_grad: Tensor::from_primitive(TensorPrimitive::Float(output.removal_grad)),
         replacement_grad: Tensor::from_primitive(TensorPrimitive::Float(output.replacement_grad)),
-        initial_state_grad: Tensor::from_primitive(TensorPrimitive::Float(output.initial_state_grad)),
+        initial_state_grad: Tensor::from_primitive(TensorPrimitive::Float(
+            output.initial_state_grad,
+        )),
     }
 }

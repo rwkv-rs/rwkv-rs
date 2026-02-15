@@ -11,10 +11,8 @@ use crate::kernels::wkv7_common::{Wkv7StateBackwardOutput, Wkv7StatePassForwardO
 pub type Wkv7StatePassForwardOutputTensor<B> = Wkv7StatePassForwardOutput<Tensor<B, 4>>;
 pub type Wkv7StatePassBackwardOutputTensor<B> = Wkv7StateBackwardOutput<Tensor<B, 4>>;
 
-pub type Wkv7StatePassForwardOutputPrimitive<B> =
-    Wkv7StatePassForwardOutput<FloatTensor<B>>;
-pub type Wkv7StatePassBackwardOutputPrimitive<B> =
-    Wkv7StateBackwardOutput<FloatTensor<B>>;
+pub type Wkv7StatePassForwardOutputPrimitive<B> = Wkv7StatePassForwardOutput<FloatTensor<B>>;
+pub type Wkv7StatePassBackwardOutputPrimitive<B> = Wkv7StateBackwardOutput<FloatTensor<B>>;
 
 #[allow(clippy::too_many_arguments)]
 pub trait Wkv7StatePassBackend: Backend {
@@ -111,6 +109,8 @@ pub fn wkv7_statepass_backward<B: Wkv7StatePassBackend>(
         value_grad: Tensor::from_primitive(TensorPrimitive::Float(output.value_grad)),
         removal_grad: Tensor::from_primitive(TensorPrimitive::Float(output.removal_grad)),
         replacement_grad: Tensor::from_primitive(TensorPrimitive::Float(output.replacement_grad)),
-        initial_state_grad: Tensor::from_primitive(TensorPrimitive::Float(output.initial_state_grad)),
+        initial_state_grad: Tensor::from_primitive(TensorPrimitive::Float(
+            output.initial_state_grad,
+        )),
     }
 }

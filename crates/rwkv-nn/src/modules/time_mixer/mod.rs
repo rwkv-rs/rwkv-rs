@@ -4,13 +4,10 @@ mod weight_prepare;
 
 use burn::{config::Config, module::Module, prelude::*};
 
-use crate::{
-    kernels::wkv7_common::Wkv7Kernel,
-    layers::lora::LoRARanks,
-};
+use crate::{kernels::wkv7_common::Wkv7Kernel, layers::lora::LoRARanks};
 
-use crate::functions::token_shift::get_embedded_token_shift;
 use crate::functions::context_mask::apply_context_mask;
+use crate::functions::token_shift::get_embedded_token_shift;
 use crate::modules::time_mixer::gated_readout::GatedReadoutInput;
 use gated_readout::{GatedReadout, GatedReadoutConfig};
 use weight_prepare::{WeightPrepare, WeightPrepareConfig};
@@ -124,7 +121,7 @@ impl<B: Backend> TimeMixer<B> {
         let [batch_size_per_device, context_length, _embedded_dim] = embedded_context.dims();
 
         let (num_heads, head_size) = (self.num_heads, self.head_size);
-        
+
         let embedded_context = apply_context_mask(embedded_context, context_mask.clone());
         let value_from_first_cell = apply_context_mask(value_from_first_cell, context_mask.clone());
 
@@ -156,10 +153,7 @@ impl<B: Backend> TimeMixer<B> {
         let output_embedded_context = self.gated_readout.forward(gated_readout_input);
 
         TimeMixerIO {
-            embedded_context: apply_context_mask(
-                output_embedded_context,
-                context_mask.clone()
-            ),
+            embedded_context: apply_context_mask(output_embedded_context, context_mask.clone()),
             context_mask: context_mask.clone(),
             value_from_first_cell: apply_context_mask(
                 weight_prepare_output.value_from_first_cell,

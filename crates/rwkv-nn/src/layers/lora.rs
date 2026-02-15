@@ -85,8 +85,11 @@ impl<B: Backend> LoRA<B> {
                 }
                 LoRAType::ValueResidual => {
                     *bias = Param::from_tensor(
-                        get_value_lora_bias(self.embedded_dim, device)
-                            .reshape([1, 1, self.embedded_dim]),
+                        get_value_lora_bias(self.embedded_dim, device).reshape([
+                            1,
+                            1,
+                            self.embedded_dim,
+                        ]),
                     );
                 }
             }

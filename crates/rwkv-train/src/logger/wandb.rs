@@ -1,11 +1,14 @@
-use std::{collections::HashMap, sync::{Arc, OnceLock}};
 use burn::train::{
     logger::{AsyncLogger, Logger, MetricLogger},
-    metric::{MetricDefinition, MetricId, NumericEntry, SerializedEntry},
     metric::store::{EpochSummary, MetricsUpdate, Split},
+    metric::{MetricDefinition, MetricId, NumericEntry, SerializedEntry},
 };
 use log::warn;
 use rwkv_config::validated::train::TRAIN_CFG;
+use std::{
+    collections::HashMap,
+    sync::{Arc, OnceLock},
+};
 use tokio::{runtime::Runtime, sync::Mutex};
 use wandb::{BackendOptions, LogData, Run, RunInfo, WandB};
 
@@ -239,7 +242,13 @@ impl Logger<LogData> for WandbLogger {
 }
 
 impl MetricLogger for WandbLogger {
-    fn log(&mut self, update: MetricsUpdate, _epoch: usize, split: Split, tag: Option<Arc<String>>) {
+    fn log(
+        &mut self,
+        update: MetricsUpdate,
+        _epoch: usize,
+        split: Split,
+        tag: Option<Arc<String>>,
+    ) {
         self.global_step += 1;
 
         let mut log = LogData::new();
@@ -273,7 +282,10 @@ impl MetricLogger for WandbLogger {
                 .map(|definition| definition.name.as_str())
                 .unwrap_or("metric");
             let name = format!("{metric_prefix}{metric_name}");
-            let SerializedEntry { formatted, serialized } = entry.serialized_entry;
+            let SerializedEntry {
+                formatted,
+                serialized,
+            } = entry.serialized_entry;
             let value = if formatted.is_empty() {
                 serialized.as_str()
             } else {
@@ -308,7 +320,9 @@ impl MetricLogger for WandbLogger {
 
             let value = match entry.numeric_entry {
                 NumericEntry::Value(value) => value,
-                NumericEntry::Aggregated { aggregated_value, .. } => aggregated_value,
+                NumericEntry::Aggregated {
+                    aggregated_value, ..
+                } => aggregated_value,
             };
             log.insert(key, value);
 
@@ -320,7 +334,10 @@ impl MetricLogger for WandbLogger {
                 && value > 0.0
             {
                 let kt_s = value * tokens_per_step / 1000.0;
-                log.insert(format!("{metric_prefix}{KILO_TOKENS_PER_SECOND_METRIC_NAME}"), kt_s);
+                log.insert(
+                    format!("{metric_prefix}{KILO_TOKENS_PER_SECOND_METRIC_NAME}"),
+                    kt_s,
+                );
             }
         }
 

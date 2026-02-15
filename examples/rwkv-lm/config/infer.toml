@@ -1,0 +1,25 @@
+model_config_path = "examples/rwkv-lm/config/model.toml"
+weights_path = "examples/rwkv-lm/weights/model.mpk"
+tokenizer_vocab_path = "examples/rwkv-lm/assets/rwkv_vocab_v20230424.txt"
+
+# HTTP
+http_bind_addr = "0.0.0.0:8080"
+request_body_limit_bytes = 52428800
+sse_keep_alive_ms = 10000
+
+# Engine
+max_batch_size = 4
+max_context_length = 4096
+prefill_chunk_size = 256
+decode_first = true
+
+# Sampling
+temperature = 1.0
+top_k = 0
+top_p = 1.0
+max_new_tokens = 128
+
+# CubeCL DeviceId
+device_id_type = 0
+device_id_index = 0
+

@@ -53,11 +53,14 @@ impl BarMetricsRenderer {
             valid_loss: None,
             metric_id_loss: MetricId::new(Arc::new(LOSS_METRIC_NAME.to_string())),
             metric_id_learning_rate: MetricId::new(Arc::new(LEARNING_RATE_METRIC_NAME.to_string())),
-            metric_id_iteration_speed: MetricId::new(Arc::new(ITERATION_SPEED_METRIC_NAME.to_string())),
+            metric_id_iteration_speed: MetricId::new(Arc::new(
+                ITERATION_SPEED_METRIC_NAME.to_string(),
+            )),
             // Each burn-train iteration corresponds to one device-local batch (even in multi-device mode),
             // so use the per-device batch size here. Iteration Speed already scales with number of devices.
             tokens_per_step: (TRAIN_CFG.get().unwrap().context_length
-                * TRAIN_CFG.get().unwrap().batch_size_per_device) as f64,
+                * TRAIN_CFG.get().unwrap().batch_size_per_device)
+                as f64,
         }
     }
 }
@@ -95,7 +98,8 @@ impl MetricsRendererTraining for BarMetricsRenderer {
         // burn-train increments `iteration` per device-local batch in multi-device mode.
         // Match the progress bar length to that convention.
         let cfg = TRAIN_CFG.get().unwrap();
-        self.pb.set_length((cfg.num_steps_per_mini_epoch_auto * cfg.num_devices_per_node) as u64);
+        self.pb
+            .set_length((cfg.num_steps_per_mini_epoch_auto * cfg.num_devices_per_node) as u64);
         self.pb.set_position(item.iteration as u64);
         self.pb.set_message(format!(
             "Epoch {}/{} | lr {:.2e} | kt/s {} | train_loss {:.5} | valid_loss {}",
@@ -118,15 +122,9 @@ impl MetricsRendererTraining for BarMetricsRenderer {
         let message = match self.valid_loss {
             Some(loss) => format!(
                 "Epoch {}/{} | valid_loss {:.5}",
-                item.epoch,
-                self.num_epochs,
-                loss
+                item.epoch, self.num_epochs, loss
             ),
-            None => format!(
-                "Epoch {}/{} | valid_loss -",
-                item.epoch,
-                self.num_epochs
-            ),
+            None => format!("Epoch {}/{} | valid_loss -", item.epoch, self.num_epochs),
         };
 
         self.pb.println(message);

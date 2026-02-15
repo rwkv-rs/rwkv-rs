@@ -52,21 +52,21 @@ pub fn token_shift<B: Backend>(
 
     // If the previous timestep is masked (padding), keep using the external shift state.
     // This handles left padding where the prefix padding should not advance the previous token.
-    let use_external_shift = Tensor::ones([batch_size, context_length], &embedded_context.device())
-        - prev_valid_mask;
+    let use_external_shift =
+        Tensor::ones([batch_size, context_length], &embedded_context.device()) - prev_valid_mask;
 
     let external_shift = embedded_token_shift.unsqueeze_dim(1);
     shifted.clone() + use_external_shift.unsqueeze_dim(2) * (external_shift - shifted)
 }
- 
+
 pub fn get_embedded_token_shift<B: Backend>(embedded_context: Tensor<B, 3>) -> Tensor<B, 2> {
     let [batch_size, context_length, embedded_dim] = embedded_context.dims();
     if context_length == 0 {
         Tensor::zeros([batch_size, embedded_dim], &embedded_context.device())
     } else {
         embedded_context
-        .clone()
-        .slice([0..batch_size, (context_length - 1)..context_length])
-        .squeeze_dim(1)
+            .clone()
+            .slice([0..batch_size, (context_length - 1)..context_length])
+            .squeeze_dim(1)
     }
 }

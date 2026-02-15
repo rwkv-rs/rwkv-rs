@@ -12,8 +12,8 @@ use log::info;
 use log::warn;
 use rwkv::config::validated::train::{FinalTrainConfigBuilder, TRAIN_CFG};
 use rwkv::config::{
-    validated::model::{FinalModelConfigBuilder, MODEL_CFG},
     DatasetFormatOptions,
+    validated::model::{FinalModelConfigBuilder, MODEL_CFG},
 };
 #[cfg(feature = "ddp")]
 use rwkv::custom::collective::{AllReduceStrategy, CollectiveConfig};
@@ -25,9 +25,9 @@ use rwkv::custom::tensor::backend::AutodiffBackend;
 #[cfg(not(feature = "ddp"))]
 use rwkv::custom::train::MultiDeviceOptim;
 use rwkv::custom::train::{
+    Interrupter, Learner, SupervisedTraining,
     logger::FileMetricLogger,
     metric::{CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric},
-    Interrupter, Learner, SupervisedTraining,
 };
 use rwkv::data::mmap::sample::Sampler;
 use rwkv::nn::kernels::l2wrap::L2WrapBackend;
@@ -113,9 +113,9 @@ pub fn train<B: AutodiffBackend>(
         .set_device(devices[0].clone())
         .build(dataset.clone());
     let dataloader_valid = dataloader_valid.slice(0, 0);
-    
+
     train_cfg_builder.check();
-    
+
     model_cfg_builder.build();
     train_cfg_builder.build();
 

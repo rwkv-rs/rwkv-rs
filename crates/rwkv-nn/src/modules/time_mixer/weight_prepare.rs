@@ -6,6 +6,7 @@ use burn::{
     tensor::activation::{sigmoid, softplus},
 };
 
+use crate::kernels::wkv7_common::Wkv7ForwardInput;
 use crate::{
     functions::{
         init_weights::{
@@ -18,7 +19,6 @@ use crate::{
     },
     layers::lora::{ActivationFn, LoRA, LoRAConfig, LoRAType},
 };
-use crate::kernels::wkv7_common::Wkv7ForwardInput;
 
 #[derive(Config, Debug)]
 pub struct WeightPrepareConfig {
@@ -250,7 +250,8 @@ impl<B: Backend> WeightPrepare<B> {
         let weight_decay_input =
             embedded_context.clone() + token_shifted_diff.clone() * self.param_weight_decay.val();
 
-        let key_input = embedded_context.clone() + token_shifted_diff.clone() * self.param_key.val();
+        let key_input =
+            embedded_context.clone() + token_shifted_diff.clone() * self.param_key.val();
 
         let value_input =
             embedded_context.clone() + token_shifted_diff.clone() * self.param_value.val();

@@ -22,8 +22,8 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
     }
 
     let mut state = Array::<F>::new(head_size);
-    let initial_state_base = (batch_index * num_heads + head_index) * head_size * head_size
-        + head_dim_index * head_size;
+    let initial_state_base =
+        (batch_index * num_heads + head_index) * head_size * head_size + head_dim_index * head_size;
 
     #[unroll(true)]
     for i in 0..head_size {
@@ -80,8 +80,8 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
         }
     }
 
-    let final_state_base = (batch_index * num_heads + head_index) * head_size * head_size
-        + head_dim_index * head_size;
+    let final_state_base =
+        (batch_index * num_heads + head_index) * head_size * head_size + head_dim_index * head_size;
 
     #[unroll(true)]
     for i in 0..head_size {

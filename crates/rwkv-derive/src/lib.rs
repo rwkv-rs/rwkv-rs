@@ -282,16 +282,15 @@ fn extract_line_ref_type(ty: &Type) -> LineRefType {
                 "String" => LineRefType::String, // 字符串类型
                 "u128" => LineRefType::U128,     // 128位无符号整数类型
                 _ => panic!(
-                    "Unsupported line_ref type. Only String and u128 are supported. \
-                     Got: {}",
+                    "Unsupported line_ref type. Only String and u128 are supported. Got: {}",
                     last_segment.ident
                 ),
             }
         }
         // 对于其他类型形式，暂时不支持
         _ => panic!(
-            "Unsupported line_ref type. Only String and u128 are supported. \
-             Expected a simple path type."
+            "Unsupported line_ref type. Only String and u128 are supported. Expected a simple \
+             path type."
         ),
     }
 }

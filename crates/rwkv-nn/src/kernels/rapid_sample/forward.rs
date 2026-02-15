@@ -3,8 +3,8 @@ use burn::tensor::ops::{FloatTensor, IntTensor};
 use burn_cubecl::CubeRuntime;
 
 use crate::kernels::rapid_sample::{
-    host::rapid_sample_topk_topp_impl, RapidSampleBackend, RapidSampleOutputPrimitive,
-    RapidSamplePenaltyConfig,
+    RapidSampleBackend, RapidSampleOutputPrimitive, RapidSamplePenaltyConfig,
+    host::rapid_sample_topk_topp_impl,
 };
 
 impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> RapidSampleBackend

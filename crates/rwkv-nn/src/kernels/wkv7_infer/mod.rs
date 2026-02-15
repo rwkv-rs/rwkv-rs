@@ -2,14 +2,13 @@ mod forward;
 mod host;
 mod kernel;
 
-
+use burn::backend::Autodiff;
+use burn::backend::autodiff::checkpoint::strategy::CheckpointStrategy;
+use burn::tensor::backend::AutodiffBackend;
 use burn::{
     prelude::Backend,
     tensor::{Tensor, TensorPrimitive, ops::FloatTensor},
 };
-use burn::backend::Autodiff;
-use burn::backend::autodiff::checkpoint::strategy::CheckpointStrategy;
-use burn::tensor::backend::AutodiffBackend;
 
 /// Forward output for inference-only WKV7 kernel.
 ///
@@ -70,7 +69,6 @@ pub fn wkv7_infer_forward<B: Wkv7InferBackend>(
         final_state: Tensor::from_primitive(TensorPrimitive::Float(output.final_state)),
     }
 }
-
 
 impl<B: Wkv7InferBackend, C: CheckpointStrategy> Wkv7InferBackend for Autodiff<B, C> {
     fn wkv7_infer_forward(

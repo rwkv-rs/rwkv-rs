@@ -145,8 +145,7 @@ pub fn wkv7_backward_kernel<F: Float>(
     }
 
     if use_final_state_grad {
-        let final_state_base =
-            (batch_index * num_heads + head_index) * head_size * head_size;
+        let final_state_base = (batch_index * num_heads + head_index) * head_size * head_size;
         let row_base = final_state_base + head_dim_index * head_size;
         let col_base = final_state_base + head_dim_index;
 

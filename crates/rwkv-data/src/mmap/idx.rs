@@ -43,8 +43,7 @@ impl<T: LineRefSample> IdxReader<T> {
         assert_eq!(
             &self.reader[0..8],
             b"RWKVIDX\0",
-            "Invalid file header. \
-            Are the idx file you provided exported by rwkv-rs."
+            "Invalid file header. Are the idx file you provided exported by rwkv-rs."
         );
 
         assert_eq!(&self.reader[8..16], &MMAP_VERSION, "Unsupported version.");
@@ -192,8 +191,8 @@ impl<T: LineRefSample> Drop for IdxWriter<T> {
     fn drop(&mut self) {
         if !self.is_metadata_updated {
             eprintln!(
-                "Warning: IdxWriter dropped without updating metadata. \
-                So the generated idx file cannot be read properly."
+                "Warning: IdxWriter dropped without updating metadata. So the generated idx file \
+                 cannot be read properly."
             );
         }
     }

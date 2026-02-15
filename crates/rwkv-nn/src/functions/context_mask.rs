@@ -19,9 +19,9 @@ pub fn apply_context_mask<B: Backend>(
         );
 
         embedded_context * context_mask.unsqueeze_dim(2)
-    } else { 
+    } else {
         embedded_context
-    }
+    };
 }
 
 /// Count valid tokens per batch lane.

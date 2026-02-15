@@ -7,3 +7,31 @@ license = "Apache-2.0"
 
 [dependencies]
 tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { version = "1.18.1", features = ["v4", "serde"] }
+bytes = "1.10.1"
+
+# HTTP server (OpenAI-compatible)
+axum = { version = "0.7.9", features = ["macros", "tokio"] }
+tower-http = { version = "0.6.6", features = ["cors"] }
+
+# Inference utilities
+dashmap = { workspace = true }
+once_cell = { workspace = true }
+log = { workspace = true }
+
+# Optional tokenizer for text endpoints (RWKV vocab)
+rwkv-data = { path = "../rwkv-data", optional = true }
+rwkv-config = { path = "../rwkv-config" }
+
+[features]
+default = ["http", "tokenizer"]
+http = []
+tokenizer = ["dep:rwkv-data"]
+
+[dev-dependencies]
+tower = "0.5"
