@@ -133,13 +133,12 @@ impl<B: Backend> AutoRegressiveModel<B> {
         let num_tokens_per_batch = batch_size * context_length;
         let logits_flat = logits.reshape([num_tokens_per_batch, self.vocab_size]);
         let targets_flat = targets.reshape([num_tokens_per_batch]);
-        let loss = l2wrap(
-            CrossEntropyLossConfig::new()
-                .init(&logits_flat.device())
-                .forward(logits_flat.clone(), targets_flat),
-            logits_flat,
-            num_tokens_per_batch,
-        );
+
+        let logits_flat = l2wrap(logits_flat, num_tokens_per_batch);
+
+        let loss = CrossEntropyLossConfig::new()
+            .init(&logits_flat.device())
+            .forward(logits_flat, targets_flat);
 
         // Return the output and loss
         (
