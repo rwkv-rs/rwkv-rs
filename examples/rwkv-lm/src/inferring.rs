@@ -1,10 +1,10 @@
 use rwkv::custom::Tensor;
 use rwkv::custom::prelude::{Backend, Int, TensorData};
-use rwkv::data::tokenizer::Tokenizer;
-use rwkv::nn::kernels::rapid_sample::{RapidSampleBackend, rapid_sample};
+use rwkv::infer::engine::InferExecutor;
+use rwkv::infer::{Error, Result, SamplingConfig};
+
+use rwkv::nn::kernels::rapid_sample::{RapidSampleBackend, RapidSamplePenaltyConfig, rapid_sample};
 use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
-use rwkv_infer::engine::InferExecutor;
-use rwkv_infer::{Error, Result, SamplingConfig};
 
 use crate::model::AutoRegressiveModel;
 
@@ -15,7 +15,6 @@ where
     B: Wkv7Backend + RapidSampleBackend,
 {
     device: B::Device,
-    tokenizer: Tokenizer,
     model: AutoRegressiveModel<B>,
 
     max_batch_size: usize,
@@ -29,6 +28,7 @@ where
     embedded_token_shift_for_channel_mix: Vec<Tensor<B, 2>>,
 
     rng_states: Tensor<B, 1, Int>,
+    penalties: Tensor<B, 2>,
 }
 
 impl<B> RwkvLmExecutor<B>
@@ -38,7 +38,6 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         device: B::Device,
-        tokenizer_vocab_path: &str,
         model: AutoRegressiveModel<B>,
         max_batch_size: usize,
         num_cells: usize,
@@ -47,8 +46,6 @@ where
         num_heads: usize,
         head_size: usize,
     ) -> Self {
-        let tokenizer = Tokenizer::new(tokenizer_vocab_path).expect("load tokenizer vocab");
-
         let embedded_token_shift_for_time_mix: Vec<Tensor<B, 2>> = (0..num_cells)
             .map(|_| Tensor::zeros([max_batch_size, embedded_dim], &device))
             .collect();
@@ -59,38 +56,44 @@ where
             .map(|_| Tensor::zeros([max_batch_size, embedded_dim], &device))
             .collect();
 
-        // Deterministic initial RNG state per batch position.
         let rng_init: Vec<i32> = (0..max_batch_size)
             .map(|i| (i as i32).wrapping_add(1))
             .collect();
         let rng_states =
             Tensor::<B, 1, Int>::from_data(TensorData::new(rng_init, [max_batch_size]), &device);
 
+        let penalties = Tensor::<B, 2>::zeros([max_batch_size, vocab_size], &device);
+
         Self {
             device,
-            tokenizer,
             model,
-
             max_batch_size,
             vocab_size,
             embedded_dim,
             num_heads,
             head_size,
-
             embedded_token_shift_for_time_mix,
             state,
             embedded_token_shift_for_channel_mix,
-
             rng_states,
+            penalties,
         }
     }
 
-    fn make_context_mask(&self, mask_u8: &[u8]) -> Vec<f32> {
+    fn make_context_mask(mask_u8: &[u8]) -> Vec<f32> {
         mask_u8
             .iter()
             .copied()
             .map(|m| if m == 0 { 0.0 } else { 1.0 })
             .collect()
+    }
+
+    fn reset_penalties_row(&mut self, batch_index: usize) {
+        let zeros = Tensor::<B, 2>::zeros([1, self.vocab_size], &self.device);
+        self.penalties = self
+            .penalties
+            .clone()
+            .slice_assign([batch_index..batch_index + 1, 0..self.vocab_size], zeros);
     }
 }
 
@@ -98,69 +101,50 @@ impl<B> InferExecutor for RwkvLmExecutor<B>
 where
     B: Backend + Wkv7Backend + RapidSampleBackend,
 {
-    fn tokenize(&self, text: &str) -> Result<Vec<i32>> {
-        Ok(self
-            .tokenizer
-            .encode(text, false)
-            .into_iter()
-            .map(|t| t as i32)
-            .collect())
-    }
-
-    fn detokenize(&self, token_ids: &[i32]) -> Result<String> {
-        Ok(self.tokenizer.decode(
-            token_ids
-                .iter()
-                .copied()
-                .map(|t| t as u16)
-                .collect::<Vec<_>>(),
-        ))
-    }
-
     fn prefill(&mut self, batch_positions: &[(usize, &[i32], &[u8])]) -> Result<()> {
         if batch_positions.is_empty() {
             return Ok(());
         }
 
-        let context_length = batch_positions[0].1.len();
-        if context_length == 0 {
+        let context_len = batch_positions[0].1.len();
+        if context_len == 0 {
             return Ok(());
         }
 
-        for (_, tokens, mask) in batch_positions {
-            if tokens.len() != context_length || mask.len() != context_length {
+        for (_, token_ids, context_mask) in batch_positions {
+            if token_ids.len() != context_len || context_mask.len() != context_len {
                 return Err(Error::BadRequest(
-                    "prefill: inconsistent tokens/mask length".to_string(),
+                    "prefill: inconsistent token_ids/context_mask length".to_string(),
                 ));
             }
         }
 
-        let mut flat_tokens = vec![0i32; self.max_batch_size * context_length];
-        let mut flat_mask = vec![0f32; self.max_batch_size * context_length];
+        let mut flat_tokens = vec![0i32; self.max_batch_size * context_len];
+        let mut flat_mask = vec![0f32; self.max_batch_size * context_len];
 
-        for (batch_index, tokens, mask) in batch_positions {
+        for (batch_index, token_ids, context_mask) in batch_positions {
             if *batch_index >= self.max_batch_size {
                 return Err(Error::BadRequest(format!(
                     "prefill: batch_index {batch_index} out of range (max_batch_size={})",
                     self.max_batch_size
                 )));
             }
-            let base = batch_index * context_length;
-            flat_tokens[base..base + context_length].copy_from_slice(tokens);
-            let mask_f = self.make_context_mask(mask);
-            flat_mask[base..base + context_length].copy_from_slice(&mask_f);
+
+            let base = batch_index * context_len;
+            flat_tokens[base..base + context_len].copy_from_slice(token_ids);
+            let mask_f = Self::make_context_mask(context_mask);
+            flat_mask[base..base + context_len].copy_from_slice(&mask_f);
         }
 
         let tokens = Tensor::<B, 2, Int>::from_data(
-            TensorData::new(flat_tokens, [self.max_batch_size, context_length]),
+            TensorData::new(flat_tokens, [self.max_batch_size, context_len]),
             &self.device,
         );
         let context_mask = Tensor::<B, 2>::from_data(
-            TensorData::new(flat_mask, [self.max_batch_size, context_length]),
+            TensorData::new(flat_mask, [self.max_batch_size, context_len]),
             &self.device,
         );
 
-        // `need_full_logits=true` is the fast path: only the last-token logits are computed.
         let _ = self.model.infer(
             tokens,
             Some(context_mask),
@@ -217,6 +201,8 @@ where
 
         let mut logits_active: Vec<Tensor<B, 2>> = Vec::with_capacity(batch_positions.len());
         let mut rng_active: Vec<Tensor<B, 1, Int>> = Vec::with_capacity(batch_positions.len());
+        let mut penalties_active: Vec<Tensor<B, 2>> = Vec::with_capacity(batch_positions.len());
+
         for (batch_index, _) in batch_positions {
             logits_active.push(
                 logits
@@ -228,10 +214,30 @@ where
                     .clone()
                     .slice([*batch_index..*batch_index + 1]),
             );
+            if sampling.penalties_enabled() {
+                penalties_active.push(
+                    self.penalties
+                        .clone()
+                        .slice([*batch_index..*batch_index + 1, 0..self.vocab_size]),
+                );
+            }
         }
 
         let logits_active = Tensor::cat(logits_active, 0);
         let rng_active = Tensor::cat(rng_active, 0);
+        let penalties = if sampling.penalties_enabled() {
+            let penalties_active = Tensor::cat(penalties_active, 0);
+            Some((
+                penalties_active,
+                RapidSamplePenaltyConfig {
+                    presence_penalty: sampling.presence_penalty,
+                    repetition_penalty: sampling.repetition_penalty,
+                    penalty_decay: sampling.penalty_decay,
+                },
+            ))
+        } else {
+            None
+        };
 
         let out = rapid_sample::<B>(
             logits_active,
@@ -239,7 +245,7 @@ where
             sampling.temperature,
             sampling.top_k,
             sampling.top_p,
-            None,
+            penalties,
         );
 
         for (i, (batch_index, _)) in batch_positions.iter().enumerate() {
@@ -248,6 +254,18 @@ where
                 .rng_states
                 .clone()
                 .slice_assign([*batch_index..*batch_index + 1], state_i);
+        }
+
+        if let Some(updated_penalties) = out.penalties {
+            for (i, (batch_index, _)) in batch_positions.iter().enumerate() {
+                let penalty_row = updated_penalties
+                    .clone()
+                    .slice([i..i + 1, 0..self.vocab_size]);
+                self.penalties = self.penalties.clone().slice_assign(
+                    [*batch_index..*batch_index + 1, 0..self.vocab_size],
+                    penalty_row,
+                );
+            }
         }
 
         let token_ids = out
@@ -309,6 +327,8 @@ where
             .rng_states
             .clone()
             .slice_assign([batch_index..batch_index + 1], seed_tensor);
+
+        self.reset_penalties_row(batch_index);
 
         Ok(())
     }

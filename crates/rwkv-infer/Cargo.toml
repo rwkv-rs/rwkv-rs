@@ -12,12 +12,12 @@ futures = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-uuid = { version = "1.18.1", features = ["v4", "serde"] }
-bytes = "1.10.1"
+uuid = { workspace = true }
+bytes = { workspace = true }
 
 # HTTP server (OpenAI-compatible)
-axum = { version = "0.7.9", features = ["macros", "tokio"] }
-tower-http = { version = "0.6.6", features = ["cors"] }
+axum = { workspace = true }
+tower-http = { workspace = true }
 
 # Inference utilities
 dashmap = { workspace = true }
@@ -25,13 +25,13 @@ once_cell = { workspace = true }
 log = { workspace = true }
 
 # Optional tokenizer for text endpoints (RWKV vocab)
-rwkv-data = { path = "../rwkv-data", optional = true }
+rwkv-data = { path = "../rwkv-data" }
 rwkv-config = { path = "../rwkv-config" }
+clia-tracing-config = { workspace = true }
 
 [features]
-default = ["http", "tokenizer"]
+default = ["http"]
 http = []
-tokenizer = ["dep:rwkv-data"]
 
 [dev-dependencies]
-tower = "0.5"
+tower = { workspace = true }

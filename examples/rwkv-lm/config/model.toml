@@ -1,9 +1,9 @@
 model_type = "auto_regressive"
 
-num_cells = 12
+num_cells = 32
 vocab_size = 65536
-embedded_dim = 768
-num_heads = 12
+embedded_dim = 4096
+num_heads = 64
 channel_mix_dim_scale = 4
 dropout_prob = 0.01
 

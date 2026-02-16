@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use crate::config::SamplingConfig;
 use crate::engine::{EngineHandle, SubmitOutput};
+use crate::types::SamplingConfig;
 
 #[derive(Clone)]
 pub struct RwkvInferClient {
@@ -17,8 +17,11 @@ impl RwkvInferClient {
         &self,
         input_text: String,
         sampling: SamplingConfig,
+        stop_suffixes: Vec<String>,
         stream: bool,
     ) -> crate::Result<SubmitOutput> {
-        self.engine.submit_text(input_text, sampling, stream).await
+        self.engine
+            .submit_text(input_text, sampling, stop_suffixes, stream)
+            .await
     }
 }

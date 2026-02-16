@@ -1,54 +1,45 @@
 use std::sync::Arc;
 
-use axum::extract::DefaultBodyLimit;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{Method, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use rwkv_config::validated::infer::FinalInferConfig;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::auth::AuthConfig;
-use crate::config::BackendConfig;
-use crate::engine::EngineHandle;
 use crate::server::handlers;
 use crate::server::openai_types::{ModelListResponse, ModelObject};
+use crate::service::RwkvInferService;
 
 #[derive(Clone)]
-pub struct SharedRwkvInferState {
-    pub cfg: BackendConfig,
-    pub engine: Arc<EngineHandle>,
+pub struct RwkvInferApp {
+    pub cfg: Arc<FinalInferConfig>,
+    pub service: Arc<RwkvInferService>,
     pub auth: AuthConfig,
 }
 
 pub struct RwkvInferRouterBuilder {
-    state: Option<SharedRwkvInferState>,
-    allowed_origins: Option<Vec<String>>,
+    app: Option<RwkvInferApp>,
 }
 
 impl RwkvInferRouterBuilder {
     pub fn new() -> Self {
-        Self {
-            state: None,
-            allowed_origins: None,
-        }
+        Self { app: None }
     }
 
-    pub fn with_state(mut self, state: SharedRwkvInferState) -> Self {
-        self.state = Some(state);
-        self
-    }
-
-    pub fn with_allowed_origins(mut self, allowed_origins: Vec<String>) -> Self {
-        self.allowed_origins = Some(allowed_origins);
+    pub fn with_app(mut self, app: RwkvInferApp) -> Self {
+        self.app = Some(app);
         self
     }
 
     pub async fn build(self) -> crate::Result<Router> {
-        let state = self
-            .state
-            .ok_or(crate::Error::Internal("state must be set".to_string()))?;
+        let app = self
+            .app
+            .ok_or(crate::Error::Internal("app must be set".to_string()))?;
 
-        let allow_origin = if let Some(origins) = self.allowed_origins {
-            let parsed: Result<Vec<_>, _> = origins.into_iter().map(|o| o.parse()).collect();
+        let allow_origin = if let Some(origins) = app.cfg.allowed_origins.clone() {
+            let parsed: Result<Vec<_>, _> = origins.into_iter().map(|origin| origin.parse()).collect();
             match parsed {
                 Ok(origins) => AllowOrigin::list(origins),
                 Err(_) => {
@@ -87,8 +78,8 @@ impl RwkvInferRouterBuilder {
             .route("/v1/audio/speech", post(handlers::audio_speech))
             .route("/health", get(health))
             .layer(cors_layer)
-            .layer(DefaultBodyLimit::max(state.cfg.request_body_limit_bytes))
-            .with_state(state);
+            .layer(DefaultBodyLimit::max(app.cfg.request_body_limit_bytes))
+            .with_state(app);
 
         Ok(router)
     }
@@ -98,14 +89,20 @@ async fn health() -> (StatusCode, &'static str) {
     (StatusCode::OK, "ok")
 }
 
-async fn models() -> Json<ModelListResponse> {
-    // A minimal static list. This can be extended when model-loading is wired.
-    Json(ModelListResponse {
-        object: "list".to_string(),
-        data: vec![ModelObject {
-            id: "rwkv".to_string(),
+async fn models(State(app): State<RwkvInferApp>) -> Json<ModelListResponse> {
+    let data = app
+        .service
+        .model_names()
+        .into_iter()
+        .map(|model_name| ModelObject {
+            id: model_name,
             object: "model".to_string(),
             owned_by: "rwkv-rs".to_string(),
-        }],
+        })
+        .collect();
+    Json(ModelListResponse {
+        object: "list".to_string(),
+        data,
     })
 }
+

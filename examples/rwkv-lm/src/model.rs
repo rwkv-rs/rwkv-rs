@@ -1,27 +1,31 @@
-// This is a basic text classification model implemented in Rust using the Burn framework.
-// It uses a Transformer as the base model and applies Linear and Embedding layers.
-// The model is then trained using Cross-Entropy loss. It contains methods for model initialization
-// (both with and without pre-trained weights), forward pass, inference, training, and validation.
-
 use rwkv::custom::Tensor;
 use rwkv::custom::config::Config;
 use rwkv::custom::module::Module;
-use rwkv::custom::nn::loss::CrossEntropyLossConfig;
 use rwkv::custom::nn::{
     Embedding, EmbeddingConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig,
 };
 use rwkv::custom::prelude::Int;
-use rwkv::custom::tensor::backend::{AutodiffBackend, Backend};
-use rwkv::custom::train::{InferenceStep, TrainOutput, TrainStep};
+use rwkv::custom::tensor::backend::Backend;
 use rwkv::nn::cells::causal::{MultiCausalCells, MultiCausalCellsConfig, MultiCausalCellsIO};
 use rwkv::nn::functions::init_weights::{orthogonal_init, uniform_init};
-use rwkv::nn::kernels::l2wrap::{L2WrapBackend, l2wrap};
-use rwkv::nn::kernels::wkv7_common::{KernelInfer, Wkv7Backend, Wkv7Kernel};
+use rwkv::nn::kernels::wkv7_common::{KernelInfer, Wkv7Backend};
 use rwkv::nn::modules::time_mixer::param_state::{StateModule, StateModuleConfig};
-use rwkv::train::learner::next_token_prediction::NextTokenPredictionOutput;
 use std::mem::take;
 
+#[cfg(feature = "training")]
 use crate::data::batcher::AutoRegressiveBatch;
+#[cfg(feature = "training")]
+use rwkv::custom::nn::loss::CrossEntropyLossConfig;
+#[cfg(feature = "training")]
+use rwkv::custom::tensor::backend::AutodiffBackend;
+#[cfg(feature = "training")]
+use rwkv::custom::train::{InferenceStep, TrainOutput, TrainStep};
+#[cfg(feature = "training")]
+use rwkv::nn::kernels::l2wrap::{l2wrap, L2WrapBackend};
+#[cfg(feature = "training")]
+use rwkv::nn::kernels::wkv7_common::Wkv7Kernel;
+#[cfg(feature = "training")]
+use rwkv::train::learner::next_token_prediction::NextTokenPredictionOutput;
 
 rwkv::custom_mode!();
 
@@ -94,6 +98,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
         self.cells.init_weights(device);
     }
 
+    #[cfg(feature = "training")]
     pub fn forward<K: Wkv7Kernel<B>>(
         &self,
         item: AutoRegressiveBatch<B>,
@@ -231,6 +236,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
     }
 }
 
+#[cfg(feature = "training")]
 impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegressiveModel<B> {
     type Input = AutoRegressiveBatch<B>;
     type Output = NextTokenPredictionOutput<B>;
@@ -338,6 +344,7 @@ impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegress
 }
 
 /// Define validation step
+#[cfg(feature = "training")]
 impl<B: Backend + Wkv7Backend + L2WrapBackend> InferenceStep for AutoRegressiveModel<B> {
     type Input = AutoRegressiveBatch<B>;
     type Output = NextTokenPredictionOutput<B>;

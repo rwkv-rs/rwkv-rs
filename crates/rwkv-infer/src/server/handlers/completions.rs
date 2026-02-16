@@ -11,32 +11,49 @@ use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
 use crate::auth::check_api_key;
-use crate::config::SamplingConfig;
 use crate::engine::SubmitOutput;
-use crate::server::SharedRwkvInferState;
+use crate::server::RwkvInferApp;
 use crate::server::openai_types::{
-    CompletionRequest, CompletionResponse, CompletionResponseChoice, OpenAiErrorResponse,
+    CompletionRequest, CompletionResponse, CompletionResponseChoice, OpenAiErrorResponse, StopField,
 };
+use crate::types::SamplingConfig;
 
 pub async fn completions(
     headers: HeaderMap,
-    State(state): State<SharedRwkvInferState>,
+    State(app): State<RwkvInferApp>,
     Json(req): Json<CompletionRequest>,
 ) -> Response {
-    if let Err(resp) = check_api_key(&headers, &state.auth) {
+    if let Err(resp) = check_api_key(&headers, &app.auth) {
         return resp;
+    }
+
+    if req.model.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(OpenAiErrorResponse::bad_request(
+                "model is required and cannot be empty",
+            )),
+        )
+            .into_response();
     }
 
     let stream = req.stream.unwrap_or(false);
     let sampling = SamplingConfig {
         temperature: req.temperature.unwrap_or(1.0),
-        top_k: 0,
+        top_k: req.top_k.unwrap_or(0),
         top_p: req.top_p.unwrap_or(1.0),
         max_new_tokens: req.max_tokens.unwrap_or(256) as usize,
+        presence_penalty: req.presence_penalty.unwrap_or(0.0),
+        repetition_penalty: req.repetition_penalty.unwrap_or(0.0),
+        penalty_decay: req.penalty_decay.unwrap_or(1.0),
     };
+    let stop_suffixes = req.stop.map(StopField::into_vec).unwrap_or_default();
 
     // Always request an event stream from the engine; non-streaming responses just collect it.
-    let submit = state.engine.submit_text(req.prompt, sampling, true).await;
+    let submit = app
+        .service
+        .submit_text(&req.model, req.prompt, sampling, stop_suffixes, true)
+        .await;
 
     let (entry_id, rx) = match submit {
         Ok(SubmitOutput::Stream { entry_id, rx }) => (entry_id, rx),
@@ -50,8 +67,12 @@ pub async fn completions(
                 .into_response();
         }
         Err(e) => {
+            let status = match e {
+                crate::Error::BadRequest(_) | crate::Error::NotSupported(_) => StatusCode::BAD_REQUEST,
+                crate::Error::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            };
             return (
-                StatusCode::INTERNAL_SERVER_ERROR,
+                status,
                 Json(OpenAiErrorResponse::bad_request(e.to_string())),
             )
                 .into_response();
@@ -62,7 +83,7 @@ pub async fn completions(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let model = req.model.unwrap_or_else(|| "rwkv".to_string());
+    let model = req.model;
     let id = format!("cmpl_{}", Uuid::new_v4().as_simple());
 
     if stream {
@@ -94,7 +115,7 @@ pub async fn completions(
         });
 
         let keep_alive = axum::response::sse::KeepAlive::new().interval(
-            std::time::Duration::from_millis(state.cfg.sse_keep_alive_ms),
+            std::time::Duration::from_millis(app.cfg.sse_keep_alive_ms),
         );
         return axum::response::Sse::new(sse_stream)
             .keep_alive(keep_alive)

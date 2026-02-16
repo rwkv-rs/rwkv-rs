@@ -21,7 +21,7 @@ tui = ["burn/tui", "rwkv-train?/tui"]
 metrics = ["burn/metrics", "rwkv-train?/metrics"]
 dataset = ["burn/dataset"]
 collective = ["burn/collective", "rwkv-train?/collective"]
-data = ["dep:rwkv-data", "dataset"]
+data = ["dep:rwkv-data"]
 nn = ["dep:rwkv-nn"]
 store = ["burn/store", "dep:burn-store", "burn-store/std", "burn-store/pytorch"]
 
@@ -40,6 +40,8 @@ cuda = ["burn/cuda"]
 rocm = ["burn/rocm"]
 cpu = ["burn/cpu"]
 
+infer = ["dep:rwkv-infer", "rwkv-infer/http", "data"]
+
 [dependencies]
 burn = { workspace = true, default-features = false, features = [] }
 burn-store = { workspace = true, default-features = false, optional = true }
@@ -48,3 +50,4 @@ rwkv-config = { path = "../rwkv-config" }
 rwkv-data = { path = "../rwkv-data", optional = true }
 rwkv-nn = { path = "../rwkv-nn", default-features = false, optional = true }
 rwkv-train = { path = "../rwkv-train", default-features = false, optional = true }
+rwkv-infer = { path = "../rwkv-infer", default-features = false, optional = true }

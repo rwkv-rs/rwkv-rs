@@ -1,51 +1,72 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use once_cell::sync::OnceCell;
 use rwkv_derive::ConfigBuilder;
 use serde::Serialize;
 
+use crate::raw::infer::RawInferModelConfig;
+
 #[derive(Clone, Debug, Serialize, ConfigBuilder)]
 #[config_builder(raw = "crate::raw::infer::RawInferConfig", cell = "INFER_CFG")]
 pub struct FinalInferConfig {
-    // Paths
-    pub model_config_path: String,
-    pub weights_path: String,
-    pub tokenizer_vocab_path: String,
-
     // HTTP
     pub http_bind_addr: String,
     pub request_body_limit_bytes: usize,
     pub sse_keep_alive_ms: u64,
     pub allowed_origins: Option<Vec<String>>,
-
     #[serde(skip_serializing)]
     pub api_key: Option<String>,
 
-    // Engine
-    pub max_batch_size: usize,
-    pub prefill_chunk_size: usize,
-    pub max_context_length: usize,
-    pub decode_first: bool,
-
-    // Sampling
-    pub temperature: f32,
-    pub top_k: i32,
-    pub top_p: f32,
-    pub max_new_tokens: usize,
-
-    // CubeCL DeviceId
-    pub device_id_type: u16,
-    pub device_id_index: u32,
+    // Multi-model deployment
+    pub models: Vec<RawInferModelConfig>,
 }
 
 impl FinalInferConfigBuilder {
     pub fn check(&self) {
-        assert!(self.max_batch_size.unwrap() >= 1);
-        assert!(self.prefill_chunk_size.unwrap() == 256);
-        assert!(self.max_context_length.unwrap() >= 1);
-        assert!(self.temperature.unwrap() > 0.0);
-        assert!(self.top_p.unwrap() > 0.0 && self.top_p.unwrap() <= 1.0);
-        assert!(self.max_new_tokens.unwrap() >= 1);
+        let models = self.get_models().unwrap();
+        assert!(!models.is_empty(), "infer config requires at least one model");
+
+        let mut names = HashSet::new();
+        for model in models {
+            assert!(
+                !model.model_name.trim().is_empty(),
+                "model_name cannot be empty"
+            );
+            assert!(
+                names.insert(model.model_name.clone()),
+                "duplicated model_name: {}",
+                model.model_name
+            );
+            assert!(
+                !model.weights_path.trim().is_empty(),
+                "weights_path cannot be empty"
+            );
+            assert!(
+                !model.tokenizer_vocab_path.trim().is_empty(),
+                "tokenizer_vocab_path cannot be empty"
+            );
+            assert!(
+                !model.device_ids.is_empty(),
+                "device_ids cannot be empty for model {}",
+                model.model_name
+            );
+            assert!(
+                model.max_batch_size.unwrap() >= 1,
+                "max_batch_size must be >= 1 for model {}",
+                model.model_name
+            );
+            assert!(
+                model.max_context_len.unwrap() >= 1,
+                "max_context_len must be >= 1 for model {}",
+                model.model_name
+            );
+            assert!(
+                model.paragraph_len.unwrap() == 256,
+                "paragraph_len must be exactly 256 for model {}",
+                model.model_name
+            );
+        }
     }
 }
 

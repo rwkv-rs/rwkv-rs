@@ -1,4 +1,4 @@
-use crate::config::SamplingConfig;
+use crate::types::SamplingConfig;
 
 #[derive(Clone, Debug)]
 pub enum InferRequestKind {
@@ -13,7 +13,9 @@ pub enum InferRequestKind {
 #[derive(Clone, Debug)]
 pub struct InferRequest {
     pub kind: InferRequestKind,
+    pub model_name: String,
     pub input_text: String,
     pub sampling: SamplingConfig,
+    pub stop_suffixes: Vec<String>,
     pub stream: bool,
 }

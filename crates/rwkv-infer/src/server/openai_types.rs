@@ -53,12 +53,17 @@ impl OpenAiErrorResponse {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompletionRequest {
-    pub model: Option<String>,
+    pub model: String,
     pub prompt: String,
     pub stream: Option<bool>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
+    pub top_k: Option<i32>,
     pub top_p: Option<f32>,
+    pub presence_penalty: Option<f32>,
+    pub repetition_penalty: Option<f32>,
+    pub penalty_decay: Option<f32>,
+    pub stop: Option<StopField>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -87,12 +92,33 @@ pub struct ChatMessage {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatCompletionRequest {
-    pub model: Option<String>,
+    pub model: String,
     pub messages: Vec<ChatMessage>,
     pub stream: Option<bool>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
+    pub top_k: Option<i32>,
     pub top_p: Option<f32>,
+    pub presence_penalty: Option<f32>,
+    pub repetition_penalty: Option<f32>,
+    pub penalty_decay: Option<f32>,
+    pub stop: Option<StopField>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StopField {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl StopField {
+    pub fn into_vec(self) -> Vec<String> {
+        match self {
+            StopField::Single(s) => vec![s],
+            StopField::Multiple(v) => v,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

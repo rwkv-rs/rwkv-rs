@@ -20,6 +20,11 @@ tokio-stream = { version = "0.1.18", features = ["sync"] }
 rayon = { version = "1.11.0" }
 futures = { version = "0.3.31" }
 async-trait = { version = "0.1.89" }
+axum = { version = "0.7.9", features = ["macros", "tokio"] }
+tower-http = { version = "0.6.6", features = ["cors"] }
+tower = { version = "0.5.2" }
+uuid = { version = "1.18.1", features = ["v4", "serde"] }
+bytes = { version = "1.10.1" }
 
 # === Data Structures ===
 once_cell = { version = "1.21.3" }

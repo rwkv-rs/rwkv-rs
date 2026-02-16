@@ -5869,6 +5869,7 @@ dependencies = [
  "burn-store",
  "rwkv-config",
  "rwkv-data",
+ "rwkv-infer",
  "rwkv-nn",
  "rwkv-train",
 ]
@@ -5956,6 +5957,7 @@ dependencies = [
  "async-trait",
  "axum 0.7.9",
  "bytes",
+ "clia-tracing-config",
  "dashmap",
  "futures",
  "log",
@@ -5980,7 +5982,6 @@ dependencies = [
  "derive-new 0.7.0",
  "log",
  "rwkv",
- "rwkv-infer",
  "sonic-rs",
  "tokio",
 ]

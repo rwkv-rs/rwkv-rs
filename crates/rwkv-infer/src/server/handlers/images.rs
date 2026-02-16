@@ -6,16 +6,16 @@ use axum::{
 };
 
 use crate::auth::check_api_key;
-use crate::server::SharedRwkvInferState;
+use crate::server::RwkvInferApp;
 use crate::server::openai_types::OpenAiErrorResponse;
 
 pub async fn images_generations(
     headers: HeaderMap,
-    State(state): State<SharedRwkvInferState>,
+    State(app): State<RwkvInferApp>,
     body: axum::body::Bytes,
 ) -> Response {
     let _ = body;
-    if let Err(resp) = check_api_key(&headers, &state.auth) {
+    if let Err(resp) = check_api_key(&headers, &app.auth) {
         return resp;
     }
     (

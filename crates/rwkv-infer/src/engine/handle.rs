@@ -1,8 +1,7 @@
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
-use crate::config::SamplingConfig;
-use crate::types::EngineEvent;
+use crate::types::{EngineEvent, SamplingConfig};
 
 pub type EntryId = Uuid;
 
@@ -11,6 +10,7 @@ pub enum EngineCommand {
     SubmitText {
         input_text: String,
         sampling: SamplingConfig,
+        stop_suffixes: Vec<String>,
         stream: bool,
         reply: oneshot::Sender<SubmitOutput>,
     },
@@ -50,6 +50,7 @@ impl EngineHandle {
         &self,
         input_text: String,
         sampling: SamplingConfig,
+        stop_suffixes: Vec<String>,
         stream: bool,
     ) -> crate::Result<SubmitOutput> {
         let (reply_tx, reply_rx) = oneshot::channel();
@@ -57,6 +58,7 @@ impl EngineHandle {
             .send(EngineCommand::SubmitText {
                 input_text,
                 sampling,
+                stop_suffixes,
                 stream,
                 reply: reply_tx,
             })

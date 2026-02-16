@@ -7,21 +7,26 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::auth::check_api_key;
-use crate::config::SamplingConfig;
 use crate::engine::SubmitOutput;
-use crate::server::SharedRwkvInferState;
+use crate::server::RwkvInferApp;
 use crate::server::openai_types::OpenAiErrorResponse;
 use crate::storage::{GLOBAL_BACKGROUND_TASKS, GLOBAL_RESPONSE_CACHE};
+use crate::types::SamplingConfig;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResponsesCreateRequest {
-    pub model: Option<String>,
+    pub model: String,
     pub input: String,
     pub background: Option<bool>,
     pub stream: Option<bool>,
     pub max_output_tokens: Option<u32>,
+    pub top_k: Option<i32>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
+    pub presence_penalty: Option<f32>,
+    pub repetition_penalty: Option<f32>,
+    pub penalty_decay: Option<f32>,
+    pub stop: Option<crate::server::StopField>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -34,33 +39,51 @@ pub struct ResponsesResource {
 
 pub async fn responses_create(
     headers: HeaderMap,
-    State(state): State<SharedRwkvInferState>,
+    State(app): State<RwkvInferApp>,
     Json(req): Json<ResponsesCreateRequest>,
 ) -> Response {
-    if let Err(resp) = check_api_key(&headers, &state.auth) {
+    if let Err(resp) = check_api_key(&headers, &app.auth) {
         return resp;
+    }
+    if req.model.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(OpenAiErrorResponse::bad_request(
+                "model is required and cannot be empty",
+            )),
+        )
+            .into_response();
     }
 
     let response_id = GLOBAL_RESPONSE_CACHE.next_response_id();
     let background = req.background.unwrap_or(false);
+    let stop_suffixes = req.stop.map(crate::server::StopField::into_vec).unwrap_or_default();
 
     let sampling = SamplingConfig {
         temperature: req.temperature.unwrap_or(1.0),
-        top_k: 0,
+        top_k: req.top_k.unwrap_or(0),
         top_p: req.top_p.unwrap_or(1.0),
         max_new_tokens: req.max_output_tokens.unwrap_or(256) as usize,
+        presence_penalty: req.presence_penalty.unwrap_or(0.0),
+        repetition_penalty: req.repetition_penalty.unwrap_or(0.0),
+        penalty_decay: req.penalty_decay.unwrap_or(1.0),
     };
 
     if background {
         let task = GLOBAL_BACKGROUND_TASKS.create(response_id.clone());
-        let engine = state.engine.clone();
+        let service = app.service.clone();
+        let model_name = req.model.clone();
+        let input = req.input.clone();
+        let stop_suffixes = stop_suffixes.clone();
         let response_id_for_task = response_id.clone();
         tokio::spawn(async move {
             GLOBAL_BACKGROUND_TASKS.set_state(
                 &task.task_id,
                 crate::storage::BackgroundTaskState::InProgress,
             );
-            let submit = engine.submit_text(req.input, sampling, true).await;
+            let submit = service
+                .submit_text(&model_name, input, sampling, stop_suffixes, true)
+                .await;
             let mut rx = match submit {
                 Ok(SubmitOutput::Stream { rx, .. }) => rx,
                 Ok(other) => {
@@ -112,7 +135,10 @@ pub async fn responses_create(
     }
 
     // Foreground: run immediately (collect).
-    let submit = state.engine.submit_text(req.input, sampling, true).await;
+    let submit = app
+        .service
+        .submit_text(&req.model, req.input, sampling, stop_suffixes, true)
+        .await;
     let mut rx = match submit {
         Ok(SubmitOutput::Stream { rx, .. }) => rx,
         Ok(other) => {
@@ -125,8 +151,12 @@ pub async fn responses_create(
                 .into_response();
         }
         Err(e) => {
+            let status = match e {
+                crate::Error::BadRequest(_) | crate::Error::NotSupported(_) => StatusCode::BAD_REQUEST,
+                crate::Error::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            };
             return (
-                StatusCode::INTERNAL_SERVER_ERROR,
+                status,
                 Json(OpenAiErrorResponse::bad_request(e.to_string())),
             )
                 .into_response();
@@ -168,13 +198,12 @@ pub async fn responses_create(
 
 pub async fn responses_get(
     headers: HeaderMap,
-    State(state): State<SharedRwkvInferState>,
+    State(app): State<RwkvInferApp>,
     Path(response_id): Path<String>,
 ) -> Response {
-    if let Err(resp) = check_api_key(&headers, &state.auth) {
+    if let Err(resp) = check_api_key(&headers, &app.auth) {
         return resp;
     }
-    let _ = state;
     match GLOBAL_RESPONSE_CACHE.get(&response_id) {
         Some(resp) => (
             StatusCode::OK,
@@ -196,13 +225,12 @@ pub async fn responses_get(
 
 pub async fn responses_delete(
     headers: HeaderMap,
-    State(state): State<SharedRwkvInferState>,
+    State(app): State<RwkvInferApp>,
     Path(response_id): Path<String>,
 ) -> Response {
-    if let Err(resp) = check_api_key(&headers, &state.auth) {
+    if let Err(resp) = check_api_key(&headers, &app.auth) {
         return resp;
     }
-    let _ = state;
     let removed = GLOBAL_RESPONSE_CACHE.remove(&response_id);
     if removed {
         (
@@ -221,13 +249,13 @@ pub async fn responses_delete(
 
 pub async fn responses_cancel(
     headers: HeaderMap,
-    State(state): State<SharedRwkvInferState>,
+    State(app): State<RwkvInferApp>,
     Path(response_id): Path<String>,
 ) -> Response {
-    if let Err(resp) = check_api_key(&headers, &state.auth) {
+    if let Err(resp) = check_api_key(&headers, &app.auth) {
         return resp;
     }
-    let _ = (state, response_id);
+    let _ = (app, response_id);
     (
         StatusCode::NOT_IMPLEMENTED,
         Json(OpenAiErrorResponse::not_supported(

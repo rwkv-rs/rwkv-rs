@@ -1,5 +1,6 @@
 extern crate derive_new;
 
+#[cfg(feature = "training")]
 pub mod data;
 #[cfg(feature = "inferring")]
 pub mod inferring;
