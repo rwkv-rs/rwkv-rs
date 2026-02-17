@@ -12,6 +12,72 @@ use crate::modules::time_mixer::gated_readout::GatedReadoutInput;
 use gated_readout::{GatedReadout, GatedReadoutConfig};
 use weight_prepare::{WeightPrepare, WeightPrepareConfig};
 
+const MIN_LORA_RANK: usize = 32;
+const LORA_RANK_GRANULARITY: usize = 32;
+
+fn build_lora_ranks(
+    embedded_dim: usize,
+    weight_decay_lora: usize,
+    learning_rate_lora: usize,
+    value_residual_lora: usize,
+    output_gate_lora: usize,
+) -> LoRARanks {
+    LoRARanks {
+        min_d_model: embedded_dim,
+        weight_decay_lora,
+        learning_rate_lora,
+        value_residual_lora,
+        output_gate_lora,
+    }
+}
+
+fn infer_lora_rank_from_formula(value: f64) -> usize {
+    let rounded = (value / LORA_RANK_GRANULARITY as f64).round_ties_even() as usize
+        * LORA_RANK_GRANULARITY;
+
+    rounded.max(MIN_LORA_RANK)
+}
+
+fn infer_default_lora_ranks(embedded_dim: usize, head_size: usize) -> LoRARanks {
+    let channel_dim = embedded_dim as f64;
+    let factor = head_size as f64 / 64.0;
+    let sqrt_channel_dim = channel_dim.sqrt();
+
+    let weight_decay_lora = infer_lora_rank_from_formula(2.5 * sqrt_channel_dim * factor);
+    let learning_rate_lora = infer_lora_rank_from_formula(2.5 * sqrt_channel_dim * factor);
+    let value_residual_lora = infer_lora_rank_from_formula(1.7 * sqrt_channel_dim * factor);
+    let output_gate_lora = infer_lora_rank_from_formula(5.0 * sqrt_channel_dim);
+
+    build_lora_ranks(
+        embedded_dim,
+        weight_decay_lora,
+        learning_rate_lora,
+        value_residual_lora,
+        output_gate_lora,
+    )
+}
+
+fn infer_override_lora_ranks(num_cells: usize, embedded_dim: usize) -> Option<LoRARanks> {
+    match (num_cells, embedded_dim) {
+        (12, 768) => Some(build_lora_ranks(embedded_dim, 64, 64, 32, 128)),
+        (24, 1024) => Some(build_lora_ranks(embedded_dim, 64, 64, 32, 128)),
+        (24, 2048) => Some(build_lora_ranks(embedded_dim, 96, 96, 64, 256)),
+        (32, 2560) => Some(build_lora_ranks(embedded_dim, 96, 96, 64, 320)),
+        (32, 4096) => Some(build_lora_ranks(embedded_dim, 128, 128, 96, 480)),
+        (61, 4096) => Some(build_lora_ranks(embedded_dim, 192, 192, 128, 384)),
+        _ => None,
+    }
+}
+
+fn infer_time_mixer_lora_ranks(
+    num_cells: usize,
+    embedded_dim: usize,
+    head_size: usize,
+) -> LoRARanks {
+    infer_override_lora_ranks(num_cells, embedded_dim)
+        .unwrap_or_else(|| infer_default_lora_ranks(embedded_dim, head_size))
+}
+
 #[derive(Config, Debug)]
 pub struct TimeMixerConfig {
     num_cells: usize,
@@ -22,42 +88,8 @@ pub struct TimeMixerConfig {
 
 impl TimeMixerConfig {
     pub fn init<B: Backend>(&self, cell_id: usize, device: &B::Device) -> TimeMixer<B> {
-        let lora_ranks_by_dim = [
-            LoRARanks {
-                min_d_model: 0,
-                weight_decay_lora: 64,
-                learning_rate_lora: 64,
-                value_residual_lora: 32,
-                output_gate_lora: 128,
-            },
-            LoRARanks {
-                min_d_model: 2048,
-                weight_decay_lora: 128,
-                learning_rate_lora: 64,
-                value_residual_lora: 64,
-                output_gate_lora: 256,
-            },
-            LoRARanks {
-                min_d_model: 4096,
-                weight_decay_lora: 192,
-                learning_rate_lora: 96,
-                value_residual_lora: 96,
-                output_gate_lora: 384,
-            },
-            LoRARanks {
-                min_d_model: 6144,
-                weight_decay_lora: 256,
-                learning_rate_lora: 128,
-                value_residual_lora: 128,
-                output_gate_lora: 512,
-            },
-        ];
-
-        let lora_rank = lora_ranks_by_dim
-            .iter()
-            .rev()
-            .find(|rank| rank.min_d_model <= self.embedded_dim)
-            .unwrap();
+        let lora_rank =
+            infer_time_mixer_lora_ranks(self.num_cells, self.embedded_dim, self.head_size);
 
         TimeMixer {
             weight_prepare: WeightPrepareConfig::new(

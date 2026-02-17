@@ -19,6 +19,19 @@ use crate::server::openai_types::{
 };
 use crate::types::SamplingConfig;
 
+fn normalize_chat_role(role: &str) -> Option<&'static str> {
+    let role = role.trim();
+    if role.eq_ignore_ascii_case("user") {
+        Some("User")
+    } else if role.eq_ignore_ascii_case("assistant") {
+        Some("Assistant")
+    } else if role.eq_ignore_ascii_case("system") {
+        Some("System")
+    } else {
+        None
+    }
+}
+
 pub async fn chat_completions(
     headers: HeaderMap,
     State(app): State<RwkvInferApp>,
@@ -50,14 +63,25 @@ pub async fn chat_completions(
     };
     let stop_suffixes = req.stop.map(StopField::into_vec).unwrap_or_default();
 
-    // Minimal chat formatting: concatenate messages as "role: content\n".
+    // Minimal chat formatting: concatenate messages as "Role: content\n\n", then start the assistant turn.
     let mut prompt = String::new();
     for msg in &req.messages {
-        prompt.push_str(&msg.role);
+        let Some(role) = normalize_chat_role(&msg.role) else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(OpenAiErrorResponse::bad_request(format!(
+                    "unknown chat role: {}",
+                    msg.role
+                ))),
+            )
+                .into_response();
+        };
+        prompt.push_str(role);
         prompt.push_str(": ");
         prompt.push_str(&msg.content);
-        prompt.push_str("\n\nAssistant: <think");
+        prompt.push_str("\n\n");
     }
+    prompt.push_str("Assistant: <think");
 
     // Always request an event stream from the engine; non-streaming responses just collect it.
     let submit = app
