@@ -1,5 +1,6 @@
 use rwkv::custom::Tensor;
 use rwkv::custom::prelude::{Backend, Int, TensorData};
+use rwkv::custom::tensor::DType;
 use rwkv::infer::engine::InferExecutor;
 use rwkv::infer::{Error, Result, SamplingConfig};
 
@@ -62,7 +63,8 @@ where
         let rng_states =
             Tensor::<B, 1, Int>::from_data(TensorData::new(rng_init, [max_batch_size]), &device);
 
-        let penalties = Tensor::<B, 2>::zeros([max_batch_size, vocab_size], &device);
+        // Keep penalties in F32, matching the rapid-sampling reference implementation.
+        let penalties = Tensor::<B, 2>::zeros([max_batch_size, vocab_size], (&device, DType::F32));
 
         Self {
             device,
@@ -89,7 +91,8 @@ where
     }
 
     fn reset_penalties_row(&mut self, batch_index: usize) {
-        let zeros = Tensor::<B, 2>::zeros([1, self.vocab_size], &self.device);
+        // Keep penalties in F32, matching the rapid-sampling kernel contract (float* penalties).
+        let zeros = Tensor::<B, 2>::zeros([1, self.vocab_size], (&self.device, DType::F32));
         self.penalties = self
             .penalties
             .clone()

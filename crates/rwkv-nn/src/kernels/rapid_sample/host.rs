@@ -134,7 +134,13 @@ pub(crate) fn rapid_sample_topk_topp_impl<
         }
         Some((penalties, penalty_cfg)) => {
             let penalties = into_contiguous(penalties);
-            let penalties = cast::<R>(penalties, DType::F32);
+            // Match the reference rapid-sampling contract: penalties are updated in-place as float32.
+            assert_eq!(
+                penalties.dtype,
+                DType::F32,
+                "rapid_sample: penalties must be F32, got {:?}",
+                penalties.dtype
+            );
 
             assert_eq!(
                 penalties.shape, shape,

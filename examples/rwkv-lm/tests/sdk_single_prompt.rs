@@ -39,12 +39,10 @@ fn env_opt(key: &str) -> Option<String> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
-async fn sdk_single_prompt_continuation_smoke() {
+async fn sdk_single_prompt_continuation_smok() {
     // --- config ---
-    let mpk_path = env_opt("RWKV_TEST_MPK")
-        .unwrap_or_else(|| "examples/rwkv-lm/weights/model.mpk".to_string());
-    let vocab_path = env_opt("RWKV_TEST_VOCAB")
-        .unwrap_or_else(|| "examples/rwkv-lm/assets/rwkv_vocab_v20230424.txt".to_string());
+    let mpk_path = "/home/caizus/Projects/Packages/rwkv-rs/examples/rwkv-lm/weights/rwkv7-g1d-7.2b-20260131-ctx8192.mpk".to_string();
+    let vocab_path = "/home/caizus/Projects/Packages/rwkv-rs/examples/rwkv-lm/assets/rwkv_vocab_v20230424.txt".to_string();
 
     if !std::path::Path::new(&mpk_path).exists() {
         eprintln!("skip: RWKV_TEST_MPK not found: {mpk_path}");
@@ -103,17 +101,17 @@ async fn sdk_single_prompt_continuation_smoke() {
 
     // --- run a single continuation ---
     // Keep the prompt in the well-known RWKV chat format (no special <think> prefix here).
-    let prompt = "User: Hello!\n\nAssistant:".to_string();
+    let prompt = "User: Hello!\n\nAssistant: <think></think>".to_string();
     let sampling = SamplingConfig {
         // Deterministic argmax path (matches the CUDA reference behavior):
         // top_p==0 => kernel normalizes to top_k=1, top_p=1.
         temperature: 1.0,
-        top_k: 0,
-        top_p: 0.0,
+        top_k: 50,
+        top_p: 0.97,
         max_new_tokens: 64,
         presence_penalty: 0.0,
         repetition_penalty: 0.0,
-        penalty_decay: 1.0,
+        penalty_decay: 0.997
     };
 
     let out = client
