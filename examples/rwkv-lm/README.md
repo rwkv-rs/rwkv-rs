@@ -38,12 +38,12 @@ git clone https://github.com/rwkv-rs/rwkv-rs.git
 cd rwkv-rs
 
 # Train (use --release for speed; add f16 feature if needed)
-cargo run -p rwkv-lm --example rwkv-lm-train --release --no-default-features --features training,cuda -- \
+cargo run --example rwkv-lm-train --release --features cuda -- \
   --config-dir examples/rwkv-lm/config \
   --train-cfg rwkv-lm-0.1b
 
 # Infer server
-cargo run -p rwkv-lm --example rwkv-lm-infer --release --no-default-features --features inferring,cuda -- \
+cargo run --example rwkv-lm-infer --release --features cuda -- \
   --config-dir examples/rwkv-lm/config \
   --infer-cfg rwkv-lm-7.2b
 ```
@@ -55,12 +55,12 @@ git clone https://github.com/rwkv-rs/rwkv-rs.git
 cd rwkv-rs
 
 # Train
-cargo run -p rwkv-lm --example rwkv-lm-train --release --no-default-features --features training,wgpu -- \
+cargo run --example rwkv-lm-train --release --features wgpu -- \
   --config-dir examples/rwkv-lm/config \
   --train-cfg rwkv-lm-0.1b
 
 # Infer server
-cargo run -p rwkv-lm --example rwkv-lm-infer --release --no-default-features --features inferring,wgpu -- \
+cargo run --example rwkv-lm-infer --release --features wgpu -- \
   --config-dir examples/rwkv-lm/config \
   --infer-cfg rwkv-lm-7.2b
 ```
@@ -72,12 +72,12 @@ git clone https://github.com/rwkv-rs/rwkv-rs.git
 cd rwkv-rs
 
 # Train
-cargo run -p rwkv-lm --example rwkv-lm-train --release --no-default-features --features training,metal -- \
+cargo run --example rwkv-lm-train --release --features metal -- \
   --config-dir examples/rwkv-lm/config \
   --train-cfg rwkv-lm-0.1b
 
 # Infer server
-cargo run -p rwkv-lm --example rwkv-lm-infer --release --no-default-features --features inferring,metal -- \
+cargo run --example rwkv-lm-infer --release --features metal -- \
   --config-dir examples/rwkv-lm/config \
   --infer-cfg rwkv-lm-7.2b
 ```

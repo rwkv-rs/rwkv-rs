@@ -110,13 +110,8 @@ impl InferEntry {
         (text, false)
     }
 
-    pub fn flush_stream_text_until(&mut self, emit_limit: usize, flush_lossy: bool) -> String {
+    pub fn flush_stream_text_until(&mut self, emit_limit: usize, _flush_lossy: bool) -> String {
         if self.emitted_byte_len >= emit_limit {
-            if flush_lossy && !self.utf8_carry.is_empty() {
-                let out = String::from_utf8_lossy(&self.utf8_carry).into_owned();
-                self.utf8_carry.clear();
-                return out;
-            }
             return String::new();
         }
 
@@ -127,11 +122,6 @@ impl InferEntry {
 
         self.emitted_byte_len = emit_limit;
 
-        if flush_lossy {
-            self.utf8_carry.clear();
-            return String::from_utf8_lossy(&buf).into_owned();
-        }
-
         match std::str::from_utf8(&buf) {
             Ok(s) => {
                 self.utf8_carry.clear();
@@ -139,21 +129,19 @@ impl InferEntry {
             }
             Err(err) => {
                 let valid = err.valid_up_to();
-                if valid == 0 {
-                    self.utf8_carry.clear();
-                    return String::from_utf8_lossy(&buf).into_owned();
-                }
-
-                let prefix = std::str::from_utf8(&buf[..valid])
-                    .unwrap_or_default()
-                    .to_string();
+                let prefix = if valid == 0 {
+                    String::new()
+                } else {
+                    std::str::from_utf8(&buf[..valid])
+                        .unwrap_or_default()
+                        .to_string()
+                };
                 if err.error_len().is_none() {
                     self.utf8_carry = buf[valid..].to_vec();
                     prefix
                 } else {
                     self.utf8_carry.clear();
-                    let rest = String::from_utf8_lossy(&buf[valid..]).into_owned();
-                    prefix + &rest
+                    prefix
                 }
             }
         }

@@ -56,11 +56,11 @@ impl RouterBuilder {
             .route("/v1/embeddings", post(handlers::embeddings))
             .route("/v1/responses", post(handlers::responses_create))
             .route(
-                "/v1/responses/:response_id",
+                "/v1/responses/{response_id}",
                 get(handlers::responses_get).delete(handlers::responses_delete),
             )
             .route(
-                "/v1/responses/:response_id/cancel",
+                "/v1/responses/{response_id}/cancel",
                 post(handlers::responses_cancel),
             )
             .route("/v1/models", get(models))

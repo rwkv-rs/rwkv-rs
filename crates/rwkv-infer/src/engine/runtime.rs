@@ -364,7 +364,7 @@ impl EngineRuntime {
                     }
 
                     if should_finish {
-                        let flush_lossy = true;
+                        let flush_lossy = false;
                         let tail = if hit_stop_suffix {
                             entry.flush_stream_text_until(entry.stop_trunc_len(), flush_lossy)
                         } else {
