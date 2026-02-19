@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use rwkv::config::validated::model::FinalModelConfig;
 use rwkv::custom::Tensor;
 use rwkv::custom::prelude::{Backend, Int, TensorData};
 use rwkv::custom::tensor::DType;
@@ -36,17 +39,18 @@ impl<B> RwkvLmExecutor<B>
 where
     B: Backend + Wkv7Backend + RapidSampleBackend,
 {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         device: B::Device,
         model: AutoRegressiveModel<B>,
+        model_cfg: Arc<FinalModelConfig>,
         max_batch_size: usize,
-        num_cells: usize,
-        vocab_size: usize,
-        embedded_dim: usize,
-        num_heads: usize,
-        head_size: usize,
     ) -> Self {
+        let num_cells = model_cfg.num_cells;
+        let vocab_size = model_cfg.vocab_size;
+        let embedded_dim = model_cfg.embedded_dim;
+        let num_heads = model_cfg.num_heads;
+        let head_size = model_cfg.head_size_auto;
+
         let embedded_token_shift_for_time_mix: Vec<Tensor<B, 2>> = (0..num_cells)
             .map(|_| Tensor::zeros([max_batch_size, embedded_dim], &device))
             .collect();

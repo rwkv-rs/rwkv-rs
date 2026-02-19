@@ -5,8 +5,6 @@
 // to build a learner, which is used to train the model. The trained model and the configuration are
 // then saved to the specified directory.
 
-use crate::data::batcher::AutoRegressiveBatcher;
-use crate::model::AutoRegressiveModelConfig;
 use log::info;
 #[cfg(not(feature = "tui"))]
 use log::warn;
@@ -40,6 +38,9 @@ use rwkv::train::renderer::BarMetricsRenderer;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use crate::data::batcher::AutoRegressiveBatcher;
+use crate::model::AutoRegressiveModelConfig;
 
 rwkv::custom_mode!();
 

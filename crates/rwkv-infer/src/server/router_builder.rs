@@ -4,42 +4,32 @@ use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{Method, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use rwkv_config::validated::infer::FinalInferConfig;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::auth::AuthConfig;
 use crate::server::handlers;
 use crate::server::openai_types::{ModelListResponse, ModelObject};
-use crate::service::RwkvInferService;
+use crate::service::RuntimeManager;
 
 #[derive(Clone)]
-pub struct RwkvInferApp {
-    pub cfg: Arc<FinalInferConfig>,
-    pub service: Arc<RwkvInferService>,
-    pub auth: AuthConfig,
+pub struct AppState {
+    pub auth_cfg: AuthConfig,
+    pub runtime_manager: Arc<RuntimeManager>,
 }
 
-pub struct RwkvInferRouterBuilder {
-    app: Option<RwkvInferApp>,
+pub struct RouterBuilder {
+    app_state: AppState,
 }
 
-impl RwkvInferRouterBuilder {
-    pub fn new() -> Self {
-        Self { app: None }
-    }
-
-    pub fn with_app(mut self, app: RwkvInferApp) -> Self {
-        self.app = Some(app);
-        self
+impl RouterBuilder {
+    pub fn new(app_state: AppState) -> Self {
+        Self { app_state }
     }
 
     pub async fn build(self) -> crate::Result<Router> {
-        let app = self
-            .app
-            .ok_or(crate::Error::Internal("app must be set".to_string()))?;
-
-        let allow_origin = if let Some(origins) = app.cfg.allowed_origins.clone() {
-            let parsed: Result<Vec<_>, _> = origins.into_iter().map(|origin| origin.parse()).collect();
+        let allow_origin = if let Some(origins) = self.app_state.runtime_manager.allowed_origins() {
+            let parsed: Result<Vec<_>, _> =
+                origins.into_iter().map(|origin| origin.parse()).collect();
             match parsed {
                 Ok(origins) => AllowOrigin::list(origins),
                 Err(_) => {
@@ -74,12 +64,15 @@ impl RwkvInferRouterBuilder {
                 post(handlers::responses_cancel),
             )
             .route("/v1/models", get(models))
+            .route("/admin/models/reload", post(handlers::admin_models_reload))
             .route("/v1/images/generations", post(handlers::images_generations))
             .route("/v1/audio/speech", post(handlers::audio_speech))
             .route("/health", get(health))
             .layer(cors_layer)
-            .layer(DefaultBodyLimit::max(app.cfg.request_body_limit_bytes))
-            .with_state(app);
+            .layer(DefaultBodyLimit::max(
+                self.app_state.runtime_manager.request_body_limit_bytes(),
+            ))
+            .with_state(self.app_state);
 
         Ok(router)
     }
@@ -89,9 +82,9 @@ async fn health() -> (StatusCode, &'static str) {
     (StatusCode::OK, "ok")
 }
 
-async fn models(State(app): State<RwkvInferApp>) -> Json<ModelListResponse> {
-    let data = app
-        .service
+async fn models(State(app_state): State<AppState>) -> Json<ModelListResponse> {
+    let data = app_state
+        .runtime_manager
         .model_names()
         .into_iter()
         .map(|model_name| ModelObject {
@@ -105,4 +98,3 @@ async fn models(State(app): State<RwkvInferApp>) -> Json<ModelListResponse> {
         data,
     })
 }
-

@@ -2,7 +2,7 @@ pub mod raw;
 pub mod validated;
 
 use std::{fs, mem::size_of, path::Path};
-
+use std::path::PathBuf;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub mod config_builder_helpers {
@@ -30,6 +30,34 @@ pub fn load_toml<P: AsRef<Path>, T: DeserializeOwned + 'static>(path: P) -> T {
 
     toml::from_str(&content)
         .unwrap_or_else(|_| panic!("Invalid TOML format in file: {}", path.as_ref().display()))
+}
+
+pub fn get_arg_value(args: &[String], key: &str) -> Option<String> {
+    for i in 0..args.len() {
+        if args[i] == key {
+            return args.get(i + 1).cloned();
+        }
+        if let Some(v) = args[i].strip_prefix(&format!("{key}=")) {
+            return Some(v.to_string());
+        }
+    }
+    None
+}
+
+pub fn default_cfg_dir() -> PathBuf {
+    // Prefer a local "./config" (works for standalone bins), otherwise fall back to the
+    // crate's config directory (works when running from workspace root via cargo).
+    let cwd_config = PathBuf::from("config");
+    if cwd_config.is_dir() {
+        return cwd_config;
+    }
+
+    let manifest_config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config");
+    if manifest_config.is_dir() {
+        return manifest_config;
+    }
+
+    cwd_config
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]

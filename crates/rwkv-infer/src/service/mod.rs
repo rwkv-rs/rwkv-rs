@@ -5,6 +5,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::engine::{EngineHandle, SubmitOutput};
 use crate::types::SamplingConfig;
 
+pub mod builder;
+pub mod runtime_manager;
+
+pub use runtime_manager::{
+    ModelEngineFactory, ModelsReloadPatch, ModelsReloadResult, RuntimeManager,
+};
+
 #[derive(Clone)]
 pub struct ModelRuntimeGroup {
     engines: Arc<Vec<Arc<EngineHandle>>>,
@@ -31,11 +38,11 @@ impl ModelRuntimeGroup {
 }
 
 #[derive(Clone)]
-pub struct RwkvInferService {
+pub struct Service {
     model_groups: Arc<HashMap<String, ModelRuntimeGroup>>,
 }
 
-impl RwkvInferService {
+impl Service {
     pub fn new(model_groups: HashMap<String, ModelRuntimeGroup>) -> crate::Result<Self> {
         if model_groups.is_empty() {
             return Err(crate::Error::BadRequest(
@@ -52,6 +59,10 @@ impl RwkvInferService {
         let mut names: Vec<String> = self.model_groups.keys().cloned().collect();
         names.sort();
         names
+    }
+
+    pub fn clone_model_groups(&self) -> HashMap<String, ModelRuntimeGroup> {
+        self.model_groups.as_ref().clone()
     }
 
     pub async fn submit_text(

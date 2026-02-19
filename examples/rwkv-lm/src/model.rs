@@ -21,7 +21,7 @@ use rwkv::custom::tensor::backend::AutodiffBackend;
 #[cfg(feature = "training")]
 use rwkv::custom::train::{InferenceStep, TrainOutput, TrainStep};
 #[cfg(feature = "training")]
-use rwkv::nn::kernels::l2wrap::{l2wrap, L2WrapBackend};
+use rwkv::nn::kernels::l2wrap::{L2WrapBackend, l2wrap};
 #[cfg(feature = "training")]
 use rwkv::nn::kernels::wkv7_common::Wkv7Kernel;
 #[cfg(feature = "training")]

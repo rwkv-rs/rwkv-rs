@@ -1,3 +1,5 @@
+model_cfg = "rwkv-lm-0.1b"
+
 experiment_name = "your_experiment_name"
 
 dataset_base_path = "/mnt/d/your/dataset/dir"

@@ -3,8 +3,8 @@ use burn::tensor::ops::FloatTensor;
 use burn_cubecl::{CubeElement, CubeRuntime};
 
 use crate::kernels::wkv7_common::{
-    Wkv7BackwardOutput, Wkv7ForwardOutput,
-    host::{wkv7_backward_impl, wkv7_forward_impl},
+    host::{wkv7_backward_impl, wkv7_forward_impl}, Wkv7BackwardOutput,
+    Wkv7ForwardOutput,
 };
 use crate::kernels::wkv7_pretrain::Wkv7PretrainBackend;
 
@@ -86,8 +86,8 @@ where
 mod fusion_impl {
     use burn::tensor::{DType, Element, Shape};
     use burn_fusion::{
-        Fusion, FusionBackend, FusionRuntime,
-        stream::{Operation, OperationStreams},
+        stream::{Operation, OperationStreams}, Fusion, FusionBackend,
+        FusionRuntime,
     };
     use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};
 
@@ -118,7 +118,8 @@ mod fusion_impl {
                 _b: core::marker::PhantomData<B1>,
             }
 
-            impl<B1: FusionBackend + Wkv7PretrainBackend> Operation<B1::FusionRuntime> for Wkv7ForwardOp<B1> {
+            impl<B1: FusionBackend + Wkv7PretrainBackend> Operation<B1::FusionRuntime>
+            for Wkv7ForwardOp<B1> {
                 fn execute(
                     &self,
                     handles: &mut HandleContainer<
@@ -237,7 +238,8 @@ mod fusion_impl {
                 _b: core::marker::PhantomData<B1>,
             }
 
-            impl<B1: FusionBackend + Wkv7PretrainBackend> Operation<B1::FusionRuntime> for Wkv7BackwardOp<B1> {
+            impl<B1: FusionBackend + Wkv7PretrainBackend> Operation<B1::FusionRuntime>
+            for Wkv7BackwardOp<B1> {
                 fn execute(
                     &self,
                     handles: &mut HandleContainer<

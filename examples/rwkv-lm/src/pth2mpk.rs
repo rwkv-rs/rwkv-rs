@@ -210,7 +210,8 @@ pub fn pth2mpk<B: Backend>(
         .map(|path| path.as_str())
         .collect();
 
-    if !result.errors.is_empty() || !unexpected_missing.is_empty() || !unexpected_unused.is_empty() {
+    if !result.errors.is_empty() || !unexpected_missing.is_empty() || !unexpected_unused.is_empty()
+    {
         let mut message = String::from("pth2mpk found unexpected tensor mapping issues:\n");
 
         if !result.errors.is_empty() {

@@ -20,11 +20,11 @@ tokio-stream = { version = "0.1.18", features = ["sync"] }
 rayon = { version = "1.11.0" }
 futures = { version = "0.3.31" }
 async-trait = { version = "0.1.89" }
-axum = { version = "0.7.9", features = ["macros", "tokio"] }
-tower-http = { version = "0.6.6", features = ["cors"] }
-tower = { version = "0.5.2" }
-uuid = { version = "1.18.1", features = ["v4", "serde"] }
-bytes = { version = "1.10.1" }
+axum = { version = "0.8.8", features = ["macros", "tokio"] }
+tower-http = { version = "0.6.8", features = ["cors"] }
+tower = { version = "0.5.3" }
+uuid = { version = "1.20.0", features = ["v4", "serde"] }
+bytes = { version = "1.11.0" }
 
 # === Data Structures ===
 once_cell = { version = "1.21.3" }
@@ -32,7 +32,7 @@ dashmap = { version = "7.0.0-rc2" }
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 
 # === File & Serialization ===
-bytemuck = { version = "1.25.0", features = ["derive", "extern_crate_alloc"] }
+bytemuck = { version = "1.24.0", features = ["derive", "extern_crate_alloc"] }
 bio = { version = "3.0.0" }
 csv = { version = "1.4.0" }
 memmap2 = "0.9.9"
@@ -52,7 +52,7 @@ safetensors = { version = "0.7.0" }
 gguf-rs-lib = { version = "0.2.5" }
 
 # === Database ===
-redis = { version = "1.0.3", features = ["default", "r2d2", "ahash", "tokio-comp"] }
+redis = { version = "1.0.2", features = ["default", "r2d2", "ahash", "tokio-comp"] }
 redb = { version = "3.1.0" }
 
 # === Utilities ===
@@ -74,7 +74,7 @@ quote = "1.0.44"
 syn = { version = "2.0.114", features = ["full"] }
 
 # === CLI & Monitoring ===
-clap = { version = "4.5.56", features = ["derive"] }
+clap = { version = "4.5.55", features = ["derive"] }
 log = "0.4.29"
 chrono = { version = "0.4.43", features = ["clock"] }
 clia-tracing-config = "0.2.7"

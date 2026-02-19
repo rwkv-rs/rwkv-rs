@@ -151,3 +151,24 @@ pub struct ModelListResponse {
     pub object: String,
     pub data: Vec<ModelObject>,
 }
+
+// === /admin/models/reload ===
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReloadModelsRequest {
+    #[serde(default)]
+    pub upsert: Vec<rwkv_config::raw::infer::GenerationConfig>,
+    #[serde(default)]
+    pub remove_model_names: Vec<String>,
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReloadModelsResponse {
+    pub changed_model_names: Vec<String>,
+    pub rebuilt_model_names: Vec<String>,
+    pub removed_model_names: Vec<String>,
+    pub active_model_names: Vec<String>,
+    pub dry_run: bool,
+    pub message: String,
+}

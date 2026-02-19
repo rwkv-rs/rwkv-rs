@@ -32,8 +32,8 @@ fn build_lora_ranks(
 }
 
 fn infer_lora_rank_from_formula(value: f64) -> usize {
-    let rounded = (value / LORA_RANK_GRANULARITY as f64).round_ties_even() as usize
-        * LORA_RANK_GRANULARITY;
+    let rounded =
+        (value / LORA_RANK_GRANULARITY as f64).round_ties_even() as usize * LORA_RANK_GRANULARITY;
 
     rounded.max(MIN_LORA_RANK)
 }

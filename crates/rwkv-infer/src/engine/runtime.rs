@@ -136,7 +136,10 @@ impl EngineRuntime {
             return;
         }
 
-        let texts: Vec<String> = submits.iter().map(|submit| submit.input_text.clone()).collect();
+        let texts: Vec<String> = submits
+            .iter()
+            .map(|submit| submit.input_text.clone())
+            .collect();
         let tokenized: Vec<Vec<u16>> = self.tokenizer.encode_batch(texts, false);
 
         for (submit, token_ids_u16) in submits.into_iter().zip(tokenized.into_iter()) {

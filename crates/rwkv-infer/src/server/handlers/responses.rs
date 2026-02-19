@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::check_api_key;
 use crate::engine::SubmitOutput;
-use crate::server::RwkvInferApp;
+use crate::server::AppState;
 use crate::server::openai_types::OpenAiErrorResponse;
 use crate::storage::{GLOBAL_BACKGROUND_TASKS, GLOBAL_RESPONSE_CACHE};
 use crate::types::SamplingConfig;
@@ -39,10 +39,10 @@ pub struct ResponsesResource {
 
 pub async fn responses_create(
     headers: HeaderMap,
-    State(app): State<RwkvInferApp>,
+    State(app): State<AppState>,
     Json(req): Json<ResponsesCreateRequest>,
 ) -> Response {
-    if let Err(resp) = check_api_key(&headers, &app.auth) {
+    if let Err(resp) = check_api_key(&headers, &app.auth_cfg) {
         return resp;
     }
     if req.model.trim().is_empty() {
@@ -57,7 +57,10 @@ pub async fn responses_create(
 
     let response_id = GLOBAL_RESPONSE_CACHE.next_response_id();
     let background = req.background.unwrap_or(false);
-    let stop_suffixes = req.stop.map(crate::server::StopField::into_vec).unwrap_or_default();
+    let stop_suffixes = req
+        .stop
+        .map(crate::server::StopField::into_vec)
+        .unwrap_or_default();
 
     let sampling = SamplingConfig {
         temperature: req.temperature.unwrap_or(1.0),
@@ -71,7 +74,7 @@ pub async fn responses_create(
 
     if background {
         let task = GLOBAL_BACKGROUND_TASKS.create(response_id.clone());
-        let service = app.service.clone();
+        let service = app.runtime_manager.current_service();
         let model_name = req.model.clone();
         let input = req.input.clone();
         let stop_suffixes = stop_suffixes.clone();
@@ -136,7 +139,8 @@ pub async fn responses_create(
 
     // Foreground: run immediately (collect).
     let submit = app
-        .service
+        .runtime_manager
+        .current_service()
         .submit_text(&req.model, req.input, sampling, stop_suffixes, true)
         .await;
     let mut rx = match submit {
@@ -152,7 +156,9 @@ pub async fn responses_create(
         }
         Err(e) => {
             let status = match e {
-                crate::Error::BadRequest(_) | crate::Error::NotSupported(_) => StatusCode::BAD_REQUEST,
+                crate::Error::BadRequest(_) | crate::Error::NotSupported(_) => {
+                    StatusCode::BAD_REQUEST
+                }
                 crate::Error::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             };
             return (
@@ -198,10 +204,10 @@ pub async fn responses_create(
 
 pub async fn responses_get(
     headers: HeaderMap,
-    State(app): State<RwkvInferApp>,
+    State(app): State<AppState>,
     Path(response_id): Path<String>,
 ) -> Response {
-    if let Err(resp) = check_api_key(&headers, &app.auth) {
+    if let Err(resp) = check_api_key(&headers, &app.auth_cfg) {
         return resp;
     }
     match GLOBAL_RESPONSE_CACHE.get(&response_id) {
@@ -225,10 +231,10 @@ pub async fn responses_get(
 
 pub async fn responses_delete(
     headers: HeaderMap,
-    State(app): State<RwkvInferApp>,
+    State(app): State<AppState>,
     Path(response_id): Path<String>,
 ) -> Response {
-    if let Err(resp) = check_api_key(&headers, &app.auth) {
+    if let Err(resp) = check_api_key(&headers, &app.auth_cfg) {
         return resp;
     }
     let removed = GLOBAL_RESPONSE_CACHE.remove(&response_id);
@@ -249,10 +255,10 @@ pub async fn responses_delete(
 
 pub async fn responses_cancel(
     headers: HeaderMap,
-    State(app): State<RwkvInferApp>,
+    State(app): State<AppState>,
     Path(response_id): Path<String>,
 ) -> Response {
-    if let Err(resp) = check_api_key(&headers, &app.auth) {
+    if let Err(resp) = check_api_key(&headers, &app.auth_cfg) {
         return resp;
     }
     let _ = (app, response_id);

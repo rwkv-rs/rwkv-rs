@@ -1,5 +1,12 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::auth::check_api_key;
+use crate::engine::SubmitOutput;
+use crate::server::AppState;
+use crate::server::openai_types::{
+    CompletionRequest, CompletionResponse, CompletionResponseChoice, OpenAiErrorResponse, StopField,
+};
+use crate::types::SamplingConfig;
 use axum::{
     Json,
     extract::State,
@@ -10,20 +17,12 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
-use crate::auth::check_api_key;
-use crate::engine::SubmitOutput;
-use crate::server::RwkvInferApp;
-use crate::server::openai_types::{
-    CompletionRequest, CompletionResponse, CompletionResponseChoice, OpenAiErrorResponse, StopField,
-};
-use crate::types::SamplingConfig;
-
 pub async fn completions(
     headers: HeaderMap,
-    State(app): State<RwkvInferApp>,
+    State(app): State<AppState>,
     Json(req): Json<CompletionRequest>,
 ) -> Response {
-    if let Err(resp) = check_api_key(&headers, &app.auth) {
+    if let Err(resp) = check_api_key(&headers, &app.auth_cfg) {
         return resp;
     }
 
@@ -51,7 +50,8 @@ pub async fn completions(
 
     // Always request an event stream from the engine; non-streaming responses just collect it.
     let submit = app
-        .service
+        .runtime_manager
+        .current_service()
         .submit_text(&req.model, req.prompt, sampling, stop_suffixes, true)
         .await;
 
@@ -68,7 +68,9 @@ pub async fn completions(
         }
         Err(e) => {
             let status = match e {
-                crate::Error::BadRequest(_) | crate::Error::NotSupported(_) => StatusCode::BAD_REQUEST,
+                crate::Error::BadRequest(_) | crate::Error::NotSupported(_) => {
+                    StatusCode::BAD_REQUEST
+                }
                 crate::Error::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             };
             return (
@@ -115,7 +117,7 @@ pub async fn completions(
         });
 
         let keep_alive = axum::response::sse::KeepAlive::new().interval(
-            std::time::Duration::from_millis(app.cfg.sse_keep_alive_ms),
+            Duration::from_millis(app.runtime_manager.sse_keep_alive_ms()),
         );
         return axum::response::Sse::new(sse_stream)
             .keep_alive(keep_alive)

@@ -10,7 +10,7 @@ pub struct AuthConfig {
     pub api_key: Option<String>,
 }
 
-pub fn check_api_key(headers: &HeaderMap, cfg: &AuthConfig) -> std::result::Result<(), Response> {
+pub fn check_api_key(headers: &HeaderMap, cfg: &AuthConfig) -> Result<(), Response> {
     let Some(expected) = cfg.api_key.as_deref() else {
         return Ok(());
     };

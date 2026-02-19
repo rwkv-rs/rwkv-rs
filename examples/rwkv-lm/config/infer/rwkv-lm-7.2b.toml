@@ -4,12 +4,12 @@ sse_keep_alive_ms = 10000
 
 [[models]]
 model_name = "rwkv"
-weights_path = "examples/rwkv-lm/weights/rwkv7-g1d-7.2b-20260131-ctx8192.mpk"
-tokenizer_vocab_path = "examples/rwkv-lm/assets/rwkv_vocab_v20230424.txt"
+model_cfg = "rwkv-lm-7.2b"
+weights_path = "../../weights/rwkv7-g1d-7.2b-20260131-ctx8192.mpk"
+tokenizer_vocab_path = "../../assets/rwkv_vocab_v20230424.txt"
 device_type = 0
 device_ids = [0]
 max_batch_size = 4
 max_context_len = 4096
 paragraph_len = 256
 decode_first = true
-

@@ -29,4 +29,3 @@ impl SamplingConfig {
         self.presence_penalty != 0.0 || self.repetition_penalty != 0.0
     }
 }
-

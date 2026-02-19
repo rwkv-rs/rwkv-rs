@@ -9,6 +9,7 @@ use crate::{DatasetFormatOptions, OptimizerOptions, TokenUnitDType};
 #[derive(Clone, Debug, Serialize, ConfigBuilder)]
 #[config_builder(raw = "crate::raw::train::RawTrainConfig", cell = "TRAIN_CFG")]
 pub struct FinalTrainConfig {
+    pub model_cfg: String,
     pub experiment_log_base_path: Option<String>,
     pub experiment_name: String,
     pub record_path: Option<String>,
@@ -106,6 +107,10 @@ impl FinalTrainConfigBuilder {
     }
 
     pub fn check(&self) {
+        assert!(
+            !self.get_model_cfg().unwrap().trim().is_empty(),
+            "model_cfg cannot be empty"
+        );
         if self.get_num_nodes().unwrap() > 1 {
             panic!("Multiple nodes training are not supported yet");
         }

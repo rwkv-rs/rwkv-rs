@@ -1,3 +1,4 @@
+mod admin;
 mod audio;
 mod chat_completions;
 mod completions;
@@ -5,6 +6,7 @@ mod embeddings;
 mod images;
 mod responses;
 
+pub use admin::admin_models_reload;
 pub use audio::audio_speech;
 pub use chat_completions::chat_completions;
 pub use completions::completions;

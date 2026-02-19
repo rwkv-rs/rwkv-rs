@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 use crate::types::{EngineEvent, SamplingConfig};
 
+
 pub type EntryId = Uuid;
 
 #[derive(Debug)]

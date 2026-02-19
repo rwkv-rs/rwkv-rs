@@ -95,7 +95,8 @@ impl InferEntry {
 
     pub fn emit_stream_text(&mut self) -> (String, bool) {
         if self.max_stop_suffix_len > 0 {
-            self.matched_stop_suffix_len = match_stop_suffix_len(&self.generated_bytes, &self.stop_suffixes);
+            self.matched_stop_suffix_len =
+                match_stop_suffix_len(&self.generated_bytes, &self.stop_suffixes);
             if self.matched_stop_suffix_len > 0 {
                 let trunc_len = self.stop_trunc_len();
                 let text = self.flush_stream_text_until(trunc_len, false);

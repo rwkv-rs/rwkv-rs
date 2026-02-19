@@ -8,142 +8,146 @@ fn main() {
     );
 }
 
-#[cfg(feature = "inferring")]
-mod infer_main {
-    use std::collections::HashMap;
-    use std::sync::Arc;
+use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::net::TcpListener;
+use axum::serve;
+use rwkv::config::raw::infer::GenerationConfig;
+use rwkv::config::validated::model::FinalModelConfig;
+use rwkv::config::{default_cfg_dir, get_arg_value};
+use rwkv::custom::cubecl::device::DeviceId;
+use rwkv::custom::module::Module;
+use rwkv::custom::prelude::{Backend, DeviceOps};
+use rwkv::custom::record::{FullPrecisionSettings, NamedMpkFileRecorder};
+use rwkv::infer::auth::AuthConfig;
+use rwkv::infer::engine::{EngineRuntime, EngineRuntimeConfig};
+use rwkv::infer::init::init_log;
+use rwkv::infer::server::{AppState, RouterBuilder};
+use rwkv::infer::service::builder::build_model_group_engines;
+use rwkv::infer::service::{ModelEngineFactory, ModelRuntimeGroup, RuntimeManager};
+use rwkv::nn::kernels::rapid_sample::RapidSampleBackend;
+use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
 
-    use rwkv::custom::cubecl::device::DeviceId;
-    use rwkv::custom::module::Module;
-    use rwkv::custom::prelude::{Backend, DeviceOps};
-    use rwkv::custom::record::{FullPrecisionSettings, NamedMpkFileRecorder};
-    use rwkv::nn::kernels::rapid_sample::RapidSampleBackend;
-    use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
+use rwkv_lm::inferring::RwkvLmExecutor;
+use rwkv_lm::model::AutoRegressiveModelConfig;
 
-    use rwkv::config::{
-        ModelTypeOptions, load_toml, raw::model::RawModelConfig, validated::infer::FinalInferConfig,
-    };
-    use rwkv::infer::auth::AuthConfig;
-    use rwkv::infer::engine::{EngineHandle, EngineRuntime, EngineRuntimeConfig};
-    use rwkv::infer::init::{init_cfg, init_log};
-    use rwkv::infer::server::{RwkvInferApp, RwkvInferRouterBuilder};
-    use rwkv::infer::service::{ModelRuntimeGroup, RwkvInferService};
+#[cfg(not(any(feature = "f32", feature = "flex32", feature = "f16")))]
+type ElemType = rwkv::custom::tensor::bf16;
+#[cfg(feature = "f32")]
+type ElemType = f32;
+#[cfg(feature = "flex32")]
+type ElemType = rwkv::custom::tensor::flex32;
+#[cfg(feature = "f16")]
+type ElemType = rwkv::custom::tensor::f16;
 
-    use rwkv_lm::inferring::RwkvLmExecutor;
-    use rwkv_lm::model::AutoRegressiveModelConfig;
+fn required_field<T: Copy>(
+    value: Option<T>,
+    field: &str,
+    model_name: &str,
+) -> rwkv::infer::Result<T>
+where
+    T: Copy,
+{
+    value.ok_or_else(|| {
+        rwkv::infer::Error::BadRequest(format!(
+            "missing {} for model {} in infer config",
+            field, model_name
+        ))
+    })
+}
 
-    const INFER_CFG_PATH: &str = "examples/rwkv-lm/config/infer.toml";
-    const MODEL_CFG_PATH: &str = "examples/rwkv-lm/config/model.toml";
+struct RwkvLmEngineFactory<B> {
+    _marker: PhantomData<B>,
+}
 
-    #[cfg(not(any(feature = "f32", feature = "flex32", feature = "f16")))]
-    type ElemType = rwkv::custom::tensor::bf16;
-    #[cfg(feature = "f32")]
-    type ElemType = f32;
-    #[cfg(feature = "flex32")]
-    type ElemType = rwkv::custom::tensor::flex32;
-    #[cfg(feature = "f16")]
-    type ElemType = rwkv::custom::tensor::f16;
-
-    #[derive(Clone, Debug)]
-    struct ResolvedModelConfig {
-        num_cells: usize,
-        vocab_size: usize,
-        embedded_dim: usize,
-        num_heads: usize,
-        head_size: usize,
-    }
-
-    fn load_model_cfg() -> ResolvedModelConfig {
-        assert!(
-            std::path::Path::new(MODEL_CFG_PATH).exists(),
-            "model.toml not found: {}",
-            MODEL_CFG_PATH
-        );
-        let mut raw: RawModelConfig = load_toml(MODEL_CFG_PATH);
-        raw.fill_default();
-
-        if raw.model_type != ModelTypeOptions::AutoRegressive {
-            panic!(
-                "Only model_type=auto_regressive is supported for rwkv-lm inference, got {:?}",
-                raw.model_type
-            );
-        }
-
-        assert_eq!(
-            raw.embedded_dim % raw.num_heads,
-            0,
-            "embedded_dim must be divisible by num_heads"
-        );
-
-        ResolvedModelConfig {
-            num_cells: raw.num_cells,
-            vocab_size: raw.vocab_size,
-            embedded_dim: raw.embedded_dim,
-            num_heads: raw.num_heads,
-            head_size: raw.embedded_dim / raw.num_heads,
+impl<B> RwkvLmEngineFactory<B> {
+    fn new() -> Self {
+        Self {
+            _marker: PhantomData,
         }
     }
+}
 
-    fn build_model_group_engines<B>(
-        infer_cfg: &FinalInferConfig,
-    ) -> rwkv::infer::Result<HashMap<String, ModelRuntimeGroup>>
-    where
-        B: Backend + Wkv7Backend + RapidSampleBackend,
-    {
-        let mut model_group_engines: HashMap<String, Vec<Arc<EngineHandle>>> = HashMap::new();
+impl<B> ModelEngineFactory for RwkvLmEngineFactory<B>
+where
+    B: Backend + Wkv7Backend + RapidSampleBackend + Send + Sync,
+{
+    fn build_model_groups(
+        &self,
+        models: &[GenerationConfig],
+        model_cfgs: &HashMap<String, Arc<FinalModelConfig>>,
+    ) -> rwkv::infer::Result<HashMap<String, ModelRuntimeGroup>> {
+        build_model_group_engines(models, |generation_cfg| {
+            let model_cfg = model_cfgs.get(&generation_cfg.model_name).ok_or_else(|| {
+                rwkv::infer::Error::Internal(format!(
+                    "missing model cfg for {}",
+                    generation_cfg.model_name
+                ))
+            })?;
 
-        for model in &infer_cfg.models {
-            let max_batch_size = model
-                .max_batch_size
-                .expect("max_batch_size must be set by infer config default fill");
-            let paragraph_len = model
-                .paragraph_len
-                .expect("paragraph_len must be set by infer config default fill");
-            let max_context_len = model
-                .max_context_len
-                .expect("max_context_len must be set by infer config default fill");
-            let decode_first = model
-                .decode_first
-                .expect("decode_first must be set by infer config default fill");
-            let device_type = model
-                .device_type
-                .expect("device_type must be set by infer config default fill");
+            let device_type = required_field(
+                generation_cfg.device_type,
+                "device_type",
+                &generation_cfg.model_name,
+            )?;
+            let max_batch_size = required_field(
+                generation_cfg.max_batch_size,
+                "max_batch_size",
+                &generation_cfg.model_name,
+            )?;
+            let paragraph_len = required_field(
+                generation_cfg.paragraph_len,
+                "paragraph_len",
+                &generation_cfg.model_name,
+            )?;
+            let max_context_len = required_field(
+                generation_cfg.max_context_len,
+                "max_context_len",
+                &generation_cfg.model_name,
+            )?;
+            let decode_first = required_field(
+                generation_cfg.decode_first,
+                "decode_first",
+                &generation_cfg.model_name,
+            )?;
 
-            let resolved_model = load_model_cfg();
-
-            for device_id in &model.device_ids {
+            let mut engines = Vec::new();
+            for device_id in &generation_cfg.device_ids {
                 let device = B::Device::from_id(DeviceId::new(device_type, *device_id));
 
                 let model_config = AutoRegressiveModelConfig::new(
-                    resolved_model.num_cells,
-                    resolved_model.vocab_size,
-                    resolved_model.embedded_dim,
-                    resolved_model.num_heads,
-                    resolved_model.head_size,
+                    model_cfg.num_cells,
+                    model_cfg.vocab_size,
+                    model_cfg.embedded_dim,
+                    model_cfg.num_heads,
+                    model_cfg.head_size_auto,
                 );
                 let model_runtime = model_config.init::<B>(&device);
                 let model_runtime = model_runtime
                     .load_file(
-                        &model.weights_path,
+                        &generation_cfg.weights_path,
                         &NamedMpkFileRecorder::<FullPrecisionSettings>::new(),
                         &device,
                     )
-                    .expect("load weights (mpk)");
+                    .map_err(|e| {
+                        rwkv::infer::Error::Internal(format!(
+                            "failed to load weights {} for model {}: {e}",
+                            generation_cfg.weights_path, generation_cfg.model_name
+                        ))
+                    })?;
 
                 let executor = RwkvLmExecutor::<B>::new(
                     device.clone(),
                     model_runtime,
+                    model_cfg.clone(),
                     max_batch_size,
-                    resolved_model.num_cells,
-                    resolved_model.vocab_size,
-                    resolved_model.embedded_dim,
-                    resolved_model.num_heads,
-                    resolved_model.head_size,
                 );
 
                 let engine = EngineRuntime::spawn(
                     EngineRuntimeConfig {
-                        tokenizer_vocab_path: model.tokenizer_vocab_path.clone(),
+                        tokenizer_vocab_path: generation_cfg.tokenizer_vocab_path.clone(),
                         max_batch_size,
                         paragraph_len,
                         max_context_len,
@@ -153,123 +157,119 @@ mod infer_main {
                 )?;
 
                 log::info!(
-                    "engine ready: model_name={} device_type={} device_id={} weights_path={}",
-                    model.model_name,
+                    "engine ready: model_name={} model_cfg={} device_type={} device_id={} \
+                     weights_path={}",
+                    generation_cfg.model_name,
+                    generation_cfg.model_cfg,
                     device_type,
                     device_id,
-                    model.weights_path
+                    generation_cfg.weights_path
                 );
-                model_group_engines
-                    .entry(model.model_name.clone())
-                    .or_default()
-                    .push(Arc::new(engine));
+                engines.push(Arc::new(engine));
             }
-        }
 
-        let mut groups = HashMap::new();
-        for (model_name, engines) in model_group_engines {
-            groups.insert(
-                model_name.clone(),
-                ModelRuntimeGroup::new(model_name, engines)?,
-            );
-        }
-        Ok(groups)
+            Ok(engines)
+        })
     }
+}
 
-    pub async fn launch<B>() -> rwkv::infer::Result<()>
-    where
-        B: Backend + Wkv7Backend + RapidSampleBackend,
-    {
-        let _log_guard = init_log("info");
-        let infer_cfg_builder = init_cfg(INFER_CFG_PATH);
-        let infer_cfg = infer_cfg_builder.build();
+pub async fn launch<B>() -> rwkv::infer::Result<()>
+where
+    B: Backend + Wkv7Backend + RapidSampleBackend + Send + Sync + 'static,
+{
+    let args: Vec<String> = std::env::args().collect();
+    let config_dir = get_arg_value(&args, "--config-dir")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_cfg_dir);
+    let infer_cfg = get_arg_value(&args, "--infer-cfg").unwrap_or_else(|| "rwkv-lm-7.2b".into());
 
-        let groups = build_model_group_engines::<B>(infer_cfg.as_ref())?;
-        let service = Arc::new(RwkvInferService::new(groups)?);
+    let _log_guard = init_log("info");
+    let runtime_manager = Arc::new(RuntimeManager::bootstrap(
+        config_dir,
+        infer_cfg,
+        Arc::new(RwkvLmEngineFactory::<B>::new()),
+    )?);
 
-        let app = RwkvInferApp {
-            cfg: infer_cfg.clone(),
-            service,
-            auth: AuthConfig {
-                api_key: infer_cfg.api_key.clone(),
-            },
-        };
+    let app = AppState {
+        auth_cfg: AuthConfig {
+            api_key: runtime_manager.api_key(),
+        },
+        runtime_manager: runtime_manager.clone(),
+    };
 
-        let app = RwkvInferRouterBuilder::new().with_app(app).build().await?;
+    let router = RouterBuilder::new(app).build().await?;
 
-        let listener = tokio::net::TcpListener::bind(&infer_cfg.http_bind_addr)
-            .await
-            .expect("bind http addr");
-        axum::serve(listener, app).await.expect("serve");
-        Ok(())
-    }
+    let bind_addr = runtime_manager.http_bind_addr();
+    let listener = TcpListener::bind(&bind_addr).await.map_err(|e| {
+        rwkv::infer::Error::Internal(format!("failed to bind http listener {}: {e}", bind_addr))
+    })?;
+    serve(listener, router).await.map_err(|e| {
+        rwkv::infer::Error::Internal(format!("inference server exited with IO error: {e}"))
+    })?;
+    Ok(())
+}
 
-    #[cfg(feature = "wgpu")]
-    mod wgpu {
-        use super::{ElemType, launch};
-        use rwkv::custom::backend::Wgpu;
-
-        pub async fn run() {
-            launch::<Wgpu<ElemType, i32>>().await.unwrap();
-        }
-    }
-
-    #[cfg(feature = "vulkan")]
-    mod vulkan {
-        use super::{ElemType, launch};
-        use rwkv::custom::backend::Vulkan;
-
-        pub async fn run() {
-            launch::<Vulkan<ElemType, i32>>().await.unwrap();
-        }
-    }
-
-    #[cfg(feature = "metal")]
-    mod metal {
-        use super::{ElemType, launch};
-        use rwkv::custom::backend::Metal;
-
-        pub async fn run() {
-            launch::<Metal<ElemType, i32>>().await.unwrap();
-        }
-    }
-
-    #[cfg(feature = "cuda")]
-    mod cuda {
-        use super::{ElemType, launch};
-        use rwkv::custom::backend::Cuda;
-
-        pub async fn run() {
-            launch::<Cuda<ElemType, i32>>().await.unwrap();
-        }
-    }
-
-    #[cfg(feature = "rocm")]
-    mod rocm {
-        use super::{ElemType, launch};
-        use rwkv::custom::backend::Rocm;
-
-        pub async fn run() {
-            launch::<Rocm<ElemType, i32>>().await.unwrap();
-        }
-    }
+#[cfg(feature = "wgpu")]
+mod wgpu {
+    use super::{ElemType, launch};
+    use rwkv::custom::backend::Wgpu;
 
     pub async fn run() {
-        #[cfg(feature = "wgpu")]
-        wgpu::run().await;
-        #[cfg(feature = "cuda")]
-        cuda::run().await;
-        #[cfg(feature = "rocm")]
-        rocm::run().await;
-        #[cfg(feature = "vulkan")]
-        vulkan::run().await;
-        #[cfg(feature = "metal")]
-        metal::run().await;
+        launch::<Wgpu<ElemType, i32>>().await.unwrap();
+    }
+}
+
+#[cfg(feature = "vulkan")]
+mod vulkan {
+    use super::{ElemType, launch};
+    use rwkv::custom::backend::Vulkan;
+
+    pub async fn run() {
+        launch::<Vulkan<ElemType, i32>>().await.unwrap();
+    }
+}
+
+#[cfg(feature = "metal")]
+mod metal {
+    use super::{ElemType, launch};
+    use rwkv::custom::backend::Metal;
+
+    pub async fn run() {
+        launch::<Metal<ElemType, i32>>().await.unwrap();
+    }
+}
+
+#[cfg(feature = "cuda")]
+mod cuda {
+    use super::{ElemType, launch};
+    use rwkv::custom::backend::Cuda;
+
+    pub async fn run() {
+        launch::<Cuda<ElemType, i32>>().await.unwrap();
+    }
+}
+
+#[cfg(feature = "rocm")]
+mod rocm {
+    use super::{ElemType, launch};
+    use rwkv::custom::backend::Rocm;
+
+    pub async fn run() {
+        launch::<Rocm<ElemType, i32>>().await.unwrap();
     }
 }
 
 #[cfg(feature = "inferring")]
 #[tokio::main]
-async fn main() {
-    infer_main::run().await;
+pub async fn main() {
+    #[cfg(feature = "wgpu")]
+    wgpu::run().await;
+    #[cfg(feature = "cuda")]
+    cuda::run().await;
+    #[cfg(feature = "rocm")]
+    rocm::run().await;
+    #[cfg(feature = "vulkan")]
+    vulkan::run().await;
+    #[cfg(feature = "metal")]
+    metal::run().await;
 }

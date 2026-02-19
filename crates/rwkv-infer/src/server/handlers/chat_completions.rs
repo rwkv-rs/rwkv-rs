@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::auth::check_api_key;
 use crate::engine::SubmitOutput;
-use crate::server::RwkvInferApp;
+use crate::server::AppState;
 use crate::server::openai_types::{
     ChatCompletionRequest, ChatCompletionResponse, ChatCompletionResponseChoice, ChatMessage,
     OpenAiErrorResponse, StopField,
@@ -34,10 +34,10 @@ fn normalize_chat_role(role: &str) -> Option<&'static str> {
 
 pub async fn chat_completions(
     headers: HeaderMap,
-    State(app): State<RwkvInferApp>,
+    State(app_state): State<AppState>,
     Json(req): Json<ChatCompletionRequest>,
 ) -> Response {
-    if let Err(resp) = check_api_key(&headers, &app.auth) {
+    if let Err(resp) = check_api_key(&headers, &app_state.auth_cfg) {
         return resp;
     }
 
@@ -84,8 +84,9 @@ pub async fn chat_completions(
     prompt.push_str("Assistant: <think");
 
     // Always request an event stream from the engine; non-streaming responses just collect it.
-    let submit = app
-        .service
+    let submit = app_state
+        .runtime_manager
+        .current_service()
         .submit_text(&req.model, prompt, sampling, stop_suffixes, true)
         .await;
     let (_entry_id, rx) = match submit {
@@ -101,7 +102,9 @@ pub async fn chat_completions(
         }
         Err(e) => {
             let status = match e {
-                crate::Error::BadRequest(_) | crate::Error::NotSupported(_) => StatusCode::BAD_REQUEST,
+                crate::Error::BadRequest(_) | crate::Error::NotSupported(_) => {
+                    StatusCode::BAD_REQUEST
+                }
                 crate::Error::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             };
             return (
@@ -151,7 +154,7 @@ pub async fn chat_completions(
         });
 
         let keep_alive = axum::response::sse::KeepAlive::new().interval(
-            std::time::Duration::from_millis(app.cfg.sse_keep_alive_ms),
+            std::time::Duration::from_millis(app_state.runtime_manager.sse_keep_alive_ms()),
         );
         return axum::response::Sse::new(sse_stream)
             .keep_alive(keep_alive)

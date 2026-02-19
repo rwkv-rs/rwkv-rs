@@ -2,35 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fill_default;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct RawInferModelConfig {
-    pub model_name: String,
-    pub weights_path: String,
-    pub tokenizer_vocab_path: String,
-
-    pub device_type: Option<u16>,
-    pub device_ids: Vec<u32>,
-
-    pub max_batch_size: Option<usize>,
-    pub paragraph_len: Option<usize>,
-    pub max_context_len: Option<usize>,
-    pub decode_first: Option<bool>,
-}
-
-impl RawInferModelConfig {
-    pub fn fill_default(&mut self) {
-        fill_default!(
-            self,
-            device_type: 0u16,
-            max_batch_size: 4usize,
-            paragraph_len: 256usize,
-            max_context_len: 4096usize,
-            decode_first: true,
-        );
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RawInferConfig {
     // HTTP
     pub http_bind_addr: Option<String>,
@@ -41,7 +13,7 @@ pub struct RawInferConfig {
     pub api_key: Option<String>,
 
     // Multi-model deployment
-    pub models: Vec<RawInferModelConfig>,
+    pub models: Vec<GenerationConfig>,
 }
 
 impl RawInferConfig {
@@ -56,5 +28,35 @@ impl RawInferConfig {
         for model in self.models.iter_mut() {
             model.fill_default();
         }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct GenerationConfig {
+    pub model_name: String,
+    #[serde(alias = "model_cfg_path")]
+    pub model_cfg: String,
+    pub weights_path: String,
+    pub tokenizer_vocab_path: String,
+
+    pub device_type: Option<u16>,
+    pub device_ids: Vec<u32>,
+
+    pub max_batch_size: Option<usize>,
+    pub paragraph_len: Option<usize>,
+    pub max_context_len: Option<usize>,
+    pub decode_first: Option<bool>,
+}
+
+impl GenerationConfig {
+    pub fn fill_default(&mut self) {
+        fill_default!(
+            self,
+            device_type: 0u16,
+            max_batch_size: 4usize,
+            paragraph_len: 256usize,
+            max_context_len: 4096usize,
+            decode_first: true,
+        );
     }
 }

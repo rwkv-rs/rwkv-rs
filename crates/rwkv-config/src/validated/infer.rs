@@ -5,7 +5,7 @@ use once_cell::sync::OnceCell;
 use rwkv_derive::ConfigBuilder;
 use serde::Serialize;
 
-use crate::raw::infer::RawInferModelConfig;
+use crate::raw::infer::GenerationConfig;
 
 #[derive(Clone, Debug, Serialize, ConfigBuilder)]
 #[config_builder(raw = "crate::raw::infer::RawInferConfig", cell = "INFER_CFG")]
@@ -19,13 +19,16 @@ pub struct FinalInferConfig {
     pub api_key: Option<String>,
 
     // Multi-model deployment
-    pub models: Vec<RawInferModelConfig>,
+    pub models: Vec<GenerationConfig>,
 }
 
 impl FinalInferConfigBuilder {
     pub fn check(&self) {
         let models = self.get_models().unwrap();
-        assert!(!models.is_empty(), "infer config requires at least one model");
+        assert!(
+            !models.is_empty(),
+            "infer config requires at least one model"
+        );
 
         let mut names = HashSet::new();
         for model in models {
@@ -36,6 +39,11 @@ impl FinalInferConfigBuilder {
             assert!(
                 names.insert(model.model_name.clone()),
                 "duplicated model_name: {}",
+                model.model_name
+            );
+            assert!(
+                !model.model_cfg.trim().is_empty(),
+                "model_cfg cannot be empty for model {}",
                 model.model_name
             );
             assert!(
@@ -59,11 +67,6 @@ impl FinalInferConfigBuilder {
             assert!(
                 model.max_context_len.unwrap() >= 1,
                 "max_context_len must be >= 1 for model {}",
-                model.model_name
-            );
-            assert!(
-                model.paragraph_len.unwrap() == 256,
-                "paragraph_len must be exactly 256 for model {}",
                 model.model_name
             );
         }
