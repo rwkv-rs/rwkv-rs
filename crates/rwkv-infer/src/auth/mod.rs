@@ -2,7 +2,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-
+use axum::http::header::AUTHORIZATION;
 use crate::server::OpenAiErrorResponse;
 
 #[derive(Clone, Debug, Default)]
@@ -15,7 +15,7 @@ pub fn check_api_key(headers: &HeaderMap, cfg: &AuthConfig) -> Result<(), Respon
         return Ok(());
     };
 
-    let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) else {
+    let Some(auth) = headers.get(AUTHORIZATION) else {
         return Err((
             StatusCode::UNAUTHORIZED,
             axum::Json(OpenAiErrorResponse::unauthorized(
