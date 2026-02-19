@@ -5,15 +5,13 @@
 // to build a learner, which is used to train the model. The trained model and the configuration are
 // then saved to the specified directory.
 
-use crate::data::batcher::AutoRegressiveBatcher;
-use crate::model::AutoRegressiveModelConfig;
 use log::info;
 #[cfg(not(feature = "tui"))]
 use log::warn;
 use rwkv::config::validated::train::{FinalTrainConfigBuilder, TRAIN_CFG};
 use rwkv::config::{
-    validated::model::{FinalModelConfigBuilder, MODEL_CFG},
     DatasetFormatOptions,
+    validated::model::{FinalModelConfigBuilder, MODEL_CFG},
 };
 #[cfg(feature = "ddp")]
 use rwkv::custom::collective::{AllReduceStrategy, CollectiveConfig};
@@ -25,9 +23,9 @@ use rwkv::custom::tensor::backend::AutodiffBackend;
 #[cfg(not(feature = "ddp"))]
 use rwkv::custom::train::MultiDeviceOptim;
 use rwkv::custom::train::{
+    Interrupter, Learner, SupervisedTraining,
     logger::FileMetricLogger,
     metric::{CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric},
-    Interrupter, Learner, SupervisedTraining,
 };
 use rwkv::data::mmap::sample::Sampler;
 use rwkv::nn::kernels::l2wrap::L2WrapBackend;
@@ -40,6 +38,9 @@ use rwkv::train::renderer::BarMetricsRenderer;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use crate::data::batcher::AutoRegressiveBatcher;
+use crate::model::AutoRegressiveModelConfig;
 
 rwkv::custom_mode!();
 
@@ -113,9 +114,9 @@ pub fn train<B: AutodiffBackend>(
         .set_device(devices[0].clone())
         .build(dataset.clone());
     let dataloader_valid = dataloader_valid.slice(0, 0);
-    
+
     train_cfg_builder.check();
-    
+
     model_cfg_builder.build();
     train_cfg_builder.build();
 

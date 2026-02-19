@@ -34,9 +34,8 @@ pub fn read_record_file(
                 && full_record_path != full_last_record_path
             {
                 let prompt = format!(
-                    "⚠️ 你指定了 {}，但 record 目录下最新的是 {}。\n\
-                             若想自动加载最新，请留空 record_path；\n\
-                             确认继续加载指定文件？",
+                    "⚠️ 你指定了 {}，但 record 目录下最新的是 {}。\n若想自动加载最新，请留空 \
+                     record_path；\n确认继续加载指定文件？",
                     full_record_path.display(),
                     full_last_record_path.display(),
                 );

@@ -3,8 +3,8 @@ use burn::tensor::ops::FloatTensor;
 use burn_cubecl::{CubeElement, CubeRuntime};
 
 use crate::kernels::wkv7_common::{
-    Wkv7BackwardOutput, Wkv7ForwardOutput,
-    host::{wkv7_backward_impl, wkv7_forward_impl},
+    host::{wkv7_backward_impl, wkv7_forward_impl}, Wkv7BackwardOutput,
+    Wkv7ForwardOutput,
 };
 use crate::kernels::wkv7_pretrain::Wkv7PretrainBackend;
 
@@ -86,8 +86,8 @@ where
 mod fusion_impl {
     use burn::tensor::{DType, Element, Shape};
     use burn_fusion::{
-        Fusion, FusionBackend, FusionRuntime,
-        stream::{Operation, OperationStreams},
+        stream::{Operation, OperationStreams}, Fusion, FusionBackend,
+        FusionRuntime,
     };
     use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};
 
@@ -119,8 +119,7 @@ mod fusion_impl {
             }
 
             impl<B1: FusionBackend + Wkv7PretrainBackend> Operation<B1::FusionRuntime>
-                for Wkv7ForwardOp<B1>
-            {
+            for Wkv7ForwardOp<B1> {
                 fn execute(
                     &self,
                     handles: &mut HandleContainer<
@@ -150,10 +149,8 @@ mod fusion_impl {
                     );
 
                     handles.register_float_tensor::<B1>(&state_out.id, output.state);
-                    handles.register_float_tensor::<B1>(
-                        &removal_state_out.id,
-                        output.removal_state,
-                    );
+                    handles
+                        .register_float_tensor::<B1>(&removal_state_out.id, output.removal_state);
                     handles.register_float_tensor::<B1>(&output_out.id, output.output);
                 }
             }
@@ -203,11 +200,7 @@ mod fusion_impl {
                 _b: core::marker::PhantomData,
             };
 
-            let mut outputs = client.register(
-                streams,
-                OperationIr::Custom(op.desc.clone()),
-                op,
-            );
+            let mut outputs = client.register(streams, OperationIr::Custom(op.desc.clone()), op);
 
             let output = outputs.pop().expect("missing output");
             let removal_state = outputs.pop().expect("missing removal_state");
@@ -246,8 +239,7 @@ mod fusion_impl {
             }
 
             impl<B1: FusionBackend + Wkv7PretrainBackend> Operation<B1::FusionRuntime>
-                for Wkv7BackwardOp<B1>
-            {
+            for Wkv7BackwardOp<B1> {
                 fn execute(
                     &self,
                     handles: &mut HandleContainer<
@@ -255,8 +247,25 @@ mod fusion_impl {
                     >,
                 ) {
                     let (
-                        [weight_decay, receptance, key, value, removal, replacement, state, removal_state, output_grad],
-                        [weight_decay_grad, receptance_grad, key_grad, value_grad, removal_grad, replacement_grad],
+                        [
+                            weight_decay,
+                            receptance,
+                            key,
+                            value,
+                            removal,
+                            replacement,
+                            state,
+                            removal_state,
+                            output_grad,
+                        ],
+                        [
+                            weight_decay_grad,
+                            receptance_grad,
+                            key_grad,
+                            value_grad,
+                            removal_grad,
+                            replacement_grad,
+                        ],
                     ) = self.desc.as_fixed();
 
                     let weight_decay_tensor = handles.get_float_tensor::<B1>(weight_decay);
@@ -282,12 +291,16 @@ mod fusion_impl {
                         self.chunk_len,
                     );
 
-                    handles.register_float_tensor::<B1>(&weight_decay_grad.id, grads.weight_decay_grad);
+                    handles.register_float_tensor::<B1>(
+                        &weight_decay_grad.id,
+                        grads.weight_decay_grad,
+                    );
                     handles.register_float_tensor::<B1>(&receptance_grad.id, grads.receptance_grad);
                     handles.register_float_tensor::<B1>(&key_grad.id, grads.key_grad);
                     handles.register_float_tensor::<B1>(&value_grad.id, grads.value_grad);
                     handles.register_float_tensor::<B1>(&removal_grad.id, grads.removal_grad);
-                    handles.register_float_tensor::<B1>(&replacement_grad.id, grads.replacement_grad);
+                    handles
+                        .register_float_tensor::<B1>(&replacement_grad.id, grads.replacement_grad);
                 }
             }
 
@@ -357,11 +370,7 @@ mod fusion_impl {
                 _b: core::marker::PhantomData,
             };
 
-            let mut outputs = client.register(
-                streams,
-                OperationIr::Custom(op.desc.clone()),
-                op,
-            );
+            let mut outputs = client.register(streams, OperationIr::Custom(op.desc.clone()), op);
 
             let replacement_grad = outputs.pop().expect("missing replacement_grad");
             let removal_grad = outputs.pop().expect("missing removal_grad");

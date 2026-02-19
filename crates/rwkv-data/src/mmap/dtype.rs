@@ -4,7 +4,6 @@ use serde::Serialize;
 
 pub use rwkv_config::TokenUnitDType;
 
-
 pub trait TokenUnit: IsDiscrete + Clone + Serialize + Pod + Element {
     const DTYPE: TokenUnitDType;
 }

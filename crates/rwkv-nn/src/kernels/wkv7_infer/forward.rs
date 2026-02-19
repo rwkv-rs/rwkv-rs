@@ -3,8 +3,7 @@ use burn::tensor::ops::FloatTensor;
 use burn_cubecl::{CubeElement, CubeRuntime};
 
 use crate::kernels::wkv7_infer::{
-    Wkv7InferBackend, Wkv7InferForwardOutput,
-    host::wkv7_infer_forward_impl,
+    Wkv7InferBackend, Wkv7InferForwardOutput, host::wkv7_infer_forward_impl,
 };
 
 impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> Wkv7InferBackend

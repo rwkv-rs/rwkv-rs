@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use burn::{
     module::{AutodiffModule, ModuleVisitor, Param, ParamId},
-    tensor::{backend::AutodiffBackend, Tensor},
+    tensor::{Tensor, backend::AutodiffBackend},
 };
 use burn_optim::{GradientsParams, MultiGradientsParams};
 

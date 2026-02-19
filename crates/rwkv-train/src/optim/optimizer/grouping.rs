@@ -1,8 +1,8 @@
 use burn::{
     module::{AutodiffModule, ModuleVisitor, Param, ParamId},
     tensor::{
-        backend::{AutodiffBackend, Backend},
         Tensor,
+        backend::{AutodiffBackend, Backend},
     },
 };
 
@@ -49,8 +49,8 @@ impl ParamGrouperVisitor<'_> {
 
         if grouping_mode == ParamGroupingMode::StateTune && visitor.state_param_count == 0 {
             panic!(
-                "StateTune mode did not find any trainable state parameter. \
-                 Expected parameter path suffix: state.state."
+                "StateTune mode did not find any trainable state parameter. Expected parameter \
+                 path suffix: state.state."
             );
         }
 

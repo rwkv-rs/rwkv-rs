@@ -21,7 +21,8 @@ impl WsdLrSchedulerConfig {
 
         assert!(
             self.lr_final >= 0.0 && self.lr_final <= self.lr_init,
-            "Final learning rate must be at least 0 and at most equal to the initial learning rate, got lr_final={}, lr_init={}",
+            "Final learning rate must be at least 0 and at most equal to the initial learning \
+             rate, got lr_final={}, lr_init={}",
             self.lr_final,
             self.lr_init
         );

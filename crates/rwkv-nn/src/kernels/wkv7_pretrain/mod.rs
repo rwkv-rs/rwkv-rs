@@ -6,8 +6,8 @@ use burn::{
     tensor::{Tensor, TensorPrimitive, backend::AutodiffBackend, ops::FloatTensor},
 };
 
-use crate::kernels::wkv7_common::{Wkv7ForwardInput, Wkv7ForwardOutput};
 use crate::kernels::wkv7_common::Wkv7BackwardOutput;
+use crate::kernels::wkv7_common::{Wkv7ForwardInput, Wkv7ForwardOutput};
 
 pub type Wkv7PretrainForwardOutput<B> = Wkv7ForwardOutput<Tensor<B, 4>>;
 pub type Wkv7PretrainBackwardOutput<B> = Wkv7BackwardOutput<Tensor<B, 4>>;
@@ -53,7 +53,10 @@ pub fn wkv7_pretrain_forward<B: Wkv7PretrainBackend>(
         wkv7_forward_input.receptance.into_primitive().tensor(),
         wkv7_forward_input.replacement_key.into_primitive().tensor(),
         wkv7_forward_input.value.into_primitive().tensor(),
-        wkv7_forward_input.removal_key_normalized.into_primitive().tensor(),
+        wkv7_forward_input
+            .removal_key_normalized
+            .into_primitive()
+            .tensor(),
         wkv7_forward_input.replacement.into_primitive().tensor(),
         chunk_len,
     );

@@ -7,3 +7,29 @@ license = "Apache-2.0"
 
 [dependencies]
 tokio = { workspace = true }
+tokio-stream = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+sonic-rs = { workspace = true }
+toml = { workspace = true }
+uuid = { workspace = true }
+
+# HTTP server (OpenAI-compatible)
+axum = { workspace = true }
+tower-http = { workspace = true }
+
+# Inference utilities
+dashmap = { workspace = true }
+once_cell = { workspace = true }
+log = { workspace = true }
+
+# Optional tokenizer for text endpoints (RWKV vocab)
+rwkv-data = { path = "../rwkv-data" }
+rwkv-config = { path = "../rwkv-config" }
+clia-tracing-config = { workspace = true }
+
+[features]
+default = ["http"]
+http = []
+
+[dev-dependencies]
+tower = { workspace = true }

@@ -1,28 +1,28 @@
+#[cfg(feature = "wgpu")]
+use std::any::TypeId;
 use std::{
     any::Any,
     path::{Path, PathBuf},
 };
-#[cfg(feature = "wgpu")]
-use std::any::TypeId;
 
 use burn::backend::Autodiff;
 use burn::backend::autodiff::checkpoint::strategy::CheckpointStrategy;
-#[cfg(feature = "fusion")]
-use burn_fusion::{Fusion, FusionBackend};
-#[cfg(feature = "cubecl")]
-use burn_cubecl::{CubeBackend, CubeRuntime};
-#[cfg(feature = "cubecl")]
-use burn_cubecl::cubecl::device::{Device as CubeDevice, DeviceId};
 #[cfg(feature = "wgpu")]
 use burn::backend::wgpu::WgpuDevice;
 use burn::prelude::Backend;
+#[cfg(feature = "cubecl")]
+use burn_cubecl::cubecl::device::{Device as CubeDevice, DeviceId};
+#[cfg(feature = "cubecl")]
+use burn_cubecl::{CubeBackend, CubeRuntime};
+#[cfg(feature = "fusion")]
+use burn_fusion::{Fusion, FusionBackend};
+#[cfg(feature = "tui")]
+use burn_train::renderer::tui::TuiMetricsRenderer;
 use burn_train::{
     Interrupter,
     logger::{AsyncLogger, FileLogger, Logger},
     renderer::MetricsRenderer,
 };
-#[cfg(feature = "tui")]
-use burn_train::renderer::tui::TuiMetricsRenderer;
 use chrono::Local;
 use log::{info, warn};
 use rwkv_config::{
@@ -37,16 +37,76 @@ use wandb::LogData;
 
 use crate::{
     logger::wandb::{
-        WandbLogger,
-        WandbLoggerConfig,
-        init_logger_blocking,
-        init_metric_logger_blocking,
+        WandbLogger, WandbLoggerConfig, init_logger_blocking, init_metric_logger_blocking,
     },
     renderer::BarMetricsRenderer,
     utils::{auto_create_directory, read_record_file},
 };
 
-pub fn init_cfg<P1: AsRef<Path>, P2: AsRef<Path>>(
+fn is_path_like(s: &str) -> bool {
+    s.contains('/') || s.contains('\\')
+}
+
+fn resolve_path(base_dir: &Path, path: &str) -> String {
+    let p = Path::new(path);
+    if p.is_absolute() {
+        path.to_string()
+    } else {
+        base_dir.join(p).to_string_lossy().to_string()
+    }
+}
+
+fn resolve_model_cfg_path(config_dir: &Path, train_cfg_dir: &Path, model_cfg: &str) -> PathBuf {
+    if is_path_like(model_cfg) {
+        let p = PathBuf::from(model_cfg);
+        if p.is_absolute() {
+            p
+        } else {
+            train_cfg_dir.join(p)
+        }
+    } else {
+        config_dir.join("model").join(format!("{model_cfg}.toml"))
+    }
+}
+
+pub fn init_cfg<P: AsRef<Path>>(
+    config_dir: P,
+    train_cfg_name: &str,
+) -> (FinalModelConfigBuilder, FinalTrainConfigBuilder) {
+    let config_dir = config_dir.as_ref();
+    let train_cfg_path = config_dir
+        .join("train")
+        .join(format!("{train_cfg_name}.toml"));
+    let train_cfg_dir = train_cfg_path.parent().unwrap_or_else(|| Path::new("."));
+
+    let mut raw_train_cfg: RawTrainConfig = load_toml(&train_cfg_path);
+    raw_train_cfg.fill_default();
+
+    // Resolve relative paths against the train config directory.
+    raw_train_cfg.dataset_base_path = resolve_path(train_cfg_dir, &raw_train_cfg.dataset_base_path);
+    raw_train_cfg.experiment_log_base_path = raw_train_cfg
+        .experiment_log_base_path
+        .map(|p| resolve_path(train_cfg_dir, &p));
+    raw_train_cfg.record_path = raw_train_cfg
+        .record_path
+        .map(|p| resolve_path(train_cfg_dir, &p));
+
+    let model_cfg_path =
+        resolve_model_cfg_path(config_dir, train_cfg_dir, raw_train_cfg.model_cfg.as_str());
+
+    let mut raw_model_cfg: RawModelConfig = load_toml(&model_cfg_path);
+    raw_model_cfg.fill_default();
+
+    let mut model_cfg_builder = FinalModelConfigBuilder::load_from_raw(raw_model_cfg);
+    let mut train_cfg_builder = FinalTrainConfigBuilder::load_from_raw(raw_train_cfg);
+
+    model_cfg_builder.fill_auto_after_load();
+    train_cfg_builder.fill_auto_after_load();
+
+    (model_cfg_builder, train_cfg_builder)
+}
+
+pub fn init_cfg_paths<P1: AsRef<Path>, P2: AsRef<Path>>(
     model_cfg_path: P1,
     train_cfg_path: P2,
 ) -> (FinalModelConfigBuilder, FinalTrainConfigBuilder) {
@@ -95,7 +155,6 @@ pub fn init_log(train_cfg_builder: &mut FinalTrainConfigBuilder) -> PathBuf {
 
     full_experiment_log_path
 }
-
 
 pub trait BackendDeviceInit: Backend {
     fn init_devices(train_cfg_builder: &FinalTrainConfigBuilder) -> Vec<Self::Device>;
@@ -158,9 +217,10 @@ where
                     3
                 } else {
                     panic!(
-                        "Requested {requested} WGPU devices, but only found discrete={available_discrete}, \
-integrated={available_integrated}, virtual={available_virtual}, cpu={available_cpu}. \
-Reduce num_devices_per_node or change backend."
+                        "Requested {requested} WGPU devices, but only found \
+                         discrete={available_discrete}, integrated={available_integrated}, \
+                         virtual={available_virtual}, cpu={available_cpu}. Reduce \
+                         num_devices_per_node or change backend."
                     );
                 };
 

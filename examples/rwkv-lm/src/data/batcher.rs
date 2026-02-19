@@ -1,10 +1,10 @@
-use std::marker::PhantomData;
-use std::sync::Arc;
+use rwkv::custom::Tensor;
 use rwkv::custom::data::dataloader::batcher::Batcher;
 use rwkv::custom::prelude::{Backend, Int, TensorData};
-use rwkv::custom::Tensor;
 use rwkv::data::mmap::dtype::TokenUnit;
 use rwkv::train::data::sliding::{MmapBinReader, SlidingSample};
+use std::marker::PhantomData;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AutoRegressiveBatcher<B: Backend, T: TokenUnit> {
@@ -42,15 +42,16 @@ pub struct AutoRegressiveBatch<B: Backend> {
     pub targets: Tensor<B, 2, Int>,
 }
 
-
 impl<B: Backend, T: TokenUnit> Batcher<B, SlidingSample, AutoRegressiveBatch<B>>
-for AutoRegressiveBatcher<B, T>
+    for AutoRegressiveBatcher<B, T>
 {
     fn batch(&self, items: Vec<SlidingSample>, device: &B::Device) -> AutoRegressiveBatch<B> {
         let batch_size = items.len();
         let seq_len = self.context_length + 1;
         let mut flat = Vec::with_capacity(
-            batch_size.saturating_mul(seq_len).saturating_mul(self.num_units_per_token),
+            batch_size
+                .saturating_mul(seq_len)
+                .saturating_mul(self.num_units_per_token),
         );
         for sample in items {
             let token_units = self.bin.get(
@@ -67,12 +68,8 @@ for AutoRegressiveBatcher<B, T>
             .clone()
             .slice([0..self.batch_size_per_device, 0..self.context_length]);
 
-        let targets = tensor
-            .slice([0..self.batch_size_per_device, 1..self.context_length + 1]);
+        let targets = tensor.slice([0..self.batch_size_per_device, 1..self.context_length + 1]);
 
-        AutoRegressiveBatch {
-            inputs,
-            targets,
-        }
+        AutoRegressiveBatch { inputs, targets }
     }
 }

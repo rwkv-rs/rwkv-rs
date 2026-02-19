@@ -1,29 +1,28 @@
 use burn::backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement};
 use burn::tensor::{
-    ops::{FloatTensor, IntTensor},
     DType, Shape,
+    ops::{FloatTensor, IntTensor},
 };
 use burn_cubecl::{
+    CubeRuntime,
     cubecl::prelude::ScalarArg,
     cubecl::{CubeCount, CubeDim},
     kernel::{cast, into_contiguous},
     ops::numeric::empty_device,
-    CubeRuntime,
 };
 
 use crate::kernels::rapid_sample::{
-    kernel::{
-        rapid_sample_repetition_temperature_topk_topp_kernel,
-        rapid_sample_temperature_topk_topp_kernel, RapidSampleConfig,
-        RapidSampleRepetitionInputsLaunch, RapidSampleRepetitionOutputsLaunch,
-        RapidSampleTemperatureInputsLaunch, RapidSampleTemperatureOutputsLaunch,
-    },
     RapidSampleOutput, RapidSamplePenaltyConfig,
+    kernel::{
+        RapidSampleConfig, RapidSampleRepetitionInputsLaunch, RapidSampleRepetitionOutputsLaunch,
+        RapidSampleTemperatureInputsLaunch, RapidSampleTemperatureOutputsLaunch,
+        rapid_sample_repetition_temperature_topk_topp_kernel,
+        rapid_sample_temperature_topk_topp_kernel,
+    },
 };
 
 const MIN_TEMP: f32 = 0.001;
 const MAX_TEMP: f32 = 1000f32;
-
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rapid_sample_topk_topp_impl<
@@ -135,7 +134,13 @@ pub(crate) fn rapid_sample_topk_topp_impl<
         }
         Some((penalties, penalty_cfg)) => {
             let penalties = into_contiguous(penalties);
-            let penalties = cast::<R>(penalties, DType::F32);
+            // Match the reference rapid-sampling contract: penalties are updated in-place as float32.
+            assert_eq!(
+                penalties.dtype,
+                DType::F32,
+                "rapid_sample: penalties must be F32, got {:?}",
+                penalties.dtype
+            );
 
             assert_eq!(
                 penalties.shape, shape,
@@ -173,7 +178,6 @@ pub(crate) fn rapid_sample_topk_topp_impl<
     }
 }
 
-
 fn normalize_topk_topp(vocab_size: usize, mut top_k: i32, mut top_p: f32) -> (u32, f32) {
     if top_k <= 0 || top_k as usize > vocab_size {
         top_k = vocab_size as i32;
@@ -194,11 +198,7 @@ fn normalize_topk_topp(vocab_size: usize, mut top_k: i32, mut top_p: f32) -> (u3
 
 fn desired_block_size(vocab_size: usize) -> usize {
     // The rapid-sampling 2-phase mapping supports vocab sizes up to `block_size^2`.
-    if vocab_size <= 256 * 256 {
-        256
-    } else {
-        1024
-    }
+    if vocab_size <= 256 * 256 { 256 } else { 1024 }
 }
 
 fn select_block_size(vocab_size: usize, max_units_per_cube: usize) -> usize {
@@ -213,6 +213,7 @@ fn select_block_size(vocab_size: usize, max_units_per_cube: usize) -> usize {
     }
 
     panic!(
-        "rapid_sample: required block_size={desired} exceeds device max_units_per_cube={max_units_per_cube} (vocab_size={vocab_size})"
+        "rapid_sample: required block_size={desired} exceeds device \
+         max_units_per_cube={max_units_per_cube} (vocab_size={vocab_size})"
     );
 }

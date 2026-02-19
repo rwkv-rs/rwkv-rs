@@ -32,18 +32,20 @@
 //! ```
 
 // 导入过程宏相关的基础库
-use proc_macro::TokenStream; // 过程宏的核心类型，用于接收和返回TokenStream
-use quote::quote; // 用于生成Rust代码的引用宏库
+use proc_macro::TokenStream;
+// 过程宏的核心类型，用于接收和返回TokenStream
+use quote::quote;
+// 用于生成Rust代码的引用宏库
 use syn::{
+    Attribute,       // 表示数据结构（Struct、Enum、Union）
+    Data,            // 表示派生宏的输入，即整个结构体/枚举定义
+    DeriveInput,     // 表示结构体字段集合
+    Fields,          // 表示泛型参数，如 `Vec<T>` 中的 `T`
+    GenericArgument, // 表示路径参数，如 `Vec<String>` 中的 `String`
+    PathArguments,   // 表示类型，如 `String`、`u32`、`Option<T>` 等
+    Type,            // 宏，用于解析输入TokenStream为指定的类型
     // syn库用于解析Rust语法树，提供以下类型：
-    Attribute,         // 表示属性，如 `#[derive(Debug)]` 或 `#[line_ref]`
-    Data,              // 表示数据结构（Struct、Enum、Union）
-    DeriveInput,       // 表示派生宏的输入，即整个结构体/枚举定义
-    Fields,            // 表示结构体字段集合
-    GenericArgument,   // 表示泛型参数，如 `Vec<T>` 中的 `T`
-    PathArguments,     // 表示路径参数，如 `Vec<String>` 中的 `String`
-    Type,              // 表示类型，如 `String`、`u32`、`Option<T>` 等
-    parse_macro_input, // 宏，用于解析输入TokenStream为指定的类型
+    parse_macro_input, // 表示属性，如 `#[derive(Debug)]` 或 `#[line_ref]`
 };
 
 /// ## LineRef 派生宏
@@ -240,7 +242,10 @@ pub fn derive_line_ref(input: TokenStream) -> TokenStream {
             /// - `data`: 序列化的数据结构
             /// - `bin`: 二进制数据源，用于读取字符串和 u128 数据
             /// - 返回：反序列化后的原始结构体实例
-            fn from_serialized(data: &Self::Serialized, bin: &rwkv_data::mmap::bin::BinReader<u8>) -> Self {
+            fn from_serialized(
+                data: &Self::Serialized,
+                bin: &rwkv_data::mmap::bin::BinReader<u8>
+            ) -> Self {
                 Self {
                     #(#from_serialized_assignments,)*  // 为所有字段赋值，包括从二进制数据读取的 line_ref 字段
                 }
@@ -282,16 +287,15 @@ fn extract_line_ref_type(ty: &Type) -> LineRefType {
                 "String" => LineRefType::String, // 字符串类型
                 "u128" => LineRefType::U128,     // 128位无符号整数类型
                 _ => panic!(
-                    "Unsupported line_ref type. Only String and u128 are supported. \
-                     Got: {}",
+                    "Unsupported line_ref type. Only String and u128 are supported. Got: {}",
                     last_segment.ident
                 ),
             }
         }
         // 对于其他类型形式，暂时不支持
         _ => panic!(
-            "Unsupported line_ref type. Only String and u128 are supported. \
-             Expected a simple path type."
+            "Unsupported line_ref type. Only String and u128 are supported. Expected a simple \
+             path type."
         ),
     }
 }
@@ -469,27 +473,38 @@ pub fn derive_config_builder(input: TokenStream) -> TokenStream {
 
     // 第八步：生成 load_from_raw 方法的字段映射代码
     // 支持字段级别的 skip_raw 属性，用于跳过从原始配置加载某些字段
-    let load_from_raw_calls: Vec<_> = fields.named.iter().map(|field| {
-        let field_name = &field.ident;
-        // 生成对应的 set 方法名称，如 "set_host"、"set_port"
-        let method_name = quote::format_ident!("set_{}", field_name.as_ref().unwrap());
+    let load_from_raw_calls: Vec<_> = fields
+        .named
+        .iter()
+        .map(|field| {
+            let field_name = &field.ident;
+            // 生成对应的 set 方法名称，如 "set_host"、"set_port"
+            let method_name = quote::format_ident!("set_{}", field_name.as_ref().unwrap());
 
-        // 检查字段是否有 skip_raw 属性
-        let has_skip_raw = field.attrs.iter().any(|attr| attr.path().is_ident("skip_raw"));
+            // 检查字段是否有 skip_raw 属性
+            let has_skip_raw = field
+                .attrs
+                .iter()
+                .any(|attr| attr.path().is_ident("skip_raw"));
 
-        if has_skip_raw {
-            // 如果有 skip_raw 属性，该字段不从原始配置加载，显式设置为 None
-            quote! {
-                .#method_name(None)  // 跳过此字段，不从 raw 中加载
+            if has_skip_raw {
+                // 如果有 skip_raw 属性，该字段不从原始配置加载，显式设置为 None
+                quote! {
+                    .#method_name(None)  // 跳过此字段，不从 raw 中加载
+                }
+            } else {
+                // 如果没有 skip_raw 属性，从原始配置中加载值
+                // 使用 IntoBuilderOption trait 进行类型转换
+                quote! {
+                    .#method_name(
+                        crate::config_builder_helpers::IntoBuilderOption::into_builder_option(
+                            raw.#field_name
+                        )
+                    )
+                }
             }
-        } else {
-            // 如果没有 skip_raw 属性，从原始配置中加载值
-            // 使用 IntoBuilderOption trait 进行类型转换
-            quote! {
-                .#method_name(crate::config_builder_helpers::IntoBuilderOption::into_builder_option(raw.#field_name))
-            }
-        }
-    }).collect();
+        })
+        .collect();
 
     // 第九步：生成最终的代码
     // 使用 quote! 宏生成完整的建造者结构体和实现代码
@@ -525,6 +540,23 @@ pub fn derive_config_builder(input: TokenStream) -> TokenStream {
                 builder
                     #(#load_from_raw_calls)*;  // 链式调用所有 set 方法加载值
                 builder
+            }
+
+            /// 构建最终的配置对象并返回（不写入全局单例）
+            /// - 执行字段验证：必填字段（非 Option<T>）必须已设置
+            /// - 创建配置结构体实例并包装为 Arc（原子引用计数）
+            ///
+            /// 适用于一个进程内需要加载多个配置实例的场景（例如多模型推理）。
+            ///
+            /// ## 错误处理
+            /// - 如果必填字段未设置，会触发 panic 并显示缺失字段名称
+            pub fn build_local(self) -> std::sync::Arc<#name> {
+                // 构建配置结构体，验证必填字段
+                let config = #name {
+                    #(#build_fields,)*  // 为所有字段赋值，包含验证逻辑
+                };
+
+                std::sync::Arc::new(config)
             }
 
             /// 构建最终的配置对象并存储为全局单例

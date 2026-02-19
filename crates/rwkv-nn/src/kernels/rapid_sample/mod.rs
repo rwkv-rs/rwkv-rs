@@ -22,8 +22,8 @@ mod kernel;
 use burn::{
     prelude::Backend,
     tensor::{
-        ops::{FloatTensor, IntTensor},
         Int, Tensor, TensorPrimitive,
+        ops::{FloatTensor, IntTensor},
     },
 };
 
@@ -56,7 +56,7 @@ pub trait RapidSampleBackend: Backend {
     /// # Shapes
     /// - `logits`: `[batch_size, vocab_size]`
     /// - `states`: `[batch_size]`
-    /// - `penalties.0`: `[batch_size, vocab_size]` when provided
+    /// - `penalties.0`: `[batch_size, vocab_size]` when provided, dtype must be `F32`
     fn rapid_sample(
         logits: FloatTensor<Self>,
         states: IntTensor<Self>,

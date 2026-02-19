@@ -13,6 +13,7 @@ workspace = true
 [features]
 default = [
     "training",
+    "inferring",
     "cuda",
     "ddp",
     "pth2mpk",
@@ -36,13 +37,25 @@ cuda = ["rwkv/cuda"]
 rocm = ["rwkv/rocm"]
 metal = ["rwkv/metal"]
 ddp = ["rwkv/collective"]
-training = ["rwkv/train", "rwkv/cubecl", "metrics", "std"]
 pth2mpk = ["rwkv/store", "rwkv/cubecl", "nn", "std"]
+training = ["rwkv/train", "rwkv/cubecl", "metrics", "std"]
+inferring = [
+    "dep:tokio",
+    "dep:axum",
+    "dep:clia-tracing-config",
+    "rwkv/infer",
+    "cubecl",
+    "nn",
+    "std"
+]
 
 [dependencies]
-log = "0.4.29"
-sonic-rs = { version = "0.5.6" }
+log = { workspace = true }
+sonic-rs = { workspace = true }
 rwkv = { path = "../../crates/rwkv", default-features = false }
+tokio = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+clia-tracing-config = { workspace = true, optional = true }
 
 # Utils
 derive-new = { workspace = true }

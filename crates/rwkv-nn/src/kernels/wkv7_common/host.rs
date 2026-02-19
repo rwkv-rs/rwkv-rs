@@ -4,12 +4,12 @@ use burn::{
     backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement},
     tensor::{DType, Shape, ops::FloatTensor},
 };
+use burn_cubecl::cubecl::{CubeCount, CubeDim, tensor_line_size_parallel};
 use burn_cubecl::{
     CubeElement, CubeRuntime,
     kernel::{cast, into_contiguous},
     ops::numeric::{empty_device, zeros_client},
 };
-use burn_cubecl::cubecl::{CubeCount, CubeDim, tensor_line_size_parallel};
 
 use crate::kernels::wkv7_common::{
     Wkv7StateBackwardOutput, Wkv7StatePassForwardOutput,
@@ -99,7 +99,10 @@ fn wkv7_forward_impl_inner<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: 
     let num_heads = shape.dims[2];
     let dim = shape.dims[3];
 
-    assert!(seq_len % chunk_len == 0, "chunk_len must divide sequence length");
+    assert!(
+        seq_len % chunk_len == 0,
+        "chunk_len must divide sequence length"
+    );
 
     let output = empty_device::<R, FE>(client.clone(), device.clone(), shape.clone());
     let removal_state = empty_device::<R, FE>(client.clone(), device.clone(), shape.clone());
@@ -161,7 +164,8 @@ fn wkv7_forward_impl_inner<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: 
             final_state.as_tensor_arg(1),
         ),
         config,
-    ).unwrap();
+    )
+    .unwrap();
 
     Wkv7StatePassForwardOutput {
         state,
@@ -269,7 +273,10 @@ fn wkv7_backward_impl_inner<R: CubeRuntime, FE: FloatElement, I: IntElement, BT:
     let num_heads = shape.dims[2];
     let dim = shape.dims[3];
 
-    assert!(seq_len % chunk_len == 0, "chunk_len must divide sequence length");
+    assert!(
+        seq_len % chunk_len == 0,
+        "chunk_len must divide sequence length"
+    );
 
     let weight_decay_grad = empty_device::<R, FE>(client.clone(), device.clone(), shape.clone());
     let receptance_grad = empty_device::<R, FE>(client.clone(), device.clone(), shape.clone());

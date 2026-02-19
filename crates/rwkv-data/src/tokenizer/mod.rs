@@ -188,6 +188,16 @@ impl Tokenizer {
         String::from_utf8_lossy(&result).into_owned()
     }
 
+    /// 获取 token 对应的原始字节序列。
+    pub fn token_bytes(&self, token_id: u16) -> &[u8] {
+        let token_index = token_id as usize;
+        if token_index < self.tokens.len() {
+            &self.tokens[token_index]
+        } else {
+            &[]
+        }
+    }
+
     /// 获取词汇表大小
     ///
     /// # 返回

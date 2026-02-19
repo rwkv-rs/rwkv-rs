@@ -4,6 +4,8 @@ use crate::{DatasetFormatOptions, OptimizerOptions, fill_default};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawTrainConfig {
+    #[serde(alias = "model_cfg_path")]
+    pub model_cfg: String,
     pub experiment_log_base_path: Option<String>,
     pub experiment_name: String,
     pub record_path: Option<String>,

@@ -1,9 +1,19 @@
 #![recursion_limit = "256"]
 
+#[cfg(not(feature = "training"))]
+fn main() {
+    panic!(
+        "This example requires feature `training`.\nRun: cargo run -p rwkv-lm --example \
+         rwkv-lm-train --no-default-features --features training,cuda"
+    );
+}
+
 use rwkv::custom::tensor::backend::AutodiffBackend;
 use rwkv::nn::kernels::l2wrap::L2WrapBackend;
 use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
 use rwkv::train::learner::init::{BackendDeviceInit, init_cfg, init_devices, init_log};
+use std::path::PathBuf;
+use rwkv::config::{default_cfg_dir, get_arg_value};
 
 #[cfg(not(any(feature = "f32", feature = "flex32", feature = "f16")))]
 #[allow(unused)]
@@ -19,27 +29,25 @@ pub fn launch<B: AutodiffBackend + BackendDeviceInit + Wkv7Backend + L2WrapBacke
 where
     <B as AutodiffBackend>::InnerBackend: BackendDeviceInit + Wkv7Backend + L2WrapBackend,
 {
-    let (model_cfg_builder, mut train_cfg_builder) = init_cfg(
-        "examples/rwkv-lm/config/model.toml",
-        "examples/rwkv-lm/config/train.toml",
-    );
+    let args: Vec<String> = std::env::args().collect();
+    let config_dir = get_arg_value(&args, "--config-dir")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_cfg_dir);
+    let train_cfg = get_arg_value(&args, "--train-cfg").unwrap_or_else(|| "rwkv-lm-0.1b".into());
+
+    let (model_cfg_builder, mut train_cfg_builder) = init_cfg(config_dir, &train_cfg);
 
     let exp_log_path = init_log(&mut train_cfg_builder);
 
     let devices = init_devices::<B>(&train_cfg_builder);
 
-    rwkv_lm::training::train::<B>(
-        devices,
-        model_cfg_builder,
-        train_cfg_builder,
-        &exp_log_path,
-    );
+    rwkv_lm::training::train::<B>(devices, model_cfg_builder, train_cfg_builder, &exp_log_path);
 }
 
 #[cfg(feature = "wgpu")]
 mod wgpu {
+    use crate::{ElemType, launch};
     use rwkv::custom::backend::{Autodiff, Wgpu};
-    use crate::{launch, ElemType};
 
     pub fn run() {
         launch::<Autodiff<Wgpu<ElemType, i32>>>();
@@ -48,17 +56,19 @@ mod wgpu {
 
 #[cfg(feature = "vulkan")]
 mod vulkan {
-    use rwkv::custom::backend::{Autodiff, Vulkan};
+    use crate::{ElemType, launch};
     use rwkv::custom::backend::autodiff::checkpoint::strategy::BalancedCheckpointing;
-    use crate::{launch, ElemType};
+    use rwkv::custom::backend::{Autodiff, Vulkan};
 
-    pub fn run() { launch::<Autodiff<Vulkan<ElemType, i32>, BalancedCheckpointing>>(); }
+    pub fn run() {
+        launch::<Autodiff<Vulkan<ElemType, i32>, BalancedCheckpointing>>();
+    }
 }
 
 #[cfg(feature = "metal")]
 mod metal {
+    use crate::{ElemType, launch};
     use rwkv::custom::backend::{Autodiff, Metal};
-    use crate::{launch, ElemType};
 
     pub fn run() {
         launch::<Autodiff<Metal<ElemType, i32>>>();
@@ -67,9 +77,9 @@ mod metal {
 
 #[cfg(feature = "cuda")]
 mod cuda {
-    use rwkv::custom::backend::{Autodiff, Cuda};
+    use crate::{ElemType, launch};
     use rwkv::custom::backend::autodiff::checkpoint::strategy::BalancedCheckpointing;
-    use crate::{launch, ElemType};
+    use rwkv::custom::backend::{Autodiff, Cuda};
 
     pub fn run() {
         launch::<Autodiff<Cuda<ElemType, i32>, BalancedCheckpointing>>();
@@ -78,11 +88,13 @@ mod cuda {
 
 #[cfg(feature = "rocm")]
 mod rocm {
-    use rwkv::custom::backend::{Autodiff, Rocm};
+    use crate::{ElemType, launch};
     use rwkv::custom::backend::autodiff::checkpoint::strategy::BalancedCheckpointing;
-    use crate::{launch, ElemType};
+    use rwkv::custom::backend::{Autodiff, Rocm};
 
-    pub fn run() {launch::<Autodiff<Rocm<ElemType, i32>, BalancedCheckpointing>>(); }
+    pub fn run() {
+        launch::<Autodiff<Rocm<ElemType, i32>, BalancedCheckpointing>>();
+    }
 }
 
 fn main() {

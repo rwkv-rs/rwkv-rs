@@ -189,7 +189,7 @@ fn block_reduce_max_f32(
         let mut warp_val = if lane < num_warps {
             warp_results[lane]
         } else {
-            f32::new(f32::NEG_INFINITY)
+            f32::new(-f32::MAX)
         };
         warp_val = warp_reduce_max_f32(warp_val);
         if lane == 0 {
@@ -219,7 +219,7 @@ fn block_reduce_min_f32(
         let mut warp_val = if lane < num_warps {
             warp_results[lane]
         } else {
-            f32::new(f32::INFINITY)
+            f32::new(f32::MAX)
         };
         warp_val = warp_reduce_min_f32(warp_val);
         if lane == 0 {
@@ -778,7 +778,7 @@ pub fn rapid_sample_temperature_topk_topp_kernel(
     let shared_warp_u32 = SharedMemory::<u32>::new(num_warps);
 
     // === 1) logits -> scaled logits (stored in probs) ===
-    let mut local_scaled_logit_max = f32::new(f32::NEG_INFINITY);
+    let mut local_scaled_logit_max = f32::new(-f32::MAX);
     let mut vec_index = unit_index;
     while vec_index < vocab_size_vec {
         let mut logit_vec = inputs.logits[batch_base_vec + vec_index];
@@ -809,8 +809,8 @@ pub fn rapid_sample_temperature_topk_topp_kernel(
     let exp_sum_denom = block_reduce_sum_f32(local_exp_sum, shared_warp_f32, num_warps);
 
     // === 3) normalize probabilities in-place (also track min/max for threshold search) ===
-    let mut local_prob_max = f32::new(f32::NEG_INFINITY);
-    let mut local_prob_min = f32::new(f32::INFINITY);
+    let mut local_prob_max = f32::new(-f32::MAX);
+    let mut local_prob_min = f32::new(f32::MAX);
     vec_index = unit_index;
     while vec_index < vocab_size_vec {
         let mut prob_vec = outputs.probs[batch_base_vec + vec_index];
@@ -915,7 +915,7 @@ pub fn rapid_sample_repetition_temperature_topk_topp_kernel(
     let shared_warp_u32 = SharedMemory::<u32>::new(num_warps);
 
     // === 1) logits (+ penalties) -> scaled logits (stored in probs) ===
-    let mut local_scaled_logit_max = f32::new(f32::NEG_INFINITY);
+    let mut local_scaled_logit_max = f32::new(-f32::MAX);
     let mut vec_index = unit_index;
     while vec_index < vocab_size_vec {
         let mut logit_vec = inputs.logits[batch_base_vec + vec_index];
@@ -950,8 +950,8 @@ pub fn rapid_sample_repetition_temperature_topk_topp_kernel(
     let exp_sum_denom = block_reduce_sum_f32(local_exp_sum, shared_warp_f32, num_warps);
 
     // === 3) normalize probabilities in-place (also track min/max for threshold search) ===
-    let mut local_prob_max = f32::new(f32::NEG_INFINITY);
-    let mut local_prob_min = f32::new(f32::INFINITY);
+    let mut local_prob_max = f32::new(-f32::MAX);
+    let mut local_prob_min = f32::new(f32::MAX);
     vec_index = unit_index;
     while vec_index < vocab_size_vec {
         let mut prob_vec = outputs.probs[batch_base_vec + vec_index];
