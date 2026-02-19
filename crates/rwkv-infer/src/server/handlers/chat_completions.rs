@@ -139,7 +139,7 @@ pub async fn chat_completions(
                         finish_reason: None,
                     }],
                 };
-                let json = serde_json::to_string(&chunk).unwrap_or_default();
+                let json = sonic_rs::to_string(&chunk).unwrap_or_default();
                 Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default().data(json))
             }
             crate::types::EngineEvent::Done => Ok::<_, std::convert::Infallible>(
@@ -148,7 +148,7 @@ pub async fn chat_completions(
             crate::types::EngineEvent::Error(msg) => Ok::<_, std::convert::Infallible>(
                 axum::response::sse::Event::default().data(format!(
                     "{{\"error\":{}}}",
-                    serde_json::to_string(&msg).unwrap_or_default()
+                    sonic_rs::to_string(&msg).unwrap_or_default()
                 )),
             ),
         });

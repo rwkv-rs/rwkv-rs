@@ -241,7 +241,7 @@ pub async fn responses_delete(
     if removed {
         (
             StatusCode::OK,
-            Json(serde_json::json!({ "id": response_id, "deleted": true })),
+            Json(sonic_rs::json!({ "id": response_id, "deleted": true })),
         )
             .into_response()
     } else {

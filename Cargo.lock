@@ -5842,7 +5842,7 @@ dependencies = [
  "rwkv-config",
  "rwkv-data",
  "serde",
- "serde_json",
+ "sonic-rs",
  "tokio",
  "tokio-stream",
  "toml",
