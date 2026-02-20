@@ -8,11 +8,6 @@ fn main() {
     );
 }
 
-use std::collections::HashMap;
-use std::marker::PhantomData;
-use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::net::TcpListener;
 use axum::serve;
 use rwkv::config::raw::infer::GenerationConfig;
 use rwkv::config::validated::model::FinalModelConfig;
@@ -24,11 +19,18 @@ use rwkv::custom::record::{FullPrecisionSettings, NamedMpkFileRecorder};
 use rwkv::infer::auth::AuthConfig;
 use rwkv::infer::engine::{EngineRuntime, EngineRuntimeConfig};
 use rwkv::infer::init::init_log;
+#[cfg(feature = "ipc-iceoryx2")]
+use rwkv::infer::ipc::IpcServer;
 use rwkv::infer::server::{AppState, RouterBuilder};
 use rwkv::infer::service::builder::build_model_group_engines;
 use rwkv::infer::service::{ModelEngineFactory, ModelRuntimeGroup, RuntimeManager};
 use rwkv::nn::kernels::rapid_sample::RapidSampleBackend;
 use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
+use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::net::TcpListener;
 
 use rwkv_lm::inferring::RwkvLmExecutor;
 use rwkv_lm::model::AutoRegressiveModelConfig;
@@ -196,6 +198,26 @@ where
         },
         runtime_manager: runtime_manager.clone(),
     };
+
+    #[cfg(feature = "ipc-iceoryx2")]
+    let _ipc_server_thread = if runtime_manager.ipc_enabled() {
+        let server =
+            IpcServer::from_runtime_manager(runtime_manager.clone(), app.auth_cfg.clone())?;
+        log::info!(
+            "starting iceoryx2 ipc service: {}",
+            runtime_manager.ipc_service_name()
+        );
+        Some(server.spawn()?)
+    } else {
+        None
+    };
+
+    #[cfg(not(feature = "ipc-iceoryx2"))]
+    if runtime_manager.ipc_enabled() {
+        return Err(rwkv::infer::Error::bad_request(
+            "ipc is enabled in infer config but feature `ipc-iceoryx2` is not enabled",
+        ));
+    }
 
     let router = RouterBuilder::new(app).build().await?;
 

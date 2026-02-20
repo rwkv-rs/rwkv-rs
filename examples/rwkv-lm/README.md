@@ -159,3 +159,64 @@ curl http://127.0.0.1:8080/v1/chat/completions \
   "dry_run": false
 }
 ```
+
+## Benchmark & Profiling Workflow
+
+Use layered benchmarking:
+
+1. `rwkv-nn` kernel microbench (Divan)
+2. runtime stage profiling (Tracy)
+3. system GPU timeline (nsys)
+4. serving pressure benchmark + report
+
+### 1) Kernel microbench (`crates/rwkv-nn/benches`)
+
+Run one kernel target (backend selected by features):
+
+```bash
+cargo bench --bench wkv7_pretrain_forward --features cuda
+cargo bench --bench wkv7_statepass_backward --features cuda
+cargo bench --bench rapid_sample_forward --features cuda
+```
+
+Available targets:
+- `wkv7_pretrain_forward`
+- `wkv7_pretrain_backward`
+- `wkv7_statepass_forward`
+- `wkv7_statepass_backward`
+- `wkv7_statetune_forward`
+- `wkv7_statetune_backward`
+- `wkv7_infer_forward`
+- `rapid_sample_forward`
+
+### 2/3/4) Scenario benches (`examples/rwkv-lm/benches/`)
+
+```bash
+# Serving pressure benchmark
+cargo bench --bench serve_bench -- \
+  --model rwkv-lm-7.2b --base-url http://127.0.0.1:8080
+
+# Sweep benchmark matrix
+cargo bench --bench sweep_bench -- \
+  --model rwkv-lm-7.2b --base-url http://127.0.0.1:8080
+
+# nsys profiling wrapper
+cargo bench --bench profile_nsys_bench -- \
+  --output-prefix logs/bench/nsys/rwkv -- \
+  cargo run --example rwkv-lm-infer --features cuda
+
+# tracy passthrough
+cargo bench --bench profile_tracy_bench -- \
+  cargo run --example rwkv-lm-infer --features cuda
+
+# Generate report from benchmark JSON
+cargo bench --bench report_bench -- \zh
+  --input-json logs/bench/serve.json --output-dir logs/bench/report
+
+# Record arbitrary train benchmark command
+cargo bench --bench train_command_bench -- \
+  --output-json logs/bench/train_run.json -- \
+  cargo run --example rwkv-lm-train --features cuda
+```
+
+Serving/sweep benches write JSON results and static Markdown/SVG reports.

@@ -5,17 +5,22 @@ edition = "2024"
 description = "Core RWKV language model layers, custom WKV kernels, and Burn module implementations"
 license = "Apache-2.0"
 
+[lib]
+bench = false
+
 [features]
-default = ["fusion"]
+default = ["fusion", "wgpu"]
 fusion = []
-hotpath = ["dep:hotpath", "hotpath/hotpath"]
-hotpath-alloc-bytes-total = ["dep:hotpath", "hotpath/hotpath-alloc"]
-hotpath-alloc-count-total = ["dep:hotpath", "hotpath/hotpath-alloc"]
-hotpath-off = ["dep:hotpath", "hotpath/hotpath-off"]
+wgpu = ["burn/wgpu"]
+webgpu = ["wgpu", "burn/webgpu"]
+vulkan = ["wgpu", "burn/vulkan"]
+metal = ["wgpu", "burn/metal"]
+cuda = ["burn/cuda"]
+rocm = ["burn/rocm"]
 
 [dependencies]
 # === Deep Learning Core ===
-burn = { workspace = true, default-features = false, features = ["std", "autodiff", "cubecl", "wgpu"] }
+burn = { workspace = true, default-features = false, features = ["std", "autodiff", "cubecl"] }
 burn-fusion = { workspace = true, default-features = false, features = ["std"] }
 burn-cubecl = { workspace = true, default-features = false, features = ["std"] }
 burn-ir = { workspace = true, default-features = false, features = ["std"] }
@@ -27,6 +32,48 @@ serde = { workspace = true }
 itertools = { workspace = true }
 
 # === Local Dependencies ===
-rwkv-config = {path = "../rwkv-config"}
+rwkv-config = { path = "../rwkv-config" }
 rwkv-data = { path = "../rwkv-data" }
-hotpath = { workspace = true, optional = true }
+
+[dev-dependencies]
+divan = { workspace = true }
+
+[[bench]]
+name = "wkv7_pretrain_forward"
+path = "benches/kernels/wkv7_pretrain/forward.rs"
+harness = false
+
+[[bench]]
+name = "wkv7_pretrain_backward"
+path = "benches/kernels/wkv7_pretrain/backward.rs"
+harness = false
+
+[[bench]]
+name = "wkv7_statepass_forward"
+path = "benches/kernels/wkv7_statepass/forward.rs"
+harness = false
+
+[[bench]]
+name = "wkv7_statepass_backward"
+path = "benches/kernels/wkv7_statepass/backward.rs"
+harness = false
+
+[[bench]]
+name = "wkv7_statetune_forward"
+path = "benches/kernels/wkv7_statetune/forward.rs"
+harness = false
+
+[[bench]]
+name = "wkv7_statetune_backward"
+path = "benches/kernels/wkv7_statetune/backward.rs"
+harness = false
+
+[[bench]]
+name = "wkv7_infer_forward"
+path = "benches/kernels/wkv7_infer/forward.rs"
+harness = false
+
+[[bench]]
+name = "rapid_sample_forward"
+path = "benches/kernels/rapid_sample/forward.rs"
+harness = false

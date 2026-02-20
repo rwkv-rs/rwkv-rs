@@ -11,6 +11,7 @@ pub struct RawInferConfig {
     pub allowed_origins: Option<Vec<String>>,
     #[serde(skip_serializing)]
     pub api_key: Option<String>,
+    pub ipc: Option<RawIpcConfig>,
 
     // Multi-model deployment
     pub models: Vec<GenerationConfig>,
@@ -25,9 +26,37 @@ impl RawInferConfig {
             sse_keep_alive_ms: 10_000u64,
         );
 
+        if let Some(ipc) = self.ipc.as_mut() {
+            ipc.fill_default();
+        }
+
         for model in self.models.iter_mut() {
             model.fill_default();
         }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct RawIpcConfig {
+    pub enabled: Option<bool>,
+    pub service_name: Option<String>,
+    pub max_request_bytes: Option<usize>,
+    pub max_response_bytes: Option<usize>,
+    pub max_inflight_requests: Option<usize>,
+    pub require_api_key: Option<bool>,
+}
+
+impl RawIpcConfig {
+    pub fn fill_default(&mut self) {
+        fill_default!(
+            self,
+            enabled: false,
+            service_name: "rwkv.infer.openai".to_string(),
+            max_request_bytes: 4 * 1024 * 1024usize,
+            max_response_bytes: 4 * 1024 * 1024usize,
+            max_inflight_requests: 128usize,
+            require_api_key: true,
+        );
     }
 }
 

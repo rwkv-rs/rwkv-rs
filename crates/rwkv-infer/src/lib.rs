@@ -5,10 +5,13 @@
 //! - OpenAI-compatible HTTP server scaffolding (axum);
 //! - in-memory "DB" utilities (response cache, background tasks).
 
+pub mod api;
 pub mod auth;
 pub mod engine;
 pub mod error;
 pub mod init;
+#[cfg(feature = "ipc-iceoryx2")]
+pub mod ipc;
 pub mod scheduler;
 pub mod sdk;
 pub mod server;

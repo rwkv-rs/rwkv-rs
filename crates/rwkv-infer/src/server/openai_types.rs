@@ -47,6 +47,28 @@ impl OpenAiErrorResponse {
             },
         }
     }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self {
+            error: OpenAiError {
+                message: message.into(),
+                ty: "internal_error".to_string(),
+                param: None,
+                code: None,
+            },
+        }
+    }
+
+    pub fn from_infer_error(error: &crate::Error) -> Self {
+        Self {
+            error: OpenAiError {
+                message: error.to_string(),
+                ty: error.openai_error_type().to_string(),
+                param: None,
+                code: None,
+            },
+        }
+    }
 }
 
 // === /v1/completions ===
@@ -171,4 +193,46 @@ pub struct ReloadModelsResponse {
     pub active_model_names: Vec<String>,
     pub dry_run: bool,
     pub message: String,
+}
+
+// === /v1/responses ===
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResponsesCreateRequest {
+    pub model: String,
+    pub input: String,
+    pub background: Option<bool>,
+    pub stream: Option<bool>,
+    pub max_output_tokens: Option<u32>,
+    pub top_k: Option<i32>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub presence_penalty: Option<f32>,
+    pub repetition_penalty: Option<f32>,
+    pub penalty_decay: Option<f32>,
+    pub stop: Option<StopField>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResponsesResource {
+    pub id: String,
+    pub object: String,
+    pub status: String,
+    pub output_text: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResponseIdRequest {
+    pub response_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DeleteResponse {
+    pub id: String,
+    pub deleted: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HealthResponse {
+    pub status: String,
 }

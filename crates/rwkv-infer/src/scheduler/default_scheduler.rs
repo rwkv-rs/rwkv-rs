@@ -2,6 +2,18 @@ use std::collections::VecDeque;
 
 use crate::types::{EntryId, InferEntry, InferEntryState};
 
+#[cfg(feature = "trace-lite")]
+macro_rules! trace_lite_scope {
+    ($name:literal) => {
+        rwkv_trace::tracy_scope!($name);
+    };
+}
+
+#[cfg(not(feature = "trace-lite"))]
+macro_rules! trace_lite_scope {
+    ($name:literal) => {};
+}
+
 #[derive(Debug)]
 pub struct SchedulerStep {
     pub decode_ids: Vec<EntryId>,
@@ -49,6 +61,7 @@ impl DefaultScheduler {
         &mut self,
         entries: &mut std::collections::HashMap<EntryId, InferEntry>,
     ) -> SchedulerStep {
+        trace_lite_scope!("rwkv_infer.scheduler.default.schedule");
         // Fill empty batch positions from waiting queue.
         for batch_index in 0..self.max_batch_size {
             if self.batch_slots[batch_index].is_some() {

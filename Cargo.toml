@@ -78,6 +78,7 @@ log = "0.4.29"
 chrono = { version = "0.4.43", features = ["clock"] }
 clia-tracing-config = "0.2.7"
 indicatif = { version = "0.18.3", features = ["tokio"] }
+thiserror = "2.0.17"
 wandb = { git = "https://github.com/rwkv-rs/wandb-rs", rev = "1633ca27afb4e09caca2e00d148ea239bc639a69" }
 
 # === Deep Learning Core ===
@@ -92,8 +93,6 @@ burn-ndarray = { version = "0.20.1", default-features = false }
 
 ndarray = { version = "0.17.2" }
 ndarray-npy = { version = "0.10.0" }
-
-hotpath = { version = "0.9.3" }
 
 
 [profile.release]

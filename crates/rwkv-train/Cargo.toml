@@ -38,26 +38,8 @@ metal = ["wgpu", "burn/metal"]
 cuda = ["cubecl", "burn/cuda"]
 rocm = ["cubecl", "burn/rocm"]
 cpu = ["burn/cpu"]
-
-hotpath = ["dep:hotpath", "rwkv-nn/hotpath", "rwkv-bench/hotpath", "hotpath/hotpath"]
-hotpath-alloc-bytes-total = [
-    "hotpath",
-    "rwkv-nn/hotpath-alloc-bytes-total",
-    "rwkv-bench/hotpath-alloc-bytes-total",
-    "hotpath/hotpath-alloc",
-]
-hotpath-alloc-count-total = [
-    "hotpath",
-    "rwkv-nn/hotpath-alloc-count-total",
-    "rwkv-bench/hotpath-alloc-count-total",
-    "hotpath/hotpath-alloc",
-]
-hotpath-off = [
-    "hotpath",
-    "rwkv-nn/hotpath-off",
-    "rwkv-bench/hotpath-off",
-    "hotpath/hotpath-off",
-]
+trace-lite = ["dep:rwkv-trace", "rwkv-trace/tracy"]
+trace-full = ["trace-lite"]
 
 [dependencies]
 # === Deep Learning Core ===
@@ -100,10 +82,10 @@ derive-new = { workspace = true }
 # === Monitoring ===
 wandb = { workspace = true }
 indicatif = { workspace = true }
-hotpath = { workspace = true, optional = true }
 
 # === Local Dependencies ===
 rwkv-nn = { path = "../rwkv-nn", default-features = false, optional = true }
 rwkv-data = { path = "../rwkv-data", optional = true }
 rwkv-config = { path = "../rwkv-config", optional = true }
 rwkv-bench = { path = "../rwkv-bench", optional = true }
+rwkv-trace = { path = "../rwkv-trace", optional = true }

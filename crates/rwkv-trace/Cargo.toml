@@ -5,4 +5,9 @@ edition = "2024"
 description = "Forthcoming tracing and telemetry utilities for RWKV model execution and training"
 license = "Apache-2.0"
 
+[features]
+default = []
+tracy = ["dep:tracy-client"]
+
 [dependencies]
+tracy-client = { version = "0.18.4", optional = true }

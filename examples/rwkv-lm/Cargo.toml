@@ -10,6 +10,39 @@ license.workspace = true
 [lints]
 workspace = true
 
+[lib]
+bench = false
+
+[[bench]]
+name = "serve_bench"
+path = "benches/serve_bench.rs"
+harness = false
+
+[[bench]]
+name = "sweep_bench"
+path = "benches/sweep_bench.rs"
+harness = false
+
+[[bench]]
+name = "report_bench"
+path = "benches/report_bench.rs"
+harness = false
+
+[[bench]]
+name = "profile_nsys_bench"
+path = "benches/profile_nsys_bench.rs"
+harness = false
+
+[[bench]]
+name = "profile_tracy_bench"
+path = "benches/profile_tracy_bench.rs"
+harness = false
+
+[[bench]]
+name = "train_command_bench"
+path = "benches/train_command_bench.rs"
+harness = false
+
 [features]
 default = [
     "training",
@@ -39,6 +72,9 @@ metal = ["rwkv/metal"]
 ddp = ["rwkv/collective"]
 pth2mpk = ["rwkv/store", "rwkv/cubecl", "nn", "std"]
 training = ["rwkv/train", "rwkv/cubecl", "metrics", "std"]
+trace-lite = ["rwkv/trace-lite"]
+trace-full = ["rwkv/trace-full"]
+ipc-iceoryx2 = ["rwkv/infer-ipc"]
 inferring = [
     "dep:tokio",
     "dep:axum",
@@ -53,9 +89,14 @@ inferring = [
 log = { workspace = true }
 sonic-rs = { workspace = true }
 rwkv = { path = "../../crates/rwkv", default-features = false }
+rwkv-bench = { path = "../../crates/rwkv-bench" }
 tokio = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }
 clia-tracing-config = { workspace = true, optional = true }
 
 # Utils
 derive-new = { workspace = true }
+
+[dev-dependencies]
+clap = { workspace = true }
+tokio = { workspace = true }

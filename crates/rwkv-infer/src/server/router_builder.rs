@@ -6,9 +6,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
+use crate::api::ApiService;
 use crate::auth::AuthConfig;
 use crate::server::handlers;
-use crate::server::openai_types::{ModelListResponse, ModelObject};
+use crate::server::openai_types::ModelListResponse;
 use crate::service::RuntimeManager;
 
 #[derive(Clone)]
@@ -33,9 +34,7 @@ impl RouterBuilder {
             match parsed {
                 Ok(origins) => AllowOrigin::list(origins),
                 Err(_) => {
-                    return Err(crate::Error::BadRequest(
-                        "invalid allowed origin format".to_string(),
-                    ));
+                    return Err(crate::Error::bad_request("invalid allowed origin format"));
                 }
             }
         } else {
@@ -83,18 +82,6 @@ async fn health() -> (StatusCode, &'static str) {
 }
 
 async fn models(State(app_state): State<AppState>) -> Json<ModelListResponse> {
-    let data = app_state
-        .runtime_manager
-        .model_names()
-        .into_iter()
-        .map(|model_name| ModelObject {
-            id: model_name,
-            object: "model".to_string(),
-            owned_by: "rwkv-rs".to_string(),
-        })
-        .collect();
-    Json(ModelListResponse {
-        object: "list".to_string(),
-        data,
-    })
+    let api = ApiService::new(app_state.runtime_manager.clone());
+    Json(api.models())
 }

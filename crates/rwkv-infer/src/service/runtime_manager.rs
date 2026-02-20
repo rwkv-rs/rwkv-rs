@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use rwkv_config::raw::infer::{GenerationConfig, RawInferConfig};
+use rwkv_config::raw::infer::{GenerationConfig, RawInferConfig, RawIpcConfig};
 use rwkv_config::raw::model::RawModelConfig;
 use rwkv_config::validated::model::{FinalModelConfig, FinalModelConfigBuilder};
 use serde::Deserialize;
@@ -39,56 +39,54 @@ fn resolve_model_cfg_path(config_dir: &Path, infer_cfg_dir: &Path, model_cfg: &s
 
 fn validate_generation_models(models: &[GenerationConfig]) -> crate::Result<()> {
     if models.is_empty() {
-        return Err(crate::Error::BadRequest(
-            "infer config requires at least one model".to_string(),
+        return Err(crate::Error::bad_request(
+            "infer config requires at least one model",
         ));
     }
 
     let mut names = HashSet::new();
     for model in models {
         if model.model_name.trim().is_empty() {
-            return Err(crate::Error::BadRequest(
-                "model_name cannot be empty".to_string(),
-            ));
+            return Err(crate::Error::bad_request("model_name cannot be empty"));
         }
         if !names.insert(model.model_name.clone()) {
-            return Err(crate::Error::BadRequest(format!(
+            return Err(crate::Error::bad_request(format!(
                 "duplicated model_name: {}",
                 model.model_name
             )));
         }
         if model.model_cfg.trim().is_empty() {
-            return Err(crate::Error::BadRequest(format!(
+            return Err(crate::Error::bad_request(format!(
                 "model_cfg cannot be empty for model {}",
                 model.model_name
             )));
         }
         if model.weights_path.trim().is_empty() {
-            return Err(crate::Error::BadRequest(format!(
+            return Err(crate::Error::bad_request(format!(
                 "weights_path cannot be empty for model {}",
                 model.model_name
             )));
         }
         if model.tokenizer_vocab_path.trim().is_empty() {
-            return Err(crate::Error::BadRequest(format!(
+            return Err(crate::Error::bad_request(format!(
                 "tokenizer_vocab_path cannot be empty for model {}",
                 model.model_name
             )));
         }
         if model.device_ids.is_empty() {
-            return Err(crate::Error::BadRequest(format!(
+            return Err(crate::Error::bad_request(format!(
                 "device_ids cannot be empty for model {}",
                 model.model_name
             )));
         }
         if model.max_batch_size.unwrap_or_default() < 1 {
-            return Err(crate::Error::BadRequest(format!(
+            return Err(crate::Error::bad_request(format!(
                 "max_batch_size must be >= 1 for model {}",
                 model.model_name
             )));
         }
         if model.max_context_len.unwrap_or_default() < 1 {
-            return Err(crate::Error::BadRequest(format!(
+            return Err(crate::Error::bad_request(format!(
                 "max_context_len must be >= 1 for model {}",
                 model.model_name
             )));
@@ -99,10 +97,12 @@ fn validate_generation_models(models: &[GenerationConfig]) -> crate::Result<()> 
 }
 
 fn read_toml_file<T: for<'de> Deserialize<'de>>(path: &Path) -> crate::Result<T> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| crate::Error::BadRequest(format!("failed to read {}: {e}", path.display())))?;
-    toml::from_str(&content)
-        .map_err(|e| crate::Error::BadRequest(format!("invalid toml {}: {e}", path.display())))
+    let content = fs::read_to_string(path).map_err(|e| {
+        crate::Error::bad_request_with_source(format!("failed to read {}", path.display()), e)
+    })?;
+    toml::from_str(&content).map_err(|e| {
+        crate::Error::bad_request_with_source(format!("invalid toml {}", path.display()), e)
+    })
 }
 
 fn load_raw_infer_cfg(path: &Path) -> crate::Result<RawInferConfig> {
@@ -197,8 +197,8 @@ fn apply_models_patch(
         model.fill_default();
         let name = model.model_name.trim().to_string();
         if name.is_empty() {
-            return Err(crate::Error::BadRequest(
-                "model_name cannot be empty in upsert".to_string(),
+            return Err(crate::Error::bad_request(
+                "model_name cannot be empty in upsert",
             ));
         }
         model.model_name = name.clone();
@@ -235,14 +235,14 @@ fn apply_models_patch(
 
 fn write_infer_cfg_atomic(path: &Path, cfg: &RawInferConfig) -> crate::Result<()> {
     let content = toml::to_string_pretty(cfg)
-        .map_err(|e| crate::Error::Internal(format!("failed to serialize infer config: {e}")))?;
+        .map_err(|e| crate::Error::internal_with_source("failed to serialize infer config", e))?;
 
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).map_err(|e| {
-        crate::Error::Internal(format!(
-            "failed to create config dir {}: {e}",
-            parent.display()
-        ))
+        crate::Error::internal_with_source(
+            format!("failed to create config dir {}", parent.display()),
+            e,
+        )
     })?;
 
     let tmp_path = parent.join(format!(
@@ -254,29 +254,29 @@ fn write_infer_cfg_atomic(path: &Path, cfg: &RawInferConfig) -> crate::Result<()
     ));
 
     fs::write(&tmp_path, content).map_err(|e| {
-        crate::Error::Internal(format!(
-            "failed to write temp config {}: {e}",
-            tmp_path.display()
-        ))
+        crate::Error::internal_with_source(
+            format!("failed to write temp config {}", tmp_path.display()),
+            e,
+        )
     })?;
 
     if let Err(e) = fs::rename(&tmp_path, path) {
         // Windows may fail to overwrite existing files with rename; retry with explicit remove.
         if path.exists() {
             fs::remove_file(path).map_err(|remove_err| {
-                crate::Error::Internal(format!(
+                crate::Error::internal(format!(
                     "failed to replace infer config {}: rename_error={e}, remove_error={remove_err}",
-                    path.display()
+                    path.display(),
                 ))
             })?;
             fs::rename(&tmp_path, path).map_err(|rename_err| {
-                crate::Error::Internal(format!(
-                    "failed to finalize infer config {}: {rename_err}",
-                    path.display()
-                ))
+                crate::Error::internal_with_source(
+                    format!("failed to finalize infer config {}", path.display()),
+                    rename_err,
+                )
             })?;
         } else {
-            return Err(crate::Error::Internal(format!(
+            return Err(crate::Error::internal(format!(
                 "failed to finalize infer config {}: {e}",
                 path.display()
             )));
@@ -403,6 +403,48 @@ impl RuntimeManager {
             .expect("runtime manager config lock poisoned")
             .api_key
             .clone()
+    }
+
+    fn resolved_ipc_cfg(&self) -> RawIpcConfig {
+        let mut cfg = self
+            .raw_infer_cfg
+            .read()
+            .expect("runtime manager config lock poisoned")
+            .ipc
+            .clone()
+            .unwrap_or_default();
+        cfg.fill_default();
+        cfg
+    }
+
+    pub fn ipc_enabled(&self) -> bool {
+        self.resolved_ipc_cfg().enabled.unwrap_or(false)
+    }
+
+    pub fn ipc_service_name(&self) -> String {
+        self.resolved_ipc_cfg()
+            .service_name
+            .unwrap_or_else(|| "rwkv.infer.openai".to_string())
+    }
+
+    pub fn ipc_max_request_bytes(&self) -> usize {
+        self.resolved_ipc_cfg()
+            .max_request_bytes
+            .unwrap_or(4 * 1024 * 1024)
+    }
+
+    pub fn ipc_max_response_bytes(&self) -> usize {
+        self.resolved_ipc_cfg()
+            .max_response_bytes
+            .unwrap_or(4 * 1024 * 1024)
+    }
+
+    pub fn ipc_max_inflight_requests(&self) -> usize {
+        self.resolved_ipc_cfg().max_inflight_requests.unwrap_or(128)
+    }
+
+    pub fn ipc_require_api_key(&self) -> bool {
+        self.resolved_ipc_cfg().require_api_key.unwrap_or(true)
     }
 
     pub async fn reload_models(

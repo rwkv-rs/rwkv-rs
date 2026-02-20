@@ -1,14 +1,13 @@
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 
+use crate::api::ApiService;
 use crate::auth::check_api_key;
-use crate::server::AppState;
-use crate::server::openai_types::{OpenAiErrorResponse, ReloadModelsRequest, ReloadModelsResponse};
-use crate::service::runtime_manager::ModelsReloadPatch;
+use crate::server::{AppState, ReloadModelsRequest};
 
 pub async fn admin_models_reload(
     headers: HeaderMap,
@@ -19,37 +18,9 @@ pub async fn admin_models_reload(
         return resp;
     }
 
-    let patch = ModelsReloadPatch {
-        upsert: req.upsert,
-        remove_model_names: req.remove_model_names,
-        dry_run: req.dry_run.unwrap_or(false),
-    };
-
-    match app.runtime_manager.reload_models(patch).await {
-        Ok(result) => (
-            StatusCode::OK,
-            Json(ReloadModelsResponse {
-                changed_model_names: result.changed_model_names,
-                rebuilt_model_names: result.rebuilt_model_names,
-                removed_model_names: result.removed_model_names,
-                active_model_names: result.active_model_names,
-                dry_run: result.dry_run,
-                message: result.message,
-            }),
-        )
-            .into_response(),
-        Err(e) => {
-            let status = match e {
-                crate::Error::BadRequest(_) | crate::Error::NotSupported(_) => {
-                    StatusCode::BAD_REQUEST
-                }
-                crate::Error::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            };
-            (
-                status,
-                Json(OpenAiErrorResponse::bad_request(e.to_string())),
-            )
-                .into_response()
-        }
+    let api = ApiService::new(app.runtime_manager.clone());
+    match api.admin_models_reload(req).await {
+        Ok(resp) => Json(resp).into_response(),
+        Err(e) => crate::server::infer_error_response(e),
     }
 }

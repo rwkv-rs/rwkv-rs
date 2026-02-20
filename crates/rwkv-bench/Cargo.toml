@@ -2,15 +2,28 @@
 name = "rwkv-bench"
 version = "0.1.0"
 edition = "2024"
-description = "Shared hotpath instrumentation macros and helpers for profiling RWKV workloads"
+description = "RWKV benchmarking, profiling orchestration, and static reporting toolkit"
 license = "Apache-2.0"
+
+[lib]
+bench = false
 
 [features]
 default = []
-hotpath = ["dep:hotpath", "hotpath/hotpath"]
-hotpath-alloc-bytes-total = ["hotpath", "hotpath/hotpath-alloc"]
-hotpath-alloc-count-total = ["hotpath", "hotpath/hotpath-alloc"]
-hotpath-off = ["hotpath", "hotpath/hotpath-off"]
+trace-lite = ["dep:rwkv-trace", "rwkv-trace/tracy"]
+trace-full = ["trace-lite"]
+bench-serve = []
+bench-report = []
 
 [dependencies]
-hotpath = { workspace = true, optional = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+plotters = { version = "0.3.7", default-features = false, features = ["line_series", "point_series", "svg_backend"] }
+reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls", "stream"] }
+serde_json = "1.0.145"
+
+rwkv-trace = { path = "../rwkv-trace", optional = true }

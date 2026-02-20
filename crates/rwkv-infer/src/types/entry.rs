@@ -18,8 +18,38 @@ pub enum InferEntryState {
 #[derive(Clone, Debug)]
 pub enum EngineEvent {
     Text(String),
-    Done,
+    Done(FinishMetadata),
     Error(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FinishReason {
+    Stop,
+    Length,
+}
+
+impl FinishReason {
+    pub fn as_openai_str(self) -> &'static str {
+        match self {
+            Self::Stop => "stop",
+            Self::Length => "length",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FinishMetadata {
+    pub reason: FinishReason,
+    pub matched_stop_suffix: Option<String>,
+    pub matched_stop_suffix_index: Option<usize>,
+    pub max_new_tokens: usize,
+    pub generated_tokens: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StopMatch {
+    pub index: usize,
+    pub len: usize,
 }
 
 #[derive(Debug)]
@@ -43,7 +73,7 @@ pub struct InferEntry {
 
     pub stop_suffixes: Vec<Vec<u8>>,
     pub max_stop_suffix_len: usize,
-    pub matched_stop_suffix_len: usize,
+    pub matched_stop_suffix: Option<StopMatch>,
 
     pub max_new_tokens: usize,
     pub sampling: SamplingConfig,
@@ -80,7 +110,7 @@ impl InferEntry {
             utf8_carry: Vec::new(),
             stop_suffixes,
             max_stop_suffix_len,
-            matched_stop_suffix_len: 0,
+            matched_stop_suffix: None,
             max_new_tokens: sampling.max_new_tokens,
             sampling,
             stream_tx: None,
@@ -88,26 +118,26 @@ impl InferEntry {
     }
 
     pub fn stop_trunc_len(&self) -> usize {
-        self.generated_bytes
-            .len()
-            .saturating_sub(self.matched_stop_suffix_len)
+        let matched_len = self.matched_stop_suffix.map(|m| m.len).unwrap_or(0);
+        self.generated_bytes.len().saturating_sub(matched_len)
     }
 
-    pub fn emit_stream_text(&mut self) -> (String, bool) {
+    pub fn emit_stream_text(&mut self) -> (String, Option<StopMatch>) {
         if self.max_stop_suffix_len > 0 {
-            self.matched_stop_suffix_len =
-                match_stop_suffix_len(&self.generated_bytes, &self.stop_suffixes);
-            if self.matched_stop_suffix_len > 0 {
+            self.matched_stop_suffix =
+                match_stop_suffix(&self.generated_bytes, &self.stop_suffixes);
+            if let Some(matched) = self.matched_stop_suffix {
                 let trunc_len = self.stop_trunc_len();
                 let text = self.flush_stream_text_until(trunc_len, false);
-                return (text, true);
+                return (text, Some(matched));
             }
         }
+        self.matched_stop_suffix = None;
 
         let hold_len = self.max_stop_suffix_len.saturating_sub(1);
         let emit_limit = self.generated_bytes.len().saturating_sub(hold_len);
         let text = self.flush_stream_text_until(emit_limit, false);
-        (text, false)
+        (text, None)
     }
 
     pub fn flush_stream_text_until(&mut self, emit_limit: usize, _flush_lossy: bool) -> String {
@@ -148,11 +178,49 @@ impl InferEntry {
     }
 }
 
-fn match_stop_suffix_len(output: &[u8], suffixes: &[Vec<u8>]) -> usize {
-    suffixes
-        .iter()
-        .filter(|suffix| !suffix.is_empty() && output.ends_with(suffix.as_slice()))
-        .map(|suffix| suffix.len())
-        .max()
-        .unwrap_or(0)
+fn match_stop_suffix(output: &[u8], suffixes: &[Vec<u8>]) -> Option<StopMatch> {
+    let mut best: Option<StopMatch> = None;
+    for (index, suffix) in suffixes.iter().enumerate() {
+        if suffix.is_empty() || !output.ends_with(suffix.as_slice()) {
+            continue;
+        }
+        let candidate = StopMatch {
+            index,
+            len: suffix.len(),
+        };
+        match best {
+            None => best = Some(candidate),
+            Some(current) => {
+                if candidate.len > current.len
+                    || (candidate.len == current.len && candidate.index < current.index)
+                {
+                    best = Some(candidate);
+                }
+            }
+        }
+    }
+    best
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn match_stop_suffix_prefers_longer_suffix() {
+        let suffixes = vec![b"END".to_vec(), b"THE END".to_vec()];
+        let output = b"This is THE END";
+        let matched = match_stop_suffix(output, &suffixes).expect("must match");
+        assert_eq!(matched.index, 1);
+        assert_eq!(matched.len, 7);
+    }
+
+    #[test]
+    fn match_stop_suffix_prefers_lower_index_on_tie() {
+        let suffixes = vec![b"stop".to_vec(), b"stop".to_vec()];
+        let output = b"please stop";
+        let matched = match_stop_suffix(output, &suffixes).expect("must match");
+        assert_eq!(matched.index, 0);
+        assert_eq!(matched.len, 4);
+    }
 }

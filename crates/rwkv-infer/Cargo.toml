@@ -21,15 +21,21 @@ tower-http = { workspace = true }
 dashmap = { workspace = true }
 once_cell = { workspace = true }
 log = { workspace = true }
+thiserror = { workspace = true }
 
 # Optional tokenizer for text endpoints (RWKV vocab)
 rwkv-data = { path = "../rwkv-data" }
 rwkv-config = { path = "../rwkv-config" }
+rwkv-trace = { path = "../rwkv-trace", optional = true }
 clia-tracing-config = { workspace = true }
+iceoryx2 = { version = "0.8.1", optional = true, features = ["libc_platform"] }
 
 [features]
 default = ["http"]
 http = []
+ipc-iceoryx2 = ["dep:iceoryx2"]
+trace-lite = ["dep:rwkv-trace", "rwkv-trace/tracy"]
+trace-full = ["trace-lite"]
 
 [dev-dependencies]
 tower = { workspace = true }
