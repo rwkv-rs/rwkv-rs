@@ -78,8 +78,8 @@ where
 mod fusion_impl {
     use burn::tensor::{DType, Element, Shape, ops::FloatTensor};
     use burn_fusion::{
-        stream::{Operation, OperationStreams}, Fusion, FusionBackend,
-        FusionRuntime,
+        Fusion, FusionBackend, FusionRuntime,
+        stream::{Operation, OperationStreams},
     };
     use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};
 
@@ -112,7 +112,8 @@ mod fusion_impl {
             }
 
             impl<B1: FusionBackend + Wkv7StateTuneBackend> Operation<B1::FusionRuntime>
-            for Wkv7StateTuneForwardOp<B1> {
+                for Wkv7StateTuneForwardOp<B1>
+            {
                 fn execute(
                     &self,
                     handles: &mut HandleContainer<
@@ -120,7 +121,15 @@ mod fusion_impl {
                     >,
                 ) {
                     let (
-                        [weight_decay, receptance, key, value, removal, replacement, initial_state],
+                        [
+                            weight_decay,
+                            receptance,
+                            key,
+                            value,
+                            removal,
+                            replacement,
+                            initial_state,
+                        ],
                         [state_out, removal_state_out, output_out],
                     ) = self.desc.as_fixed();
 
@@ -236,7 +245,8 @@ mod fusion_impl {
             }
 
             impl<B1: FusionBackend + Wkv7StateTuneBackend> Operation<B1::FusionRuntime>
-            for Wkv7StateTuneBackwardOp<B1> {
+                for Wkv7StateTuneBackwardOp<B1>
+            {
                 fn execute(
                     &self,
                     handles: &mut HandleContainer<
@@ -299,8 +309,10 @@ mod fusion_impl {
                     handles.register_float_tensor::<B1>(&removal_grad.id, grads.removal_grad);
                     handles
                         .register_float_tensor::<B1>(&replacement_grad.id, grads.replacement_grad);
-                    handles
-                        .register_float_tensor::<B1>(&initial_state_grad.id, grads.initial_state_grad);
+                    handles.register_float_tensor::<B1>(
+                        &initial_state_grad.id,
+                        grads.initial_state_grad,
+                    );
                 }
             }
 

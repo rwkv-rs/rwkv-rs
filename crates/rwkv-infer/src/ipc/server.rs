@@ -340,6 +340,7 @@ impl IpcServer {
                                 index: 0,
                                 finish_reason: None,
                             }],
+                            timings_ms: None,
                         };
                         let payload = encode_json(&chunk)?;
                         self.send_data(active_request, &request, payload, 200)?;
@@ -355,6 +356,7 @@ impl IpcServer {
                                 index: 0,
                                 finish_reason: Some(meta.reason.as_openai_str().to_string()),
                             }],
+                            timings_ms: meta.timings_ms.clone(),
                         };
                         let payload = encode_json(&final_chunk)?;
                         self.send_data(active_request, &request, payload, 200)?;
@@ -437,6 +439,7 @@ impl IpcServer {
                                 },
                                 finish_reason: None,
                             }],
+                            timings_ms: None,
                         };
                         let payload = encode_json(&chunk)?;
                         self.send_data(active_request, &request, payload, 200)?;
@@ -455,6 +458,7 @@ impl IpcServer {
                                 },
                                 finish_reason: Some(meta.reason.as_openai_str().to_string()),
                             }],
+                            timings_ms: meta.timings_ms.clone(),
                         };
                         let payload = encode_json(&final_chunk)?;
                         self.send_data(active_request, &request, payload, 200)?;

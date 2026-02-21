@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
 use rwkv_bench::serving::{Endpoint, ServeConfig};
+use rwkv_lm::paths;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum EndpointArg {
@@ -42,9 +43,19 @@ pub struct ServeArgs {
     pub output_tokens: usize,
     #[arg(long, default_value_t = true)]
     pub stream: bool,
-    #[arg(long, default_value_t = 0.0)]
+    #[arg(long, default_value_t = 1.0)]
     pub temperature: f32,
-    #[arg(long, default_value_t = 120)]
+    #[arg(long, default_value_t = 500)]
+    pub top_k: i32,
+    #[arg(long, default_value_t = 0.3)]
+    pub top_p: f32,
+    #[arg(long, default_value_t = 0.5)]
+    pub presence_penalty: f32,
+    #[arg(long, default_value_t = 0.5)]
+    pub repetition_penalty: f32,
+    #[arg(long, default_value_t = 0.996)]
+    pub penalty_decay: f32,
+    #[arg(long, default_value_t = 0)]
     pub timeout_secs: u64,
     #[arg(long)]
     pub api_key: Option<String>,
@@ -67,6 +78,11 @@ impl From<ServeArgs> for ServeConfig {
             output_tokens: args.output_tokens,
             stream: args.stream,
             temperature: args.temperature,
+            top_k: args.top_k,
+            top_p: args.top_p,
+            presence_penalty: args.presence_penalty,
+            repetition_penalty: args.repetition_penalty,
+            penalty_decay: args.penalty_decay,
             timeout_secs: args.timeout_secs,
             api_key: args.api_key,
             metadata: BTreeMap::new(),
@@ -83,7 +99,7 @@ pub fn sanitize_request_rate(request_rate: f64) -> f64 {
 }
 
 pub fn default_output_path(name: &str) -> PathBuf {
-    PathBuf::from("logs").join("bench").join(name)
+    paths::bench_output_path(name)
 }
 
 pub fn normalized_args() -> Vec<OsString> {

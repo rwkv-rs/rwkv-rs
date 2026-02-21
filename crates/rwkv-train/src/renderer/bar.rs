@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use burn::train::{
     metric::{MetricDefinition, MetricId},
@@ -29,6 +30,7 @@ pub struct BarMetricsRenderer {
     metric_id_learning_rate: MetricId,
     metric_id_iteration_speed: MetricId,
     tokens_per_step: f64,
+    last_render_at: Option<Instant>,
 }
 
 impl BarMetricsRenderer {
@@ -61,6 +63,7 @@ impl BarMetricsRenderer {
             tokens_per_step: (TRAIN_CFG.get().unwrap().context_length
                 * TRAIN_CFG.get().unwrap().batch_size_per_device)
                 as f64,
+            last_render_at: None,
         }
     }
 }
@@ -89,6 +92,19 @@ impl MetricsRendererTraining for BarMetricsRenderer {
     }
 
     fn render_train(&mut self, item: TrainingProgress) {
+        #[cfg(feature = "trace")]
+        let _step_span = tracing::trace_span!(
+            "rwkv.train.step",
+            epoch = item.epoch,
+            iteration = item.iteration,
+            train_loss = self.train_loss,
+            train_lr = self.train_lr,
+            train_kt_s = self.train_kilo_tokens_per_sec
+        )
+        .entered();
+        #[cfg(feature = "nsys")]
+        let _nvtx_step = nvtx::range!("rwkv.train.step");
+
         // Reset progress bar when epoch changes
         if item.epoch != self.epoch_index {
             self.epoch_index = item.epoch;
@@ -116,6 +132,16 @@ impl MetricsRendererTraining for BarMetricsRenderer {
                 .map(|value| format!("{value:.5}"))
                 .unwrap_or_else(|| "-".to_string()),
         ));
+
+        #[cfg(feature = "trace")]
+        {
+            let now = Instant::now();
+            let step_ms = self
+                .last_render_at
+                .map(|last| now.saturating_duration_since(last).as_millis() as u64);
+            self.last_render_at = Some(now);
+            tracing::trace!(step_ms, "train render tick");
+        }
     }
 
     fn render_valid(&mut self, item: TrainingProgress) {

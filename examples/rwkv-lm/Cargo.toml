@@ -72,8 +72,8 @@ metal = ["rwkv/metal"]
 ddp = ["rwkv/collective"]
 pth2mpk = ["rwkv/store", "rwkv/cubecl", "nn", "std"]
 training = ["rwkv/train", "rwkv/cubecl", "metrics", "std"]
-trace-lite = ["rwkv/trace-lite"]
-trace-full = ["rwkv/trace-full"]
+trace = ["rwkv/trace", "dep:tracing"]
+nsys = ["rwkv/nsys", "dep:nvtx"]
 ipc-iceoryx2 = ["rwkv/infer-ipc"]
 inferring = [
     "dep:tokio",
@@ -93,6 +93,8 @@ rwkv-bench = { path = "../../crates/rwkv-bench" }
 tokio = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }
 clia-tracing-config = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+nvtx = { workspace = true, optional = true }
 
 # Utils
 derive-new = { workspace = true }

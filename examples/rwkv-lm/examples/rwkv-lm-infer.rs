@@ -4,7 +4,7 @@
 fn main() {
     eprintln!(
         "This example requires feature `inferring`.\nRun: cargo run -p rwkv-lm --example \
-         rwkv-lm-infer --no-default-features --features inferring,cuda"
+         rwkv-lm-infer --features cuda"
     );
 }
 
@@ -18,7 +18,6 @@ use rwkv::custom::prelude::{Backend, DeviceOps};
 use rwkv::custom::record::{FullPrecisionSettings, NamedMpkFileRecorder};
 use rwkv::infer::auth::AuthConfig;
 use rwkv::infer::engine::{EngineRuntime, EngineRuntimeConfig};
-use rwkv::infer::init::init_log;
 #[cfg(feature = "ipc-iceoryx2")]
 use rwkv::infer::ipc::IpcServer;
 use rwkv::infer::server::{AppState, RouterBuilder};
@@ -34,6 +33,7 @@ use tokio::net::TcpListener;
 
 use rwkv_lm::inferring::RwkvLmExecutor;
 use rwkv_lm::model::AutoRegressiveModelConfig;
+use rwkv_lm::paths;
 
 #[cfg(not(any(feature = "f32", feature = "flex32", feature = "f16")))]
 type ElemType = rwkv::custom::tensor::bf16;
@@ -185,7 +185,38 @@ where
         .unwrap_or_else(default_cfg_dir);
     let infer_cfg = get_arg_value(&args, "--infer-cfg").unwrap_or_else(|| "rwkv-lm-7.2b".into());
 
-    let _log_guard = init_log("info");
+    let log_dir = paths::logs_dir();
+    std::fs::create_dir_all(&log_dir).map_err(|e| {
+        rwkv::infer::Error::Internal(format!(
+            "failed to create infer log directory {}: {e}",
+            log_dir.display()
+        ))
+    })?;
+    #[cfg(not(feature = "trace"))]
+    let log_dir_text = log_dir.to_string_lossy().to_string();
+    #[cfg(feature = "trace")]
+    let trace_mode = rwkv::infer::trace::init_tracing("rwkv-lm-infer")?;
+
+    #[cfg(feature = "trace")]
+    let _log_guard: Option<clia_tracing_config::WorkerGuard> = None;
+    #[cfg(not(feature = "trace"))]
+    let _log_guard = Some(
+        clia_tracing_config::build()
+            .filter_level("info")
+            .with_ansi(true)
+            .to_stdout(true)
+            .directory(&log_dir_text)
+            .file_name("infer.log")
+            .init(),
+    );
+    println!(
+        "infer cfg: {infer_cfg} (config_dir: {})",
+        config_dir.display()
+    );
+    println!("infer logs: {}", log_dir.display());
+    #[cfg(feature = "trace")]
+    println!("trace mode: {trace_mode:?}");
+
     let runtime_manager = Arc::new(RuntimeManager::bootstrap(
         config_dir,
         infer_cfg,

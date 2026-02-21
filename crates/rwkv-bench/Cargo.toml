@@ -10,8 +10,12 @@ bench = false
 
 [features]
 default = []
-trace-lite = ["dep:rwkv-trace", "rwkv-trace/tracy"]
-trace-full = ["trace-lite"]
+trace = [
+    "dep:tracy-client",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:tracing-tracy",
+]
 bench-serve = []
 bench-report = []
 
@@ -21,9 +25,12 @@ futures = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+indicatif = { workspace = true }
+tracy-client = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+tracing-tracy = { workspace = true, optional = true }
 
-plotters = { version = "0.3.7", default-features = false, features = ["line_series", "point_series", "svg_backend"] }
-reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls", "stream"] }
-serde_json = "1.0.145"
-
-rwkv-trace = { path = "../rwkv-trace", optional = true }
+plotters = { workspace = true, default-features = false, features = ["line_series", "point_series", "svg_backend"] }
+reqwest = { workspace = true, default-features = false, features = ["json", "rustls-tls", "stream"] }
+serde_json = { workspace = true }

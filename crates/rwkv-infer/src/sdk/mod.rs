@@ -21,7 +21,7 @@ impl RwkvInferClient {
         stream: bool,
     ) -> crate::Result<SubmitOutput> {
         self.engine
-            .submit_text(input_text, sampling, stop_suffixes, stream)
+            .submit_text(input_text, sampling, stop_suffixes, stream, None)
             .await
     }
 }

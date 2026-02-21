@@ -20,8 +20,12 @@ pub(crate) fn infer_error_response(err: crate::Error) -> Response {
     let chain = err.format_chain();
     if err.is_client_error() {
         log::warn!("request failed: {chain}");
+        #[cfg(feature = "trace")]
+        tracing::warn!(error = %chain, "request failed");
     } else {
         log::error!("request failed: {chain}");
+        #[cfg(feature = "trace")]
+        tracing::error!(error = %chain, "request failed");
     }
     (status, Json(OpenAiErrorResponse::from_infer_error(&err))).into_response()
 }

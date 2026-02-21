@@ -1,15 +1,18 @@
 use std::collections::BTreeMap;
+use std::error::Error as _;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use futures::StreamExt;
+use futures::{StreamExt, stream::FuturesUnordered};
+use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 
-use crate::metrics::{AggregateMetrics, RequestMetrics, aggregate_metrics};
+use crate::metrics::{AggregateMetrics, RequestMetrics, StageBreakdownMs, aggregate_metrics};
 use crate::{BenchError, Result};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -39,7 +42,18 @@ pub struct ServeConfig {
     pub input_tokens: usize,
     pub output_tokens: usize,
     pub stream: bool,
+    #[serde(default = "default_temperature")]
     pub temperature: f32,
+    #[serde(default = "default_top_k")]
+    pub top_k: i32,
+    #[serde(default = "default_top_p")]
+    pub top_p: f32,
+    #[serde(default = "default_presence_penalty")]
+    pub presence_penalty: f32,
+    #[serde(default = "default_repetition_penalty")]
+    pub repetition_penalty: f32,
+    #[serde(default = "default_penalty_decay")]
+    pub penalty_decay: f32,
     pub timeout_secs: u64,
     pub api_key: Option<String>,
     pub metadata: BTreeMap<String, String>,
@@ -58,26 +72,20 @@ pub struct ServeRunResult {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SweepConfig {
     pub base: ServeConfig,
-    pub batch_sizes: Vec<usize>,
-    pub paragraph_lens: Vec<usize>,
-    pub backends: Vec<String>,
+    pub request_counts: Vec<usize>,
     pub before_each_command: Option<String>,
     pub after_each_command: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SweepCaseResult {
-    pub backend: String,
-    pub batch_size: usize,
-    pub paragraph_len: usize,
+    pub request_count: usize,
     pub run: ServeRunResult,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SweepBestCase {
-    pub backend: String,
-    pub batch_size: usize,
-    pub paragraph_len: usize,
+    pub request_count: usize,
     pub total_token_throughput: f64,
     pub request_throughput: f64,
 }
@@ -89,6 +97,97 @@ pub struct SweepRunResult {
     pub config: SweepConfig,
     pub cases: Vec<SweepCaseResult>,
     pub best_case: Option<SweepBestCase>,
+}
+
+fn default_temperature() -> f32 {
+    1.0
+}
+
+fn default_top_k() -> i32 {
+    500
+}
+
+fn default_top_p() -> f32 {
+    0.3
+}
+
+fn default_presence_penalty() -> f32 {
+    0.5
+}
+
+fn default_repetition_penalty() -> f32 {
+    0.5
+}
+
+fn default_penalty_decay() -> f32 {
+    0.996
+}
+
+#[derive(Default)]
+struct LiveStats {
+    processed: usize,
+    completed: usize,
+    failed: usize,
+    output_tokens: usize,
+    e2el_sum_s: f64,
+    first_error: Option<String>,
+}
+
+impl LiveStats {
+    fn observe(&mut self, metrics: &RequestMetrics) {
+        self.processed += 1;
+        if metrics.success {
+            self.completed += 1;
+            self.output_tokens += metrics.output_tokens;
+        } else {
+            self.failed += 1;
+            if self.first_error.is_none() {
+                self.first_error = metrics.error.clone();
+            }
+        }
+        self.e2el_sum_s += metrics.e2el_s.max(0.0);
+    }
+
+    fn status_line(&self, elapsed_s: f64, inflight: usize) -> String {
+        let safe_elapsed = elapsed_s.max(1e-9);
+        let success_rps = self.completed as f64 / safe_elapsed;
+        let output_tok_s = self.output_tokens as f64 / safe_elapsed;
+        let mean_e2el_ms = if self.processed > 0 {
+            self.e2el_sum_s * 1000.0 / self.processed as f64
+        } else {
+            0.0
+        };
+
+        format!(
+            "ok={} fail={} inflight={} succ_rps={success_rps:.1} out_tok/s={output_tok_s:.1} mean_e2el={mean_e2el_ms:.1}ms",
+            self.completed, self.failed, inflight
+        )
+    }
+}
+
+fn create_progress_bar(total_requests: usize) -> ProgressBar {
+    if !std::io::stderr().is_terminal() {
+        return ProgressBar::hidden();
+    }
+
+    let bar = ProgressBar::new(total_requests as u64);
+    let style = match ProgressStyle::with_template(
+        "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} req {msg}",
+    ) {
+        Ok(style) => style.progress_chars("#>-"),
+        Err(_) => ProgressStyle::default_bar(),
+    };
+    bar.set_style(style);
+    bar.enable_steady_tick(Duration::from_millis(120));
+    bar
+}
+
+fn format_elapsed(elapsed: Duration) -> String {
+    let total = elapsed.as_secs();
+    let h = total / 3600;
+    let m = (total % 3600) / 60;
+    let s = total % 60;
+    format!("{h:02}:{m:02}:{s:02}")
 }
 
 fn build_prompt(input_tokens: usize, request_id: usize) -> String {
@@ -108,10 +207,35 @@ fn endpoint_url(cfg: &ServeConfig) -> String {
     )
 }
 
-fn extract_chunk_text(chunk: &str) -> String {
-    let parsed = serde_json::from_str::<serde_json::Value>(chunk);
-    if let Ok(value) = parsed
-        && let Some(choices) = value.get("choices").and_then(serde_json::Value::as_array)
+fn format_reqwest_error(context: &str, err: &reqwest::Error) -> String {
+    let mut message = format!("{context}: {err}");
+
+    if err.is_connect() {
+        message.push_str(" [kind=connect]");
+    }
+    if err.is_timeout() {
+        message.push_str(" [kind=timeout]");
+    }
+    if err.is_decode() {
+        message.push_str(" [kind=decode]");
+    }
+    if let Some(url) = err.url() {
+        message.push_str(&format!(" [url={url}]"));
+    }
+
+    let mut source = err.source();
+    let mut depth = 0usize;
+    while let Some(cause) = source {
+        depth += 1;
+        message.push_str(&format!(" | source[{depth}]: {cause}"));
+        source = cause.source();
+    }
+
+    message
+}
+
+fn extract_chunk_text_from_value(value: &serde_json::Value) -> String {
+    if let Some(choices) = value.get("choices").and_then(serde_json::Value::as_array)
         && let Some(choice) = choices.first()
     {
         if let Some(text) = choice.get("text").and_then(serde_json::Value::as_str) {
@@ -124,8 +248,36 @@ fn extract_chunk_text(chunk: &str) -> String {
             return content.to_string();
         }
     }
-
     String::new()
+}
+
+fn has_finish_reason(value: &serde_json::Value) -> bool {
+    value
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("finish_reason"))
+        .and_then(serde_json::Value::as_str)
+        .is_some()
+}
+
+fn parse_timings_ms(value: &serde_json::Value) -> StageBreakdownMs {
+    let timings = value.get("timings_ms").cloned().unwrap_or_default();
+    StageBreakdownMs {
+        validate_ms: read_from(&timings, "validate_ms"),
+        tokenize_ms: read_from(&timings, "tokenize_ms"),
+        queue_wait_ms: read_from(&timings, "queue_wait_ms"),
+        schedule_wait_ms: read_from(&timings, "schedule_wait_ms"),
+        prefill_first_ms: read_from(&timings, "prefill_first_ms"),
+        first_emit_ms: read_from(&timings, "first_emit_ms"),
+        prefill_total_ms: read_from(&timings, "prefill_total_ms"),
+        decode_total_ms: read_from(&timings, "decode_total_ms"),
+        request_total_ms: read_from(&timings, "request_total_ms"),
+    }
+}
+
+fn read_from(value: &serde_json::Value, key: &str) -> Option<f64> {
+    value.get(key).and_then(serde_json::Value::as_f64)
 }
 
 fn parse_sse_line(
@@ -135,6 +287,8 @@ fn parse_sse_line(
     last_token_s: &mut Option<f64>,
     itl_s: &mut Vec<f64>,
     output_tokens: &mut usize,
+    stage_ms: &mut StageBreakdownMs,
+    saw_terminal: &mut bool,
 ) -> bool {
     let trimmed = line.trim();
     if !trimmed.starts_with("data:") {
@@ -147,11 +301,21 @@ fn parse_sse_line(
     }
 
     if payload == "[DONE]" {
+        *saw_terminal = true;
         return true;
     }
 
-    let text = extract_chunk_text(payload);
+    let value = match serde_json::from_str::<serde_json::Value>(payload) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let text = extract_chunk_text_from_value(&value);
     if text.is_empty() {
+        if has_finish_reason(&value) {
+            *stage_ms = parse_timings_ms(&value);
+            *saw_terminal = true;
+            return true;
+        }
         return false;
     }
 
@@ -182,6 +346,11 @@ async fn run_single_request(
             "stream": cfg.stream,
             "max_tokens": cfg.output_tokens,
             "temperature": cfg.temperature,
+            "top_k": cfg.top_k,
+            "top_p": cfg.top_p,
+            "presence_penalty": cfg.presence_penalty,
+            "repetition_penalty": cfg.repetition_penalty,
+            "penalty_decay": cfg.penalty_decay,
         }),
         Endpoint::ChatCompletions => serde_json::json!({
             "model": cfg.model,
@@ -189,6 +358,11 @@ async fn run_single_request(
             "stream": cfg.stream,
             "max_tokens": cfg.output_tokens,
             "temperature": cfg.temperature,
+            "top_k": cfg.top_k,
+            "top_p": cfg.top_p,
+            "presence_penalty": cfg.presence_penalty,
+            "repetition_penalty": cfg.repetition_penalty,
+            "penalty_decay": cfg.penalty_decay,
         }),
     };
 
@@ -212,12 +386,18 @@ async fn run_single_request(
         itl_s: Vec::new(),
         tpot_s: None,
         e2el_s: 0.0,
+        stage_ms: StageBreakdownMs::default(),
     };
 
     let response = match response {
         Ok(resp) => resp,
         Err(err) => {
-            metrics.error = Some(format!("request failed: {err}"));
+            let prefix = if err.is_timeout() {
+                "timeout"
+            } else {
+                "request failed"
+            };
+            metrics.error = Some(format_reqwest_error(prefix, &err));
             metrics.e2el_s = start.elapsed().as_secs_f64();
             return metrics;
         }
@@ -225,26 +405,40 @@ async fn run_single_request(
 
     if !response.status().is_success() {
         let status = response.status();
-        let body = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "<failed to read body>".to_string());
+        let body = match response.text().await {
+            Ok(body) => body,
+            Err(err) => format!(
+                "<failed to read body: {}>",
+                format_reqwest_error("body read failed", &err)
+            ),
+        };
         metrics.error = Some(format!("http {}: {}", status.as_u16(), body));
         metrics.e2el_s = start.elapsed().as_secs_f64();
         return metrics;
     }
 
     if cfg.stream {
+        let content_encoding = response
+            .headers()
+            .get(reqwest::header::CONTENT_ENCODING)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
         let mut byte_stream = response.bytes_stream();
         let mut sse_buffer = String::new();
         let mut first_token_s = None;
         let mut last_token_s = None;
+        let mut saw_terminal = false;
 
         while let Some(chunk) = byte_stream.next().await {
             let chunk = match chunk {
                 Ok(c) => c,
                 Err(err) => {
-                    metrics.error = Some(format!("stream read failed: {err}"));
+                    let mut msg = format_reqwest_error("stream read failed", &err);
+                    msg.push_str(&format!(
+                        " [content-encoding={}]",
+                        content_encoding.as_deref().unwrap_or("none")
+                    ));
+                    metrics.error = Some(msg);
                     break;
                 }
             };
@@ -261,6 +455,25 @@ async fn run_single_request(
                     &mut last_token_s,
                     &mut metrics.itl_s,
                     &mut metrics.output_tokens,
+                    &mut metrics.stage_ms,
+                    &mut saw_terminal,
+                ) {
+                    metrics.success = true;
+                }
+            }
+        }
+
+        if metrics.error.is_none() && !sse_buffer.trim().is_empty() {
+            for line in sse_buffer.lines() {
+                if parse_sse_line(
+                    line,
+                    start,
+                    &mut first_token_s,
+                    &mut last_token_s,
+                    &mut metrics.itl_s,
+                    &mut metrics.output_tokens,
+                    &mut metrics.stage_ms,
+                    &mut saw_terminal,
                 ) {
                     metrics.success = true;
                 }
@@ -275,8 +488,11 @@ async fn run_single_request(
             metrics.tpot_s = Some((metrics.e2el_s - ttft) / (metrics.output_tokens as f64 - 1.0));
         }
 
-        if metrics.error.is_none() {
+        if metrics.error.is_none() && saw_terminal {
             metrics.success = true;
+        } else if metrics.error.is_none() {
+            metrics.error = Some("stream ended without terminal event".to_string());
+            metrics.success = false;
         }
         return metrics;
     }
@@ -286,14 +502,8 @@ async fn run_single_request(
         Ok(raw) => {
             let parsed = serde_json::from_str::<serde_json::Value>(&raw);
             if let Ok(value) = parsed {
-                let text = value
-                    .get("choices")
-                    .and_then(serde_json::Value::as_array)
-                    .and_then(|choices| choices.first())
-                    .and_then(|choice| choice.get("text"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
+                metrics.stage_ms = parse_timings_ms(&value);
+                let text = extract_chunk_text_from_value(&value);
                 metrics.output_tokens = text.split_whitespace().count();
             }
 
@@ -304,7 +514,7 @@ async fn run_single_request(
             metrics
         }
         Err(err) => {
-            metrics.error = Some(format!("response decode failed: {err}"));
+            metrics.error = Some(format_reqwest_error("response decode failed", &err));
             metrics.e2el_s = start.elapsed().as_secs_f64();
             metrics
         }
@@ -314,13 +524,21 @@ async fn run_single_request(
 pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
     let started_at_utc = Utc::now().to_rfc3339();
     let bench_start = Instant::now();
+    let progress_visible = std::io::stderr().is_terminal();
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(cfg.timeout_secs.max(1)))
-        .build()?;
+    let mut client_builder = reqwest::Client::builder();
+    if cfg.timeout_secs > 0 {
+        client_builder = client_builder.timeout(Duration::from_secs(cfg.timeout_secs));
+    }
+    let client = client_builder.build()?;
 
     let semaphore = Arc::new(Semaphore::new(cfg.concurrency.max(1)));
-    let mut handles = Vec::with_capacity(cfg.num_requests);
+    let mut inflight = FuturesUnordered::new();
+    let progress = create_progress_bar(cfg.num_requests);
+    let mut live_stats = LiveStats::default();
+    let mut tick = tokio::time::interval(Duration::from_millis(500));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut last_text_update = Instant::now();
 
     for request_id in 0..cfg.num_requests {
         if cfg.request_rate.is_finite() && cfg.request_rate > 0.0 {
@@ -331,37 +549,81 @@ pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
             }
         }
 
-        let permit = semaphore.clone().acquire_owned().await?;
         let client = client.clone();
         let cfg_cloned = cfg.clone();
-        let handle = tokio::spawn(async move {
-            let _permit = permit;
-            run_single_request(client, cfg_cloned, request_id).await
+        let semaphore = semaphore.clone();
+        inflight.push(async move {
+            let metrics = match semaphore.acquire_owned().await {
+                Ok(permit) => {
+                    let _permit = permit;
+                    run_single_request(client, cfg_cloned, request_id).await
+                }
+                Err(err) => RequestMetrics {
+                    request_id,
+                    success: false,
+                    error: Some(format!("acquire error: {err}")),
+                    prompt_tokens: cfg_cloned.input_tokens,
+                    output_tokens: 0,
+                    ttft_s: None,
+                    itl_s: Vec::new(),
+                    tpot_s: None,
+                    e2el_s: 0.0,
+                    stage_ms: StageBreakdownMs::default(),
+                },
+            };
+            (request_id, metrics)
         });
-        handles.push((request_id, handle));
     }
 
     let mut requests = Vec::with_capacity(cfg.num_requests);
-    for (request_id, handle) in handles {
-        match handle.await {
-            Ok(metrics) => requests.push(metrics),
-            Err(err) => requests.push(RequestMetrics {
-                request_id,
-                success: false,
-                error: Some(format!("join error: {err}")),
-                prompt_tokens: cfg.input_tokens,
-                output_tokens: 0,
-                ttft_s: None,
-                itl_s: Vec::new(),
-                tpot_s: None,
-                e2el_s: 0.0,
-            }),
+    while !inflight.is_empty() {
+        tokio::select! {
+            biased;
+            _ = tick.tick() => {
+                let inflight_count = cfg.num_requests.saturating_sub(live_stats.processed);
+                let status = live_stats.status_line(
+                    bench_start.elapsed().as_secs_f64(),
+                    inflight_count,
+                );
+                progress.set_message(status.clone());
+                progress.tick();
+
+                if !progress_visible
+                    && last_text_update.elapsed() >= Duration::from_secs(2)
+                {
+                    eprintln!(
+                        "[{}] {}/{} req {}",
+                        format_elapsed(bench_start.elapsed()),
+                        live_stats.processed,
+                        cfg.num_requests,
+                        status
+                    );
+                    last_text_update = Instant::now();
+                }
+            }
+            maybe = inflight.next() => {
+                let Some((_request_id, metrics)) = maybe else {
+                    break;
+                };
+                live_stats.observe(&metrics);
+                progress.inc(1);
+                let inflight_count = cfg.num_requests.saturating_sub(live_stats.processed);
+                progress.set_message(live_stats.status_line(
+                    bench_start.elapsed().as_secs_f64(),
+                    inflight_count,
+                ));
+                requests.push(metrics);
+            }
         }
     }
 
     requests.sort_by_key(|request| request.request_id);
 
     let duration_s = bench_start.elapsed().as_secs_f64();
+    progress.finish_with_message(format!("done {}", live_stats.status_line(duration_s, 0)));
+    if let Some(err) = live_stats.first_error.as_deref() {
+        eprintln!("first request error: {err}");
+    }
     let summary = aggregate_metrics(&requests, duration_s);
 
     Ok(ServeRunResult {
@@ -374,29 +636,18 @@ pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
     })
 }
 
-fn render_template(
-    template: &str,
-    backend: &str,
-    batch_size: usize,
-    paragraph_len: usize,
-) -> String {
+fn render_template(template: &str, request_count: usize) -> String {
     template
-        .replace("{backend}", backend)
-        .replace("{batch_size}", &batch_size.to_string())
-        .replace("{paragraph_len}", &paragraph_len.to_string())
+        .replace("{request_count}", &request_count.to_string())
+        .replace("{concurrency}", &request_count.to_string())
 }
 
-fn maybe_run_template(
-    template: &Option<String>,
-    backend: &str,
-    batch_size: usize,
-    paragraph_len: usize,
-) -> Result<()> {
+fn maybe_run_template(template: &Option<String>, request_count: usize) -> Result<()> {
     let Some(template) = template else {
         return Ok(());
     };
 
-    let rendered = render_template(template, backend, batch_size, paragraph_len);
+    let rendered = render_template(template, request_count);
     let status = Command::new("bash").arg("-lc").arg(&rendered).status()?;
     if !status.success() {
         return Err(BenchError::command_failed(rendered, status.code()));
@@ -408,33 +659,24 @@ pub async fn run_sweep(cfg: SweepConfig) -> Result<SweepRunResult> {
     let mut cases = Vec::new();
     let started_at_utc = Utc::now().to_rfc3339();
 
-    for backend in &cfg.backends {
-        for &batch_size in &cfg.batch_sizes {
-            for &paragraph_len in &cfg.paragraph_lens {
-                maybe_run_template(&cfg.before_each_command, backend, batch_size, paragraph_len)?;
+    for &request_count in &cfg.request_counts {
+        maybe_run_template(&cfg.before_each_command, request_count)?;
 
-                let mut case_cfg = cfg.base.clone();
-                case_cfg
-                    .metadata
-                    .insert("backend".to_string(), backend.clone());
-                case_cfg
-                    .metadata
-                    .insert("batch_size".to_string(), batch_size.to_string());
-                case_cfg
-                    .metadata
-                    .insert("paragraph_len".to_string(), paragraph_len.to_string());
+        let mut case_cfg = cfg.base.clone();
+        case_cfg.num_requests = request_count;
+        case_cfg.concurrency = request_count;
+        case_cfg.request_rate = 0.0;
+        case_cfg
+            .metadata
+            .insert("request_count".to_string(), request_count.to_string());
+        case_cfg
+            .metadata
+            .insert("concurrency".to_string(), request_count.to_string());
 
-                let run = run_serve_benchmark(case_cfg).await?;
-                cases.push(SweepCaseResult {
-                    backend: backend.clone(),
-                    batch_size,
-                    paragraph_len,
-                    run,
-                });
+        let run = run_serve_benchmark(case_cfg).await?;
+        cases.push(SweepCaseResult { request_count, run });
 
-                maybe_run_template(&cfg.after_each_command, backend, batch_size, paragraph_len)?;
-            }
-        }
+        maybe_run_template(&cfg.after_each_command, request_count)?;
     }
 
     let best_case = cases
@@ -446,9 +688,7 @@ pub async fn run_sweep(cfg: SweepConfig) -> Result<SweepRunResult> {
                 .total_cmp(&b.run.summary.total_token_throughput)
         })
         .map(|best| SweepBestCase {
-            backend: best.backend.clone(),
-            batch_size: best.batch_size,
-            paragraph_len: best.paragraph_len,
+            request_count: best.request_count,
             total_token_throughput: best.run.summary.total_token_throughput,
             request_throughput: best.run.summary.request_throughput,
         });

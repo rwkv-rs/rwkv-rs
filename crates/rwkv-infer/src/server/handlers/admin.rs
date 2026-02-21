@@ -9,6 +9,14 @@ use crate::api::ApiService;
 use crate::auth::check_api_key;
 use crate::server::{AppState, ReloadModelsRequest};
 
+#[cfg_attr(
+    feature = "trace",
+    tracing::instrument(
+        name = "rwkv.infer.http.admin_models_reload",
+        skip_all,
+        fields(path = "/admin/models/reload")
+    )
+)]
 pub async fn admin_models_reload(
     headers: HeaderMap,
     State(app): State<AppState>,

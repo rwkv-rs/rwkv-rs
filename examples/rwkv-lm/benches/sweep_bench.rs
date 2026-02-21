@@ -10,12 +10,12 @@ mod common;
 struct SweepArgs {
     #[command(flatten)]
     serve: common::ServeArgs,
-    #[arg(long, value_delimiter = ',', default_value = "1,2,4,8,16")]
-    batch_sizes: Vec<usize>,
-    #[arg(long, value_delimiter = ',', default_value = "64,128,256,512")]
-    paragraph_lens: Vec<usize>,
-    #[arg(long, value_delimiter = ',', default_value = "cuda,wgpu")]
-    backends: Vec<String>,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        default_value = "64,128,256,512,1024,2048"
+    )]
+    request_counts: Vec<usize>,
     #[arg(long)]
     before_each_command: Option<String>,
     #[arg(long)]
@@ -45,9 +45,7 @@ fn run(cli: Cli) -> Result<()> {
 
     let cfg = SweepConfig {
         base: cli.sweep.serve.into(),
-        batch_sizes: cli.sweep.batch_sizes,
-        paragraph_lens: cli.sweep.paragraph_lens,
-        backends: cli.sweep.backends,
+        request_counts: cli.sweep.request_counts,
         before_each_command: cli.sweep.before_each_command,
         after_each_command: cli.sweep.after_each_command,
     };

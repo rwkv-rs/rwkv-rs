@@ -338,6 +338,13 @@ impl RuntimeManager {
         let groups = factory.build_model_groups(&runtime_models, &model_cfgs)?;
         let service = Arc::new(Service::new(groups)?);
 
+        #[cfg(feature = "trace")]
+        tracing::info!(
+            infer_cfg = %infer_cfg_name,
+            model_count = raw_infer_cfg.models.len(),
+            "runtime manager bootstrapped"
+        );
+
         Ok(Self {
             config_dir,
             infer_cfg_name,
@@ -447,6 +454,18 @@ impl RuntimeManager {
         self.resolved_ipc_cfg().require_api_key.unwrap_or(true)
     }
 
+    #[cfg_attr(
+        feature = "trace",
+        tracing::instrument(
+            name = "rwkv.infer.runtime.reload_models",
+            skip_all,
+            fields(
+                upsert = patch.upsert.len(),
+                remove = patch.remove_model_names.len(),
+                dry_run = patch.dry_run
+            )
+        )
+    )]
     pub async fn reload_models(
         &self,
         patch: ModelsReloadPatch,
@@ -508,6 +527,14 @@ impl RuntimeManager {
             }
         }
 
+        #[cfg(feature = "trace")]
+        tracing::info!(
+            changed = changed_model_names.len(),
+            rebuilt = rebuilt_model_names.len(),
+            removed = removed_model_names.len(),
+            "reload patch evaluated"
+        );
+
         let new_service = Arc::new(Service::new(merged_groups)?);
 
         if !patch.dry_run {
@@ -540,6 +567,13 @@ impl RuntimeManager {
                 rebuilt_model_names.len()
             )
         };
+
+        #[cfg(feature = "trace")]
+        tracing::info!(
+            dry_run = patch.dry_run,
+            active = active_model_names.len(),
+            "reload models completed"
+        );
 
         Ok(ModelsReloadResult {
             changed_model_names,

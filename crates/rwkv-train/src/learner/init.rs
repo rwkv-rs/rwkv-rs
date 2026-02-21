@@ -136,13 +136,20 @@ pub fn init_log(train_cfg_builder: &mut FinalTrainConfigBuilder) -> PathBuf {
     .unwrap();
 
     let level = train_cfg_builder.get_level().unwrap();
-    let _guard = clia_tracing_config::build()
-        .filter_level(level.as_str())
-        .with_ansi(true)
-        .to_stdout(true)
-        .directory(full_experiment_log_path.to_str().unwrap())
-        .file_name("experiment.log")
-        .init();
+    #[cfg(feature = "trace")]
+    let tracing_already_initialized = tracing::dispatcher::has_been_set();
+    #[cfg(not(feature = "trace"))]
+    let tracing_already_initialized = false;
+
+    if !tracing_already_initialized {
+        let _guard = clia_tracing_config::build()
+            .filter_level(level.as_str())
+            .with_ansi(true)
+            .to_stdout(true)
+            .directory(full_experiment_log_path.to_str().unwrap())
+            .file_name("experiment.log")
+            .init();
+    }
 
     info!("log level: {}", level);
 

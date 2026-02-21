@@ -26,3 +26,4 @@ reference_for_agents/
 .DS_Store
 /logs
 /examples/rwkv-lm/config/train/logs
+/examples/rwkv-lm/logs

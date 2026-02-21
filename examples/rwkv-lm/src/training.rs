@@ -44,6 +44,18 @@ use crate::model::AutoRegressiveModelConfig;
 
 rwkv::custom_mode!();
 
+#[cfg(feature = "trace")]
+macro_rules! trace_scope {
+    ($name:literal) => {
+        let _rwkv_trace_scope = tracing::info_span!($name).entered();
+    };
+}
+
+#[cfg(not(feature = "trace"))]
+macro_rules! trace_scope {
+    ($name:literal) => {};
+}
+
 // Define train function
 pub fn train<B: AutodiffBackend>(
     devices: Vec<B::Device>, // Device on which to perform computation (e.g., CPU or CUDA device)
@@ -54,6 +66,8 @@ pub fn train<B: AutodiffBackend>(
     B: Wkv7Backend + L2WrapBackend,
     B::InnerBackend: Wkv7Backend + L2WrapBackend,
 {
+    trace_scope!("rwkv.train.pipeline");
+
     let bin_path = PathBuf::from(train_cfg_builder.get_dataset_base_path().unwrap())
         .join(train_cfg_builder.get_filename_without_extensions().unwrap())
         .with_extension("bin");
@@ -61,7 +75,10 @@ pub fn train<B: AutodiffBackend>(
     let dataset_format = train_cfg_builder
         .get_dataset_format()
         .unwrap_or(DatasetFormatOptions::Rwkv);
-    let bin = Arc::new(MmapBinReader::<u16>::open(&bin_path, dataset_format));
+    let bin = {
+        trace_scope!("rwkv.train.data.load");
+        Arc::new(MmapBinReader::<u16>::open(&bin_path, dataset_format))
+    };
     train_cfg_builder.fill_after_read_bin(
         bin.num_tokens() as usize,
         bin.num_units_per_token() as usize,
@@ -121,14 +138,17 @@ pub fn train<B: AutodiffBackend>(
     train_cfg_builder.build();
 
     // Initialize model
-    let mut model = AutoRegressiveModelConfig::new(
-        MODEL_CFG.get().unwrap().num_cells,
-        MODEL_CFG.get().unwrap().vocab_size,
-        MODEL_CFG.get().unwrap().embedded_dim,
-        MODEL_CFG.get().unwrap().num_heads,
-        MODEL_CFG.get().unwrap().head_size_auto,
-    )
-    .init::<B>(&devices[0]);
+    let mut model = {
+        trace_scope!("rwkv.train.model.init");
+        AutoRegressiveModelConfig::new(
+            MODEL_CFG.get().unwrap().num_cells,
+            MODEL_CFG.get().unwrap().vocab_size,
+            MODEL_CFG.get().unwrap().embedded_dim,
+            MODEL_CFG.get().unwrap().num_heads,
+            MODEL_CFG.get().unwrap().head_size_auto,
+        )
+        .init::<B>(&devices[0])
+    };
 
     if TRAIN_CFG.get().unwrap().need_init_weight_auto {
         model.init_weights(&devices[0]);
@@ -136,39 +156,50 @@ pub fn train<B: AutodiffBackend>(
     }
 
     // Initialize optimizer
-    #[cfg(not(any(feature = "statetune")))]
-    let optim =
-        GroupedOptimizerConfig::new(0.9, 0.99, 1e-16, TRAIN_CFG.get().unwrap().weight_decay)
-            .init(&model, ParamGroupingMode::Default);
+    let optim = {
+        trace_scope!("rwkv.train.optim.init");
+        #[cfg(not(any(feature = "statetune")))]
+        {
+            GroupedOptimizerConfig::new(0.9, 0.99, 1e-16, TRAIN_CFG.get().unwrap().weight_decay)
+                .init(&model, ParamGroupingMode::Default)
+        }
 
-    #[cfg(feature = "statetune")]
-    let optim =
-        GroupedOptimizerConfig::new(0.9, 0.99, 1e-16, TRAIN_CFG.get().unwrap().weight_decay)
-            .init(&model, ParamGroupingMode::StateTune);
+        #[cfg(feature = "statetune")]
+        {
+            GroupedOptimizerConfig::new(0.9, 0.99, 1e-16, TRAIN_CFG.get().unwrap().weight_decay)
+                .init(&model, ParamGroupingMode::StateTune)
+        }
+    };
 
     // Initialize learning rate scheduler
-    let lr_scheduler = WsdLrSchedulerConfig::new(
-        TRAIN_CFG.get().unwrap().learning_rate_start as LearningRate,
-        TRAIN_CFG.get().unwrap().learning_rate_end as LearningRate,
-        TRAIN_CFG.get().unwrap().warmup_steps,
-        TRAIN_CFG.get().unwrap().num_mini_epochs_auto
-            * TRAIN_CFG.get().unwrap().num_steps_per_mini_epoch_auto,
-    )
-    .init();
+    let lr_scheduler = {
+        trace_scope!("rwkv.train.lr_scheduler.init");
+        WsdLrSchedulerConfig::new(
+            TRAIN_CFG.get().unwrap().learning_rate_start as LearningRate,
+            TRAIN_CFG.get().unwrap().learning_rate_end as LearningRate,
+            TRAIN_CFG.get().unwrap().warmup_steps,
+            TRAIN_CFG.get().unwrap().num_mini_epochs_auto
+                * TRAIN_CFG.get().unwrap().num_steps_per_mini_epoch_auto,
+        )
+        .init()
+    };
 
     // Initialize learner
     let interrupter = Interrupter::new();
 
-    let mut training = SupervisedTraining::new(exp_log_path, dataloader_train, dataloader_valid)
-        .metric_train(CudaMetric::new())
-        .metric_train_numeric(IterationSpeedMetric::new())
-        .metric_train_numeric(LossMetric::new())
-        .metric_train_numeric(LearningRateMetric::new())
-        .with_file_checkpointer(CompactRecorder::new())
-        .num_epochs(TRAIN_CFG.get().unwrap().num_mini_epochs_auto)
-        .summary()
-        .with_interrupter(interrupter.clone())
-        .with_application_logger(None);
+    let mut training = {
+        trace_scope!("rwkv.train.learner.build");
+        SupervisedTraining::new(exp_log_path, dataloader_train, dataloader_valid)
+            .metric_train(CudaMetric::new())
+            .metric_train_numeric(IterationSpeedMetric::new())
+            .metric_train_numeric(LossMetric::new())
+            .metric_train_numeric(LearningRateMetric::new())
+            .with_file_checkpointer(CompactRecorder::new())
+            .num_epochs(TRAIN_CFG.get().unwrap().num_mini_epochs_auto)
+            .summary()
+            .with_interrupter(interrupter.clone())
+            .with_application_logger(None)
+    };
 
     training = training.with_metric_logger(FileMetricLogger::new(exp_log_path));
 
@@ -198,19 +229,30 @@ pub fn train<B: AutodiffBackend>(
     };
 
     #[cfg(not(feature = "ddp"))]
-    let training = training.with_training_strategy(
-        rwkv::custom::train::TrainingStrategy::MultiDevice(devices, MultiDeviceOptim::OptimSharded),
-    );
+    let training = {
+        trace_scope!("rwkv.train.strategy.multidevice");
+        training.with_training_strategy(rwkv::custom::train::TrainingStrategy::MultiDevice(
+            devices,
+            MultiDeviceOptim::OptimSharded,
+        ))
+    };
 
     #[cfg(feature = "ddp")]
     let collective_config =
         CollectiveConfig::default().with_local_all_reduce_strategy(AllReduceStrategy::Tree(2));
     #[cfg(feature = "ddp")]
-    let training =
-        training.with_training_strategy(rwkv::custom::train::ddp(devices, collective_config));
+    let training = {
+        trace_scope!("rwkv.train.strategy.ddp");
+        training.with_training_strategy(rwkv::custom::train::ddp(devices, collective_config))
+    };
 
     // Train the model
-    let result = training.launch(Learner::new(model, optim, lr_scheduler));
+    let result = {
+        trace_scope!("rwkv.train.step");
+        #[cfg(feature = "nsys")]
+        let _nvtx_step = nvtx::range!("rwkv.train.step");
+        training.launch(Learner::new(model, optim, lr_scheduler))
+    };
 
     // Save the configuration and the trained model
     let config_json = sonic_rs::json!({
@@ -223,7 +265,12 @@ pub fn train<B: AutodiffBackend>(
     )
     .unwrap();
 
-    CompactRecorder::new()
-        .record(result.model.into_record(), exp_log_path.join("model"))
-        .unwrap();
+    {
+        trace_scope!("rwkv.train.checkpoint.save");
+        #[cfg(feature = "nsys")]
+        let _nvtx_ckpt = nvtx::range!("rwkv.train.checkpoint.save");
+        CompactRecorder::new()
+            .record(result.model.into_record(), exp_log_path.join("model"))
+            .unwrap();
+    }
 }

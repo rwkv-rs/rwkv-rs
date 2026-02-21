@@ -1,5 +1,7 @@
+mod validation;
+
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -15,7 +17,7 @@ use crate::service::RuntimeManager;
 use crate::storage::{
     BackgroundTaskState, CachedResponse, GLOBAL_BACKGROUND_TASKS, GLOBAL_RESPONSE_CACHE,
 };
-use crate::types::{EngineEvent, SamplingConfig};
+use crate::types::EngineEvent;
 
 #[derive(Clone)]
 pub struct ApiService {
@@ -51,6 +53,14 @@ impl ApiService {
         }
     }
 
+    #[cfg_attr(
+        feature = "trace",
+        tracing::instrument(
+            name = "rwkv.infer.request.completions",
+            skip_all,
+            fields(model = %req.model, stream = req.stream.unwrap_or(false))
+        )
+    )]
     pub async fn completions(&self, req: CompletionRequest) -> crate::Result<CompletionRun> {
         if req.model.trim().is_empty() {
             return Err(crate::Error::bad_request(
@@ -59,21 +69,36 @@ impl ApiService {
         }
 
         let stream_requested = req.stream.unwrap_or(false);
-        let sampling = SamplingConfig {
-            temperature: req.temperature.unwrap_or(1.0),
-            top_k: req.top_k.unwrap_or(0),
-            top_p: req.top_p.unwrap_or(1.0),
-            max_new_tokens: req.max_tokens.unwrap_or(256) as usize,
-            presence_penalty: req.presence_penalty.unwrap_or(0.0),
-            repetition_penalty: req.repetition_penalty.unwrap_or(0.0),
-            penalty_decay: req.penalty_decay.unwrap_or(1.0),
-        };
+        let validate_start = Instant::now();
+        let sampling = validation::validate_sampling_config(
+            req.temperature,
+            req.top_k,
+            req.top_p,
+            req.max_tokens,
+            req.presence_penalty,
+            req.repetition_penalty,
+            req.penalty_decay,
+        )?;
+        let validate_ms = elapsed_ms(validate_start);
+        #[cfg(feature = "trace")]
+        tracing::info!(
+            request_stage = "validate",
+            validate_ms,
+            "sampling validation completed"
+        );
         let stop_suffixes = req.stop.map(StopField::into_vec).unwrap_or_default();
 
         let submit = self
             .runtime_manager
             .current_service()
-            .submit_text(&req.model, req.prompt, sampling, stop_suffixes, true)
+            .submit_text_with_trace(
+                &req.model,
+                req.prompt,
+                sampling,
+                stop_suffixes,
+                true,
+                Some(validate_ms),
+            )
             .await?;
         let (_entry_id, rx) = expect_submit_stream(submit)?;
 
@@ -86,6 +111,14 @@ impl ApiService {
         })
     }
 
+    #[cfg_attr(
+        feature = "trace",
+        tracing::instrument(
+            name = "rwkv.infer.request.chat_completions",
+            skip_all,
+            fields(model = %req.model, stream = req.stream.unwrap_or(false))
+        )
+    )]
     pub async fn chat_completions(
         &self,
         req: ChatCompletionRequest,
@@ -97,22 +130,37 @@ impl ApiService {
         }
 
         let stream_requested = req.stream.unwrap_or(false);
-        let sampling = SamplingConfig {
-            temperature: req.temperature.unwrap_or(1.0),
-            top_k: req.top_k.unwrap_or(0),
-            top_p: req.top_p.unwrap_or(1.0),
-            max_new_tokens: req.max_tokens.unwrap_or(256) as usize,
-            presence_penalty: req.presence_penalty.unwrap_or(0.0),
-            repetition_penalty: req.repetition_penalty.unwrap_or(0.0),
-            penalty_decay: req.penalty_decay.unwrap_or(1.0),
-        };
+        let validate_start = Instant::now();
+        let sampling = validation::validate_sampling_config(
+            req.temperature,
+            req.top_k,
+            req.top_p,
+            req.max_tokens,
+            req.presence_penalty,
+            req.repetition_penalty,
+            req.penalty_decay,
+        )?;
+        let validate_ms = elapsed_ms(validate_start);
+        #[cfg(feature = "trace")]
+        tracing::info!(
+            request_stage = "validate",
+            validate_ms,
+            "sampling validation completed"
+        );
         let stop_suffixes = req.stop.map(StopField::into_vec).unwrap_or_default();
         let prompt = build_chat_prompt(&req.messages)?;
 
         let submit = self
             .runtime_manager
             .current_service()
-            .submit_text(&req.model, prompt, sampling, stop_suffixes, true)
+            .submit_text_with_trace(
+                &req.model,
+                prompt,
+                sampling,
+                stop_suffixes,
+                true,
+                Some(validate_ms),
+            )
             .await?;
         let (_entry_id, rx) = expect_submit_stream(submit)?;
 
@@ -125,6 +173,14 @@ impl ApiService {
         })
     }
 
+    #[cfg_attr(
+        feature = "trace",
+        tracing::instrument(
+            name = "rwkv.infer.request.responses_create",
+            skip_all,
+            fields(model = %req.model, background = req.background.unwrap_or(false))
+        )
+    )]
     pub async fn responses_create(
         &self,
         req: ResponsesCreateRequest,
@@ -138,15 +194,23 @@ impl ApiService {
         let response_id = GLOBAL_RESPONSE_CACHE.next_response_id();
         let background = req.background.unwrap_or(false);
         let stop_suffixes = req.stop.map(StopField::into_vec).unwrap_or_default();
-        let sampling = SamplingConfig {
-            temperature: req.temperature.unwrap_or(1.0),
-            top_k: req.top_k.unwrap_or(0),
-            top_p: req.top_p.unwrap_or(1.0),
-            max_new_tokens: req.max_output_tokens.unwrap_or(256) as usize,
-            presence_penalty: req.presence_penalty.unwrap_or(0.0),
-            repetition_penalty: req.repetition_penalty.unwrap_or(0.0),
-            penalty_decay: req.penalty_decay.unwrap_or(1.0),
-        };
+        let validate_start = Instant::now();
+        let sampling = validation::validate_sampling_config(
+            req.temperature,
+            req.top_k,
+            req.top_p,
+            req.max_output_tokens,
+            req.presence_penalty,
+            req.repetition_penalty,
+            req.penalty_decay,
+        )?;
+        let validate_ms = elapsed_ms(validate_start);
+        #[cfg(feature = "trace")]
+        tracing::info!(
+            request_stage = "validate",
+            validate_ms,
+            "sampling validation completed"
+        );
 
         if background {
             let task = GLOBAL_BACKGROUND_TASKS.create(response_id.clone());
@@ -157,7 +221,14 @@ impl ApiService {
             tokio::spawn(async move {
                 GLOBAL_BACKGROUND_TASKS.set_state(&task.task_id, BackgroundTaskState::InProgress);
                 let submit = service
-                    .submit_text(&model_name, input, sampling, stop_suffixes, true)
+                    .submit_text_with_trace(
+                        &model_name,
+                        input,
+                        sampling,
+                        stop_suffixes,
+                        true,
+                        Some(validate_ms),
+                    )
                     .await;
                 let mut rx = match submit {
                     Ok(SubmitOutput::Stream { rx, .. }) => rx,
@@ -201,7 +272,14 @@ impl ApiService {
         let submit = self
             .runtime_manager
             .current_service()
-            .submit_text(&req.model, req.input, sampling, stop_suffixes, true)
+            .submit_text_with_trace(
+                &req.model,
+                req.input,
+                sampling,
+                stop_suffixes,
+                true,
+                Some(validate_ms),
+            )
             .await?;
         let (_entry_id, mut rx) = expect_submit_stream(submit)?;
         let out = collect_stream_text(&mut rx).await?.text;
@@ -302,7 +380,11 @@ pub struct CompletionRun {
 }
 
 impl CompletionRun {
-    pub fn chunk(&self, text: String, finish_reason: Option<String>) -> CompletionResponse {
+    pub fn chunk(
+        &self,
+        text: String,
+        finish_meta: Option<&crate::types::FinishMetadata>,
+    ) -> CompletionResponse {
         CompletionResponse {
             id: self.id.clone(),
             object: "text_completion".to_string(),
@@ -311,14 +393,15 @@ impl CompletionRun {
             choices: vec![CompletionResponseChoice {
                 text,
                 index: 0,
-                finish_reason,
+                finish_reason: finish_meta.map(|meta| meta.reason.as_openai_str().to_string()),
             }],
+            timings_ms: finish_meta.and_then(|meta| meta.timings_ms.clone()),
         }
     }
 
     pub async fn collect(mut self) -> crate::Result<CompletionResponse> {
         let collected = collect_stream_text(&mut self.rx).await?;
-        Ok(self.chunk(collected.text, Some(collected.finish_reason)))
+        Ok(self.chunk(collected.text, Some(&collected.finish_meta)))
     }
 }
 
@@ -332,7 +415,11 @@ pub struct ChatCompletionRun {
 }
 
 impl ChatCompletionRun {
-    pub fn chunk(&self, text: String, finish_reason: Option<String>) -> ChatCompletionResponse {
+    pub fn chunk(
+        &self,
+        text: String,
+        finish_meta: Option<&crate::types::FinishMetadata>,
+    ) -> ChatCompletionResponse {
         ChatCompletionResponse {
             id: self.id.clone(),
             object: "chat.completion".to_string(),
@@ -344,43 +431,62 @@ impl ChatCompletionRun {
                     role: "assistant".to_string(),
                     content: text,
                 },
-                finish_reason,
+                finish_reason: finish_meta.map(|meta| meta.reason.as_openai_str().to_string()),
             }],
+            timings_ms: finish_meta.and_then(|meta| meta.timings_ms.clone()),
         }
     }
 
     pub async fn collect(mut self) -> crate::Result<ChatCompletionResponse> {
         let collected = collect_stream_text(&mut self.rx).await?;
-        Ok(self.chunk(collected.text, Some(collected.finish_reason)))
+        Ok(self.chunk(collected.text, Some(&collected.finish_meta)))
     }
 }
 
 pub struct CollectedStream {
     pub text: String,
-    pub finish_reason: String,
+    pub finish_meta: crate::types::FinishMetadata,
 }
 
+#[cfg_attr(
+    feature = "trace",
+    tracing::instrument(name = "rwkv.infer.request.collect_stream", skip(rx))
+)]
 pub async fn collect_stream_text(
     rx: &mut mpsc::Receiver<EngineEvent>,
 ) -> crate::Result<CollectedStream> {
     let mut out = String::new();
-    let mut finish_reason = None;
+    let mut finish_meta = None;
     while let Some(ev) = rx.recv().await {
         match ev {
-            EngineEvent::Text(t) => out.push_str(&t),
+            EngineEvent::Text(t) => {
+                #[cfg(feature = "trace")]
+                tracing::trace!(chars = t.chars().count(), "collect stream chunk");
+                out.push_str(&t)
+            }
             EngineEvent::Done(meta) => {
-                finish_reason = Some(meta.reason.as_openai_str().to_string());
+                #[cfg(feature = "trace")]
+                tracing::info!(
+                    finish_reason = meta.reason.as_openai_str(),
+                    generated_tokens = meta.generated_tokens,
+                    "collect stream done"
+                );
+                finish_meta = Some(meta);
                 break;
             }
-            EngineEvent::Error(msg) => return Err(crate::Error::internal(msg)),
+            EngineEvent::Error(msg) => {
+                #[cfg(feature = "trace")]
+                tracing::error!(error = %msg, "collect stream failed");
+                return Err(crate::Error::internal(msg));
+            }
         }
     }
-    let finish_reason = finish_reason.ok_or_else(|| {
+    let finish_meta = finish_meta.ok_or_else(|| {
         crate::Error::internal("engine stream closed without final finish reason")
     })?;
     Ok(CollectedStream {
         text: out,
-        finish_reason,
+        finish_meta,
     })
 }
 
@@ -400,6 +506,10 @@ fn current_unix_seconds() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn elapsed_ms(start: Instant) -> u64 {
+    start.elapsed().as_millis() as u64
 }
 
 fn build_chat_prompt(messages: &[ChatMessage]) -> crate::Result<String> {

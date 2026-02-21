@@ -17,6 +17,8 @@ pub mod sdk;
 pub mod server;
 pub mod service;
 pub mod storage;
+#[cfg(feature = "trace")]
+pub mod trace;
 pub mod types;
 
 pub use engine::{EngineCommand, EngineHandle};

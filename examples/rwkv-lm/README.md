@@ -107,10 +107,10 @@ Authorization: Bearer <your_api_key>
   ],
   "stream": false,
   "max_tokens": 4096,
-  "temperature": 0.8,
-  "top_k": 50,
-  "top_p": 0.95,
-  "presence_penalty": 0.2,
+  "temperature": 1.0,
+  "top_k": 500,
+  "top_p": 0.3,
+  "presence_penalty": 0.5,
   "repetition_penalty": 0.5,
   "penalty_decay": 0.996,
   "stop": ["\nUser:"]
@@ -127,15 +127,25 @@ curl http://127.0.0.1:8080/v1/chat/completions \
     "messages": [{"role": "User", "content": "Hello!"}],
     "stream": false,
     "max_tokens": 4096,
-    "temperature": 0.8,
-    "top_k": 50,
-    "top_p": 0.95,
-    "presence_penalty": 0.2,
+    "temperature": 1.0,
+    "top_k": 500,
+    "top_p": 0.3,
+    "presence_penalty": 0.5,
     "repetition_penalty": 0.5,
     "penalty_decay": 0.996,
     "stop": ["\nUser:"]
   }'
 ```
+
+### Sampling parameter validation
+
+The infer API rejects invalid sampling parameters with `400 invalid_request_error`:
+
+- `temperature`: finite and in `[0.001, 1000]`
+- `top_p`: finite and in `[0, 1]`
+- `top_k`: `>= 0` (`0` means disabled)
+- `max_tokens` / `max_output_tokens`: `>= 1`
+- `presence_penalty` / `repetition_penalty` / `penalty_decay`: finite
 
 ### Admin hot-reload request body example
 
@@ -194,29 +204,89 @@ Available targets:
 ```bash
 # Serving pressure benchmark
 cargo bench --bench serve_bench -- \
-  --model rwkv-lm-7.2b --base-url http://127.0.0.1:8080
+  --model rwkv-lm-7.2b --base-url http://127.0.0.1:8080 \
+  --num-requests 1000 --concurrency 960 --stream true
 
-# Sweep benchmark matrix
+# Sweep request-count matrix (burst submit)
 cargo bench --bench sweep_bench -- \
-  --model rwkv-lm-7.2b --base-url http://127.0.0.1:8080
+  --model rwkv-lm-7.2b --base-url http://127.0.0.1:8080 \
+  --request-counts 64,128,256,512,1024,2048
 
 # nsys profiling wrapper
 cargo bench --bench profile_nsys_bench -- \
-  --output-prefix logs/bench/nsys/rwkv -- \
-  cargo run --example rwkv-lm-infer --features cuda
+  cargo run --example rwkv-lm-infer --features cuda,trace,nsys
 
-# tracy passthrough
+# tracy passthrough (trace feature => tracy enabled)
 cargo bench --bench profile_tracy_bench -- \
-  cargo run --example rwkv-lm-infer --features cuda
+  cargo run --example rwkv-lm-infer --features cuda,trace
 
 # Generate report from benchmark JSON
-cargo bench --bench report_bench -- \zh
-  --input-json logs/bench/serve.json --output-dir logs/bench/report
+cargo bench --bench report_bench -- \
+  --input-json examples/rwkv-lm/logs/bench/serve.json \
+  --output-dir examples/rwkv-lm/logs/bench/report
 
 # Record arbitrary train benchmark command
 cargo bench --bench train_command_bench -- \
-  --output-json logs/bench/train_run.json -- \
   cargo run --example rwkv-lm-train --features cuda
 ```
 
+By default, rwkv-lm train/infer/bench artifacts are written under `examples/rwkv-lm/logs/`.
+
+Default serving/sweep sampling params:
+- `temperature=1.0`
+- `top_k=500`
+- `top_p=0.3`
+- `presence_penalty=0.5`
+- `repetition_penalty=0.5`
+- `penalty_decay=0.996`
+- `timeout_secs=0` (disabled by default; set a positive value to enforce client timeout)
+
+During run, serve/sweep benches now show a live progress bar with:
+- completed/failed requests
+- success request throughput (`succ_rps`)
+- output token throughput (`out_tok/s`)
+- mean end-to-end latency (`mean_e2el`)
+
 Serving/sweep benches write JSON results and static Markdown/SVG reports.
+
+Serve benchmark JSON now includes:
+- global throughput/latency metrics (`succ_rps`, `out_tok/s`, TTFT/E2EL p50/p90/p99)
+- stage timings (`validate/tokenize/queue_wait/schedule_wait/prefill_first/first_emit/prefill_total/decode_total/request_total`)
+- error buckets (`bad_request/timeout/cancel/backend_error/other`)
+
+Sweep reports now draw request-count scaling charts:
+- request_count vs success req/s
+- request_count vs output token/s
+- request_count vs TTFT p99
+
+### Tracy / nsys quickstart
+
+With `--features trace`, Tracy is enabled by default (no extra env vars required).
+
+```bash
+# 1) Start infer with Tracy spans (keep process running)
+cargo run --example rwkv-lm-infer --features cuda,trace
+
+# 2) Run load in another shell
+cargo bench --bench serve_bench -- \
+  --model rwkv-lm-7.2b --base-url http://127.0.0.1:8080 \
+  --num-requests 1000 --concurrency 960 --stream true
+
+# 3) nsys full GPU timeline
+cargo bench --bench profile_nsys_bench -- \
+  cargo run --example rwkv-lm-infer --features cuda,trace,nsys
+```
+
+### Metric glossary and quick checks
+
+- `TTFT`: time to first token. Dominated by queue + prefill path.
+- `E2EL`: end-to-end latency per request.
+- `prefill_first_ms`: wait from `scheduled_at` to first prefill execution.
+- `prefill_total_ms`: total prefill stage time until decode starts (or request ends).
+- `decode_total_ms`: decode stage time after first decode token loop starts.
+- `request_total_ms`: total request lifecycle since submit.
+
+If `TTFT` is unexpectedly high, check in order:
+1) `queue_wait_ms` and `schedule_wait_ms` (scheduler pressure)
+2) `prefill_first_ms` and `prefill_total_ms` (prefill path)
+3) `decode_total_ms` (decode loop or sampling bottleneck)

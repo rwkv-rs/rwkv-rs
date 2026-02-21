@@ -5,6 +5,8 @@ use axum::http::{Method, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use tower_http::cors::{AllowOrigin, CorsLayer};
+#[cfg(feature = "trace")]
+use tower_http::trace::TraceLayer;
 
 use crate::api::ApiService;
 use crate::auth::AuthConfig;
@@ -72,6 +74,36 @@ impl RouterBuilder {
                 self.app_state.runtime_manager.request_body_limit_bytes(),
             ))
             .with_state(self.app_state);
+
+        #[cfg(feature = "trace")]
+        let router = router.layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &axum::http::Request<_>| {
+                    tracing::info_span!(
+                        "rwkv.infer.http.request",
+                        method = %request.method(),
+                        path = %request.uri().path()
+                    )
+                })
+                .on_request(|request: &axum::http::Request<_>, _span: &tracing::Span| {
+                    tracing::trace!(
+                        method = %request.method(),
+                        path = %request.uri().path(),
+                        "http request received"
+                    );
+                })
+                .on_response(
+                    |response: &axum::http::Response<_>,
+                     latency: std::time::Duration,
+                     _span: &tracing::Span| {
+                        tracing::info!(
+                            status = response.status().as_u16(),
+                            latency_ms = latency.as_millis() as u64,
+                            "http response"
+                        );
+                    },
+                ),
+        );
 
         Ok(router)
     }

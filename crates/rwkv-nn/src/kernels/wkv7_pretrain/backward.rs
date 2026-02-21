@@ -1,13 +1,13 @@
 use burn::tensor::ops::FloatTensor;
 use burn::{
     backend::{
+        Autodiff,
         autodiff::{
+            NodeId,
             checkpoint::{base::Checkpointer, strategy::CheckpointStrategy},
             grads::Gradients,
             ops::{Backward, Ops, OpsKind},
-            NodeId,
         },
-        Autodiff,
     },
     tensor::backend::AutodiffBackend,
 };
@@ -232,5 +232,4 @@ impl<B: Wkv7PretrainBackend, C: CheckpointStrategy> Wkv7PretrainBackend for Auto
     }
 }
 
-impl<B: Wkv7PretrainBackend, C: CheckpointStrategy> Wkv7PretrainAutodiffBackend
-for Autodiff<B, C> {}
+impl<B: Wkv7PretrainBackend, C: CheckpointStrategy> Wkv7PretrainAutodiffBackend for Autodiff<B, C> {}

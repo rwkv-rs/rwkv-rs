@@ -9,6 +9,14 @@ use crate::api::ApiService;
 use crate::auth::check_api_key;
 use crate::server::{AppState, OpenAiErrorResponse, ResponseIdRequest, ResponsesCreateRequest};
 
+#[cfg_attr(
+    feature = "trace",
+    tracing::instrument(
+        name = "rwkv.infer.http.responses_create",
+        skip_all,
+        fields(path = "/v1/responses")
+    )
+)]
 pub async fn responses_create(
     headers: HeaderMap,
     State(app): State<AppState>,
@@ -25,6 +33,14 @@ pub async fn responses_create(
     }
 }
 
+#[cfg_attr(
+    feature = "trace",
+    tracing::instrument(
+        name = "rwkv.infer.http.responses_get",
+        skip_all,
+        fields(path = "/v1/responses/:id")
+    )
+)]
 pub async fn responses_get(
     headers: HeaderMap,
     State(app): State<AppState>,
@@ -45,6 +61,14 @@ pub async fn responses_get(
     }
 }
 
+#[cfg_attr(
+    feature = "trace",
+    tracing::instrument(
+        name = "rwkv.infer.http.responses_delete",
+        skip_all,
+        fields(path = "/v1/responses/:id")
+    )
+)]
 pub async fn responses_delete(
     headers: HeaderMap,
     State(app): State<AppState>,
@@ -67,6 +91,14 @@ pub async fn responses_delete(
     }
 }
 
+#[cfg_attr(
+    feature = "trace",
+    tracing::instrument(
+        name = "rwkv.infer.http.responses_cancel",
+        skip_all,
+        fields(path = "/v1/responses/:id/cancel")
+    )
+)]
 pub async fn responses_cancel(
     headers: HeaderMap,
     State(app): State<AppState>,

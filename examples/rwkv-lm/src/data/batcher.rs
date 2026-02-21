@@ -5,6 +5,7 @@ use rwkv::data::mmap::dtype::TokenUnit;
 use rwkv::train::data::sliding::{MmapBinReader, SlidingSample};
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Instant;
 
 #[derive(Clone)]
 pub struct AutoRegressiveBatcher<B: Backend, T: TokenUnit> {
@@ -46,6 +47,17 @@ impl<B: Backend, T: TokenUnit> Batcher<B, SlidingSample, AutoRegressiveBatch<B>>
     for AutoRegressiveBatcher<B, T>
 {
     fn batch(&self, items: Vec<SlidingSample>, device: &B::Device) -> AutoRegressiveBatch<B> {
+        let batch_start = Instant::now();
+        #[cfg(feature = "trace")]
+        let _data_span = tracing::trace_span!(
+            "rwkv.train.data.batch",
+            batch_size = items.len(),
+            context_length = self.context_length
+        )
+        .entered();
+        #[cfg(feature = "nsys")]
+        let _nvtx_batch = nvtx::range!("rwkv.train.data.batch");
+
         let batch_size = items.len();
         let seq_len = self.context_length + 1;
         let mut flat = Vec::with_capacity(
@@ -69,6 +81,14 @@ impl<B: Backend, T: TokenUnit> Batcher<B, SlidingSample, AutoRegressiveBatch<B>>
             .slice([0..self.batch_size_per_device, 0..self.context_length]);
 
         let targets = tensor.slice([0..self.batch_size_per_device, 1..self.context_length + 1]);
+
+        #[cfg(feature = "trace")]
+        tracing::trace!(
+            batch_size,
+            seq_len = self.context_length,
+            duration_ms = batch_start.elapsed().as_millis() as u64,
+            "train batch prepared"
+        );
 
         AutoRegressiveBatch { inputs, targets }
     }

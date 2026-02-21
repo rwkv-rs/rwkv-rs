@@ -1,9 +1,9 @@
 pub mod raw;
 pub mod validated;
 
-use std::{fs, mem::size_of, path::Path};
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::path::PathBuf;
+use std::{fs, mem::size_of, path::Path};
 
 pub mod config_builder_helpers {
     /// 辅助trait：智能转换 T 或 Option<T> 到 Option<T>

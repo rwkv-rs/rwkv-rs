@@ -4793,6 +4793,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nvtx"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad2e855e8019f99e4b94ac33670eb4e4f570a2e044f3749a0b2c7f83b841e52c"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "objc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6017,13 +6026,17 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
+ "indicatif",
  "plotters",
  "reqwest 0.12.28",
- "rwkv-trace",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-tracy",
+ "tracy-client",
 ]
 
 [[package]]
@@ -6100,10 +6113,11 @@ dependencies = [
  "dashmap",
  "iceoryx2",
  "log",
+ "nvtx",
  "once_cell",
+ "rwkv-bench",
  "rwkv-config",
  "rwkv-data",
- "rwkv-trace",
  "serde",
  "sonic-rs",
  "thiserror 2.0.18",
@@ -6112,6 +6126,7 @@ dependencies = [
  "toml",
  "tower",
  "tower-http",
+ "tracing",
  "uuid",
 ]
 
@@ -6124,10 +6139,12 @@ dependencies = [
  "clia-tracing-config",
  "derive-new 0.7.0",
  "log",
+ "nvtx",
  "rwkv",
  "rwkv-bench",
  "sonic-rs",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -6154,9 +6171,6 @@ version = "0.1.0"
 [[package]]
 name = "rwkv-trace"
 version = "0.1.0"
-dependencies = [
- "tracy-client",
-]
 
 [[package]]
 name = "rwkv-train"
@@ -6178,6 +6192,7 @@ dependencies = [
  "hashbrown 0.16.1",
  "indicatif",
  "log",
+ "nvtx",
  "primes",
  "rayon",
  "redb",
@@ -6187,10 +6202,10 @@ dependencies = [
  "rwkv-config",
  "rwkv-data",
  "rwkv-nn",
- "rwkv-trace",
  "serde",
  "tokio",
  "toml",
+ "tracing",
  "wandb",
 ]
 
@@ -7207,6 +7222,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -7406,6 +7422,17 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "tracing-tracy"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0eaa1852afa96e0fe9e44caa53dc0bd2d9d05e0f2611ce09f97f8677af56e4ba"
+dependencies = [
+ "tracing-core",
+ "tracing-subscriber",
+ "tracy-client",
 ]
 
 [[package]]

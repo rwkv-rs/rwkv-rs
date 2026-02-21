@@ -42,8 +42,8 @@ cpu = ["burn/cpu"]
 
 infer = ["dep:rwkv-infer", "rwkv-infer/http", "data"]
 infer-ipc = ["infer", "rwkv-infer/ipc-iceoryx2"]
-trace-lite = ["rwkv-infer?/trace-lite", "rwkv-train?/trace-lite"]
-trace-full = ["rwkv-infer?/trace-full", "rwkv-train?/trace-full"]
+trace = ["rwkv-infer?/trace", "rwkv-train?/trace"]
+nsys = ["rwkv-infer?/nsys", "rwkv-train?/nsys"]
 
 [dependencies]
 burn = { workspace = true, default-features = false, features = [] }

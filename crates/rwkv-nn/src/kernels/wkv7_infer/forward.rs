@@ -38,8 +38,8 @@ where
 mod fusion_impl {
     use burn::tensor::{Element, Shape};
     use burn_fusion::{
-        stream::{Operation, OperationStreams}, Fusion, FusionBackend,
-        FusionRuntime,
+        Fusion, FusionBackend, FusionRuntime,
+        stream::{Operation, OperationStreams},
     };
     use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};
 
@@ -69,8 +69,7 @@ mod fusion_impl {
                 _b: core::marker::PhantomData<B1>,
             }
 
-            impl<B1: FusionBackend + Wkv7InferBackend> Operation<B1::FusionRuntime>
-            for Wkv7InferForwardOp<B1> {
+            impl<B1: FusionBackend + Wkv7InferBackend> Operation<B1::FusionRuntime> for Wkv7InferForwardOp<B1> {
                 fn execute(
                     &self,
                     handles: &mut HandleContainer<

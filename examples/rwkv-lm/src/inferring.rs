@@ -109,6 +109,11 @@ where
     B: Backend + Wkv7Backend + RapidSampleBackend,
 {
     fn prefill(&mut self, batch_positions: &[(usize, &[i32], &[u8])]) -> Result<()> {
+        #[cfg(feature = "trace")]
+        let _prefill_span =
+            tracing::info_span!("rwkv.infer.executor.prefill", batch = batch_positions.len())
+                .entered();
+
         if batch_positions.is_empty() {
             return Ok(());
         }
@@ -152,6 +157,8 @@ where
             &self.device,
         );
 
+        #[cfg(feature = "nsys")]
+        let _nvtx_prefill = nvtx::range!("rwkv.infer.executor.prefill");
         let _ = self.model.infer(
             tokens,
             Some(context_mask),
@@ -168,6 +175,16 @@ where
         batch_positions: &[(usize, i32)],
         sampling: SamplingConfig,
     ) -> Result<Vec<(usize, i32)>> {
+        #[cfg(feature = "trace")]
+        let _decode_span = tracing::info_span!(
+            "rwkv.infer.executor.decode",
+            batch = batch_positions.len(),
+            temperature = sampling.temperature,
+            top_k = sampling.top_k,
+            top_p = sampling.top_p
+        )
+        .entered();
+
         if batch_positions.is_empty() {
             return Ok(Vec::new());
         }
@@ -194,6 +211,8 @@ where
             &self.device,
         );
 
+        #[cfg(feature = "nsys")]
+        let _nvtx_decode = nvtx::range!("rwkv.infer.executor.decode");
         let logits = self
             .model
             .infer(
@@ -246,6 +265,15 @@ where
             None
         };
 
+        #[cfg(feature = "trace")]
+        let _sample_span = tracing::trace_span!(
+            "rwkv.infer.executor.sample",
+            batch = batch_positions.len(),
+            penalties = sampling.penalties_enabled()
+        )
+        .entered();
+        #[cfg(feature = "nsys")]
+        let _nvtx_sample = nvtx::range!("rwkv.infer.executor.sample");
         let out = rapid_sample::<B>(
             logits_active,
             rng_active,

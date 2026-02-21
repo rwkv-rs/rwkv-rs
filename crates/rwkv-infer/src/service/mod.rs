@@ -73,6 +73,36 @@ impl Service {
         stop_suffixes: Vec<String>,
         stream: bool,
     ) -> crate::Result<SubmitOutput> {
+        self.submit_text_with_trace(
+            model_name,
+            input_text,
+            sampling,
+            stop_suffixes,
+            stream,
+            None,
+        )
+        .await
+    }
+
+    pub async fn submit_text_with_trace(
+        &self,
+        model_name: &str,
+        input_text: String,
+        sampling: SamplingConfig,
+        stop_suffixes: Vec<String>,
+        stream: bool,
+        validate_ms: Option<u64>,
+    ) -> crate::Result<SubmitOutput> {
+        #[cfg(feature = "trace")]
+        tracing::info!(
+            target: "rwkv.infer",
+            model = %model_name,
+            stream,
+            max_new_tokens = sampling.max_new_tokens,
+            validate_ms,
+            "dispatch submit request"
+        );
+
         let group = self.model_groups.get(model_name).ok_or_else(|| {
             crate::Error::BadRequest(format!(
                 "unknown model_name: {model_name}. available: {:?}",
@@ -82,7 +112,7 @@ impl Service {
 
         group
             .select_engine()
-            .submit_text(input_text, sampling, stop_suffixes, stream)
+            .submit_text(input_text, sampling, stop_suffixes, stream, validate_ms)
             .await
     }
 }

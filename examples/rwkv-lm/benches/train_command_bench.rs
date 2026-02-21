@@ -14,15 +14,21 @@ mod common;
     about = "Run and record a train benchmark command"
 )]
 struct Cli {
-    #[arg(long, default_value = "logs/bench/train_run.json")]
-    output_json: PathBuf,
+    #[arg(long)]
+    output_json: Option<PathBuf>,
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<String>,
 }
 
 fn run(cli: Cli) -> Result<()> {
+    let output_json = cli
+        .output_json
+        .clone()
+        .unwrap_or_else(|| common::default_output_path("train_run.json"));
+
     let run = run_external_command(&cli.command)?;
-    write_json_file(&cli.output_json, &run)?;
+    write_json_file(&output_json, &run)?;
+    println!("train command json: {}", output_json.display());
     ensure_success(&run)
 }
 

@@ -14,12 +14,22 @@ use crate::api::ApiService;
 use crate::auth::check_api_key;
 use crate::server::{AppState, CompletionRequest};
 
+#[cfg_attr(
+    feature = "trace",
+    tracing::instrument(
+        name = "rwkv.infer.http.completions",
+        skip_all,
+        fields(path = "/v1/completions")
+    )
+)]
 pub async fn completions(
     headers: HeaderMap,
     State(app): State<AppState>,
     Json(req): Json<CompletionRequest>,
 ) -> Response {
     if let Err(resp) = check_api_key(&headers, &app.auth_cfg) {
+        #[cfg(feature = "trace")]
+        tracing::warn!("api key check failed");
         return resp;
     }
 
@@ -41,9 +51,23 @@ pub async fn completions(
         let (sse_tx, sse_rx) = mpsc::channel(256);
         tokio::spawn(async move {
             let mut rx = rx;
+            #[cfg(feature = "trace")]
+            let mut emitted_chunks = 0usize;
+            #[cfg(feature = "trace")]
+            tracing::info!(completion_id = %id, model = %model, "completion stream opened");
             while let Some(ev) = rx.recv().await {
                 match ev {
                     crate::types::EngineEvent::Text(text) => {
+                        #[cfg(feature = "trace")]
+                        {
+                            emitted_chunks += 1;
+                            tracing::trace!(
+                                completion_id = %id,
+                                chunk = emitted_chunks,
+                                chars = text.chars().count(),
+                                "completion stream chunk"
+                            );
+                        }
                         let chunk = crate::server::CompletionResponse {
                             id: id.clone(),
                             object: "text_completion".to_string(),
@@ -54,6 +78,7 @@ pub async fn completions(
                                 index: 0,
                                 finish_reason: None,
                             }],
+                            timings_ms: None,
                         };
                         let json = sonic_rs::to_string(&chunk).unwrap_or_default();
                         if sse_tx
@@ -61,10 +86,18 @@ pub async fn completions(
                             .await
                             .is_err()
                         {
+                            #[cfg(feature = "trace")]
+                            tracing::warn!(completion_id = %id, "sse receiver dropped");
                             break;
                         }
                     }
                     crate::types::EngineEvent::Done(meta) => {
+                        #[cfg(feature = "trace")]
+                        tracing::info!(
+                            emitted_chunks,
+                            finish_reason = meta.reason.as_openai_str(),
+                            "completion stream done"
+                        );
                         let final_chunk = crate::server::CompletionResponse {
                             id: id.clone(),
                             object: "text_completion".to_string(),
@@ -75,6 +108,7 @@ pub async fn completions(
                                 index: 0,
                                 finish_reason: Some(meta.reason.as_openai_str().to_string()),
                             }],
+                            timings_ms: meta.timings_ms.clone(),
                         };
                         let final_json = sonic_rs::to_string(&final_chunk).unwrap_or_default();
                         if sse_tx
@@ -82,6 +116,8 @@ pub async fn completions(
                             .await
                             .is_err()
                         {
+                            #[cfg(feature = "trace")]
+                            tracing::warn!(completion_id = %id, "sse receiver dropped before final chunk");
                             break;
                         }
                         let _ = sse_tx
@@ -90,6 +126,8 @@ pub async fn completions(
                         break;
                     }
                     crate::types::EngineEvent::Error(msg) => {
+                        #[cfg(feature = "trace")]
+                        tracing::error!(error = %msg, "completion stream error");
                         let _ = sse_tx
                             .send(axum::response::sse::Event::default().data(format!(
                                 "{{\"error\":{}}}",
@@ -100,6 +138,8 @@ pub async fn completions(
                     }
                 }
             }
+            #[cfg(feature = "trace")]
+            tracing::info!(completion_id = %id, emitted_chunks, "completion stream closed");
         });
         let sse_stream = ReceiverStream::new(sse_rx).map(Ok::<_, std::convert::Infallible>);
 

@@ -1,15 +1,16 @@
 use std::collections::VecDeque;
+use std::time::Instant;
 
 use crate::types::{EntryId, InferEntry, InferEntryState};
 
-#[cfg(feature = "trace-lite")]
+#[cfg(feature = "trace")]
 macro_rules! trace_lite_scope {
     ($name:literal) => {
-        rwkv_trace::tracy_scope!($name);
+        let _rwkv_trace_scope = tracing::trace_span!($name).entered();
     };
 }
 
-#[cfg(not(feature = "trace-lite"))]
+#[cfg(not(feature = "trace"))]
 macro_rules! trace_lite_scope {
     ($name:literal) => {};
 }
@@ -61,7 +62,14 @@ impl DefaultScheduler {
         &mut self,
         entries: &mut std::collections::HashMap<EntryId, InferEntry>,
     ) -> SchedulerStep {
-        trace_lite_scope!("rwkv_infer.scheduler.default.schedule");
+        trace_lite_scope!("rwkv.infer.scheduler.default.schedule");
+        #[cfg(feature = "trace")]
+        tracing::trace!(
+            waiting = self.waiting.len(),
+            running = self.running.len(),
+            capacity = self.max_batch_size,
+            "scheduler tick"
+        );
         // Fill empty batch positions from waiting queue.
         for batch_index in 0..self.max_batch_size {
             if self.batch_slots[batch_index].is_some() {
@@ -76,6 +84,9 @@ impl DefaultScheduler {
                 entry.batch_index = Some(batch_index);
                 if entry.state == InferEntryState::Waiting {
                     entry.state = InferEntryState::RunningPrefill;
+                }
+                if entry.scheduled_at.is_none() {
+                    entry.scheduled_at = Some(Instant::now());
                 }
             }
         }
@@ -95,6 +106,19 @@ impl DefaultScheduler {
         }
 
         // "One decode + one prefill" per tick semantics is enforced by the engine; here we just group.
+        #[cfg(feature = "trace")]
+        tracing::trace!(
+            decode = decode_ids.len(),
+            prefill = prefill_ids.len(),
+            occupied_slots = self
+                .batch_slots
+                .iter()
+                .filter(|slot| slot.is_some())
+                .count(),
+            waiting = self.waiting.len(),
+            "scheduler groups built"
+        );
+
         if self.decode_first {
             SchedulerStep {
                 decode_ids,

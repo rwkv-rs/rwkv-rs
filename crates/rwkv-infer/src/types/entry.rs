@@ -1,3 +1,6 @@
+use std::time::Instant;
+
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -44,6 +47,20 @@ pub struct FinishMetadata {
     pub matched_stop_suffix_index: Option<usize>,
     pub max_new_tokens: usize,
     pub generated_tokens: usize,
+    pub timings_ms: Option<TimingBreakdownMs>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimingBreakdownMs {
+    pub validate_ms: Option<u64>,
+    pub tokenize_ms: Option<u64>,
+    pub queue_wait_ms: Option<u64>,
+    pub schedule_wait_ms: Option<u64>,
+    pub prefill_first_ms: Option<u64>,
+    pub first_emit_ms: Option<u64>,
+    pub prefill_total_ms: Option<u64>,
+    pub decode_total_ms: Option<u64>,
+    pub request_total_ms: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +96,18 @@ pub struct InferEntry {
     pub sampling: SamplingConfig,
 
     pub stream_tx: Option<mpsc::Sender<EngineEvent>>,
+
+    pub validate_ms: Option<u64>,
+    pub tokenize_ms: Option<u64>,
+    pub submitted_at: Option<Instant>,
+    pub runtime_received_at: Option<Instant>,
+    pub enqueued_at: Option<Instant>,
+    pub scheduled_at: Option<Instant>,
+    pub first_prefill_at: Option<Instant>,
+    pub last_prefill_at: Option<Instant>,
+    pub first_decode_at: Option<Instant>,
+    pub last_decode_at: Option<Instant>,
+    pub first_emit_at: Option<Instant>,
 }
 
 impl InferEntry {
@@ -114,6 +143,17 @@ impl InferEntry {
             max_new_tokens: sampling.max_new_tokens,
             sampling,
             stream_tx: None,
+            validate_ms: None,
+            tokenize_ms: None,
+            submitted_at: None,
+            runtime_received_at: None,
+            enqueued_at: None,
+            scheduled_at: None,
+            first_prefill_at: None,
+            last_prefill_at: None,
+            first_decode_at: None,
+            last_decode_at: None,
+            first_emit_at: None,
         }
     }
 

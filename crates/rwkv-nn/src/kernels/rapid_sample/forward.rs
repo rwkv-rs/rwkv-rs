@@ -33,8 +33,8 @@ impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> RapidSampl
 mod fusion_impl {
     use burn::tensor::{DType, Shape};
     use burn_fusion::{
-        stream::{Operation, OperationStreams}, Fusion, FusionBackend,
-        FusionRuntime,
+        Fusion, FusionBackend, FusionRuntime,
+        stream::{Operation, OperationStreams},
     };
     use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};
 
@@ -67,15 +67,15 @@ mod fusion_impl {
                         _b: core::marker::PhantomData<B1>,
                     }
 
-                    impl<B1: FusionBackend + RapidSampleBackend> Operation<B1::FusionRuntime>
-                    for RapidSampleOp<B1> {
+                    impl<B1: FusionBackend + RapidSampleBackend> Operation<B1::FusionRuntime> for RapidSampleOp<B1> {
                         fn execute(
                             &self,
                             handles: &mut HandleContainer<
                                 <B1::FusionRuntime as FusionRuntime>::FusionHandle,
                             >,
                         ) {
-                            let ([logits, states], [token_ids_out, states_out]) = self.desc.as_fixed();
+                            let ([logits, states], [token_ids_out, states_out]) =
+                                self.desc.as_fixed();
 
                             let logits_tensor = handles.get_float_tensor::<B1>(logits);
                             let states_tensor = handles.get_int_tensor::<B1>(states);
@@ -149,15 +149,18 @@ mod fusion_impl {
                     }
 
                     impl<B1: FusionBackend + RapidSampleBackend> Operation<B1::FusionRuntime>
-                    for RapidSamplePenaltyOp<B1> {
+                        for RapidSamplePenaltyOp<B1>
+                    {
                         fn execute(
                             &self,
                             handles: &mut HandleContainer<
                                 <B1::FusionRuntime as FusionRuntime>::FusionHandle,
                             >,
                         ) {
-                            let ([logits, states, penalties], [token_ids_out, states_out, penalties_out]) =
-                                self.desc.as_fixed();
+                            let (
+                                [logits, states, penalties],
+                                [token_ids_out, states_out, penalties_out],
+                            ) = self.desc.as_fixed();
 
                             let logits_tensor = handles.get_float_tensor::<B1>(logits);
                             let states_tensor = handles.get_int_tensor::<B1>(states);

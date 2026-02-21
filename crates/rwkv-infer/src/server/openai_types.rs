@@ -1,3 +1,4 @@
+use crate::types::TimingBreakdownMs;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -102,6 +103,8 @@ pub struct CompletionResponse {
     pub created: u64,
     pub model: String,
     pub choices: Vec<CompletionResponseChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timings_ms: Option<TimingBreakdownMs>,
 }
 
 // === /v1/chat/completions ===
@@ -157,6 +160,8 @@ pub struct ChatCompletionResponse {
     pub created: u64,
     pub model: String,
     pub choices: Vec<ChatCompletionResponseChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timings_ms: Option<TimingBreakdownMs>,
 }
 
 // === /v1/models ===

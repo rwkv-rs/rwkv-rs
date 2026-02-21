@@ -15,27 +15,29 @@ uuid = { workspace = true }
 
 # HTTP server (OpenAI-compatible)
 axum = { workspace = true }
-tower-http = { workspace = true }
+tower-http = { workspace = true, features = ["trace"] }
 
 # Inference utilities
 dashmap = { workspace = true }
 once_cell = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true, optional = true }
+nvtx = { workspace = true, optional = true }
 
 # Optional tokenizer for text endpoints (RWKV vocab)
 rwkv-data = { path = "../rwkv-data" }
 rwkv-config = { path = "../rwkv-config" }
-rwkv-trace = { path = "../rwkv-trace", optional = true }
+rwkv-bench = { path = "../rwkv-bench", default-features = false, optional = true }
 clia-tracing-config = { workspace = true }
-iceoryx2 = { version = "0.8.1", optional = true, features = ["libc_platform"] }
+iceoryx2 = { workspace = true, optional = true }
 
 [features]
 default = ["http"]
 http = []
 ipc-iceoryx2 = ["dep:iceoryx2"]
-trace-lite = ["dep:rwkv-trace", "rwkv-trace/tracy"]
-trace-full = ["trace-lite"]
+trace = ["dep:tracing", "dep:rwkv-bench", "rwkv-bench/trace"]
+nsys = ["trace", "dep:nvtx"]
 
 [dev-dependencies]
 tower = { workspace = true }

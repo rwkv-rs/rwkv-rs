@@ -13,8 +13,8 @@ mod common;
     about = "Wrap a command with nsys profile"
 )]
 struct Cli {
-    #[arg(long, default_value = "logs/bench/nsys/rwkv")]
-    output_prefix: PathBuf,
+    #[arg(long)]
+    output_prefix: Option<PathBuf>,
     #[arg(long, default_value = "cuda,nvtx,osrt")]
     trace: String,
     #[arg(long, default_value = "none")]
@@ -24,13 +24,19 @@ struct Cli {
 }
 
 fn run(cli: Cli) -> Result<()> {
+    let output_prefix = cli
+        .output_prefix
+        .clone()
+        .unwrap_or_else(|| common::default_output_path("nsys/rwkv"));
+
     let run = run_nsys(&NsysProfileArgs {
-        output_prefix: cli.output_prefix,
+        output_prefix: output_prefix.clone(),
         trace: cli.trace,
         sample: cli.sample,
         command: cli.command,
     })?;
 
+    println!("nsys output prefix: {}", output_prefix.display());
     ensure_success(&run)
 }
 

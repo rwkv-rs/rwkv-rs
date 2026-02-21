@@ -1,9 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use plotters::prelude::*;
 
-use crate::serving::{ServeRunResult, SweepCaseResult, SweepRunResult};
+use crate::serving::{ServeRunResult, SweepRunResult};
 use crate::{BenchError, Result};
 
 #[derive(Clone, Debug)]
@@ -202,91 +201,56 @@ fn write_e2el_histogram_svg(run: &ServeRunResult, path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write_heatmap_svg(backend: &str, cases: &[&SweepCaseResult], path: &Path) -> Result<()> {
-    let batch_values = cases
+fn write_sweep_line_svg(
+    run: &SweepRunResult,
+    path: &Path,
+    caption: &str,
+    y_desc: &str,
+    value_of: impl Fn(&crate::serving::SweepCaseResult) -> f64,
+) -> Result<()> {
+    let mut points: Vec<(f64, f64)> = run
+        .cases
         .iter()
-        .map(|c| c.batch_size)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let paragraph_values = cases
-        .iter()
-        .map(|c| c.paragraph_len)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-
-    let mut value_map = BTreeMap::new();
-    for case in cases {
-        value_map.insert(
-            (case.batch_size, case.paragraph_len),
-            case.run.summary.total_token_throughput,
-        );
-    }
-
-    let min_v = value_map.values().copied().fold(f64::INFINITY, f64::min);
-    let max_v = value_map
-        .values()
-        .copied()
-        .fold(f64::NEG_INFINITY, f64::max)
-        .max(min_v + 1e-9);
+        .map(|case| (case.request_count as f64, value_of(case)))
+        .collect();
+    points.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     let root = SVGBackend::new(path, (1200, 720)).into_drawing_area();
     root.fill(&WHITE)?;
 
+    if points.is_empty() {
+        root.present()?;
+        return Ok(());
+    }
+
+    let x_min = points.first().map(|p| p.0).unwrap_or(0.0);
+    let x_max = points.last().map(|p| p.0).unwrap_or(1.0).max(x_min + 1.0);
+    let y_max = points
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(1.0f64, f64::max)
+        .max(1.0)
+        * 1.1;
+
     let mut chart = ChartBuilder::on(&root)
-        .caption(
-            format!("Sweep Heatmap ({backend}) - Total Token Throughput"),
-            ("sans-serif", 32),
-        )
+        .caption(caption, ("sans-serif", 34))
         .margin(20)
-        .x_label_area_size(70)
+        .x_label_area_size(60)
         .y_label_area_size(70)
-        .build_cartesian_2d(
-            0i32..batch_values.len() as i32,
-            0i32..paragraph_values.len() as i32,
-        )?;
+        .build_cartesian_2d(x_min..x_max, 0.0f64..y_max)?;
 
     chart
         .configure_mesh()
-        .x_labels(batch_values.len())
-        .x_label_formatter(&|idx| {
-            let i = (*idx as usize).min(batch_values.len().saturating_sub(1));
-            format!("{}", batch_values[i])
-        })
-        .y_labels(paragraph_values.len())
-        .y_label_formatter(&|idx| {
-            let i = (*idx as usize).min(paragraph_values.len().saturating_sub(1));
-            format!("{}", paragraph_values[i])
-        })
-        .x_desc("batch_size")
-        .y_desc("paragraph_len")
+        .x_desc("Request Count (=Concurrency)")
+        .y_desc(y_desc)
         .draw()?;
 
-    for (x_idx, batch) in batch_values.iter().enumerate() {
-        for (y_idx, paragraph) in paragraph_values.iter().enumerate() {
-            let value = value_map
-                .get(&(*batch, *paragraph))
-                .copied()
-                .unwrap_or_default();
-            let normalized = if (max_v - min_v).abs() < f64::EPSILON {
-                0.5
-            } else {
-                (value - min_v) / (max_v - min_v)
-            };
-
-            let hue = 240.0 - 240.0 * normalized;
-            let color = HSLColor(hue / 360.0, 0.7, 0.5);
-
-            chart.draw_series(std::iter::once(Rectangle::new(
-                [
-                    (x_idx as i32, y_idx as i32),
-                    (x_idx as i32 + 1, y_idx as i32 + 1),
-                ],
-                color.filled(),
-            )))?;
-        }
-    }
+    chart.draw_series(LineSeries::new(points.clone(), BLUE.stroke_width(3)))?;
+    chart.draw_series(
+        points
+            .iter()
+            .map(|(x, y)| Circle::new((*x, *y), 4, BLUE.filled())),
+    )?;
 
     root.present()?;
     Ok(())
@@ -305,12 +269,13 @@ pub fn generate_serve_report(run: &ServeRunResult, report_dir: &Path) -> Result<
     write_e2el_histogram_svg(run, &e2el_hist)?;
 
     let body = format!(
-        "# RWKV Serve Benchmark Report\n\n- Started: {}\n- Finished: {}\n- Duration: {:.3}s\n- Completed: {}\n- Failed: {}\n\n## Throughput\n- Request throughput: {:.3} req/s\n- Output token throughput: {:.3} tok/s\n- Total token throughput: {:.3} tok/s\n\n## Latency (ms)\n- TTFT p50/p95/p99: {:.3} / {:.3} / {:.3}\n- E2EL p50/p95/p99: {:.3} / {:.3} / {:.3}\n\n## Artifacts\n- latency_cdf.svg\n- throughput.svg\n- e2el_histogram.svg\n",
+        "# RWKV Serve Benchmark Report\n\n- Started: {}\n- Finished: {}\n- Duration: {:.3}s\n- Completed: {}\n- Failed: {}\n- Error rate: {:.2}%\n\n## Throughput\n- Request throughput: {:.3} req/s\n- Output token throughput: {:.3} tok/s\n- Total token throughput: {:.3} tok/s\n\n## Latency (ms)\n- TTFT p50/p95/p99: {:.3} / {:.3} / {:.3}\n- E2EL p50/p95/p99: {:.3} / {:.3} / {:.3}\n\n## Stage Breakdown (ms)\n- validate mean/p99: {:.3} / {:.3}\n- tokenize mean/p99: {:.3} / {:.3}\n- queue_wait mean/p99: {:.3} / {:.3}\n- schedule_wait mean/p99: {:.3} / {:.3}\n- prefill_first mean/p99: {:.3} / {:.3}\n- first_emit mean/p99: {:.3} / {:.3}\n- prefill_total mean/p99: {:.3} / {:.3}\n- decode_total mean/p99: {:.3} / {:.3}\n- request_total mean/p99: {:.3} / {:.3}\n\n## Metric Notes\n- TTFT: time-to-first-token\n- E2EL: end-to-end latency\n- prefill_first: first prefill launch wait since scheduled\n- first_emit: first token emit wait since first prefill\n\n## Errors\n- bad_request: {}\n- timeout: {}\n- cancel: {}\n- backend_error: {}\n- other: {}\n\n## Artifacts\n- latency_cdf.svg\n- throughput.svg\n- e2el_histogram.svg\n",
         run.started_at_utc,
         run.finished_at_utc,
         run.duration_s,
         run.summary.completed,
         run.summary.failed,
+        run.summary.error_rate * 100.0,
         run.summary.request_throughput,
         run.summary.output_token_throughput,
         run.summary.total_token_throughput,
@@ -320,6 +285,29 @@ pub fn generate_serve_report(run: &ServeRunResult, report_dir: &Path) -> Result<
         run.summary.e2el_ms.p50,
         run.summary.e2el_ms.p95,
         run.summary.e2el_ms.p99,
+        run.summary.stage_ms.mean_validate_ms,
+        run.summary.stage_ms.validate_ms.p99,
+        run.summary.stage_ms.mean_tokenize_ms,
+        run.summary.stage_ms.tokenize_ms.p99,
+        run.summary.stage_ms.mean_queue_wait_ms,
+        run.summary.stage_ms.queue_wait_ms.p99,
+        run.summary.stage_ms.mean_schedule_wait_ms,
+        run.summary.stage_ms.schedule_wait_ms.p99,
+        run.summary.stage_ms.mean_prefill_first_ms,
+        run.summary.stage_ms.prefill_first_ms.p99,
+        run.summary.stage_ms.mean_first_emit_ms,
+        run.summary.stage_ms.first_emit_ms.p99,
+        run.summary.stage_ms.mean_prefill_total_ms,
+        run.summary.stage_ms.prefill_total_ms.p99,
+        run.summary.stage_ms.mean_decode_total_ms,
+        run.summary.stage_ms.decode_total_ms.p99,
+        run.summary.stage_ms.mean_request_total_ms,
+        run.summary.stage_ms.request_total_ms.p99,
+        run.summary.error_buckets.bad_request,
+        run.summary.error_buckets.timeout,
+        run.summary.error_buckets.cancel,
+        run.summary.error_buckets.backend_error,
+        run.summary.error_buckets.other,
     );
 
     std::fs::write(&markdown, body)?;
@@ -336,27 +324,38 @@ pub fn generate_sweep_report(run: &SweepRunResult, report_dir: &Path) -> Result<
     let markdown = report_dir.join("report.md");
     let mut charts = Vec::new();
 
-    let mut grouped: BTreeMap<&str, Vec<&SweepCaseResult>> = BTreeMap::new();
-    for case in &run.cases {
-        grouped.entry(&case.backend).or_default().push(case);
-    }
-
-    for (backend, cases) in &grouped {
-        let heatmap = report_dir.join(format!("sweep_heatmap_{}.svg", backend));
-        write_heatmap_svg(backend, cases, &heatmap)?;
-        charts.push(heatmap);
-    }
+    let req_vs_rps = report_dir.join("sweep_request_count_vs_rps.svg");
+    let req_vs_tok = report_dir.join("sweep_request_count_vs_out_tok_s.svg");
+    let req_vs_ttft = report_dir.join("sweep_request_count_vs_p99_ttft.svg");
+    write_sweep_line_svg(
+        run,
+        &req_vs_rps,
+        "Request Count Sweep - Success RPS",
+        "success req/s",
+        |case| case.run.summary.request_throughput,
+    )?;
+    write_sweep_line_svg(
+        run,
+        &req_vs_tok,
+        "Request Count Sweep - Output Tokens/s",
+        "output tok/s",
+        |case| case.run.summary.output_token_throughput,
+    )?;
+    write_sweep_line_svg(
+        run,
+        &req_vs_ttft,
+        "Request Count Sweep - TTFT p99",
+        "ttft p99 (ms)",
+        |case| case.run.summary.ttft_ms.p99,
+    )?;
+    charts.extend([req_vs_rps, req_vs_tok, req_vs_ttft]);
 
     let best = run.best_case.as_ref().map_or_else(
         || "- None".to_string(),
         |case| {
             format!(
-                "- backend={} batch_size={} paragraph_len={} total_tok/s={:.3} req/s={:.3}",
-                case.backend,
-                case.batch_size,
-                case.paragraph_len,
-                case.total_token_throughput,
-                case.request_throughput
+                "- request_count={} total_tok/s={:.3} req/s={:.3}",
+                case.request_count, case.total_token_throughput, case.request_throughput
             )
         },
     );
