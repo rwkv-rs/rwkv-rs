@@ -75,6 +75,7 @@ pub trait RapidSampleBackend: Backend {
     ) -> RapidSampleOutputPrimitive<Self>;
 }
 
+#[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.executor.rapid_sample", skip_all))]
 pub fn rapid_sample<B: RapidSampleBackend>(
     logits: Tensor<B, 2>,
     states: Tensor<B, 1, Int>,

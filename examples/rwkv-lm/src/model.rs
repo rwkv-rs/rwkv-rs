@@ -167,6 +167,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
         )
     }
 
+    #[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.model.infer", skip_all))]
     pub fn infer(
         &self,
         tokens: Tensor<B, 2, Int>,
@@ -212,8 +213,14 @@ impl<B: Backend> AutoRegressiveModel<B> {
             );
         }
 
-        let embedded_context = self.embed.forward(tokens);
-        let embedded_context = self.layer_norm_for_first_cell.forward(embedded_context);
+        let embedded_context = {
+            rwkv_bench::trace_lite_scope!("rwkv.infer.model.embed");
+            self.embed.forward(tokens)
+        };
+        let embedded_context = {
+            rwkv_bench::trace_lite_scope!("rwkv.infer.model.layer_norm_pre");
+            self.layer_norm_for_first_cell.forward(embedded_context)
+        };
 
         let multi_causal_cells_input = MultiCausalCellsIO {
             embedded_context,
@@ -239,11 +246,13 @@ impl<B: Backend> AutoRegressiveModel<B> {
         match unembed_mode {
             UnembedMode::Skip => None,
             UnembedMode::LastToken => {
+                rwkv_bench::trace_lite_scope!("rwkv.infer.model.unembed");
                 let last =
                     embedded_context.slice([0..batch_size, (context_length - 1)..context_length]);
                 Some(self.unembed.forward(self.layer_norm_for_unembed.forward(last)))
             }
             UnembedMode::Full => {
+                rwkv_bench::trace_lite_scope!("rwkv.infer.model.unembed");
                 Some(self.unembed.forward(self.layer_norm_for_unembed.forward(embedded_context)))
             }
         }

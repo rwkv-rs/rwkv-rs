@@ -42,7 +42,7 @@ cpu = ["burn/cpu"]
 
 infer = ["dep:rwkv-infer", "rwkv-infer/http", "data"]
 infer-ipc = ["infer", "rwkv-infer/ipc-iceoryx2"]
-trace = ["rwkv-infer?/trace", "rwkv-train?/trace"]
+trace = ["rwkv-infer?/trace", "rwkv-train?/trace", "rwkv-nn?/trace"]
 nsys = ["rwkv-infer?/nsys", "rwkv-train?/nsys"]
 
 [dependencies]

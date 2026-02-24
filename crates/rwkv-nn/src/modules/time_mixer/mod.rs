@@ -141,6 +141,7 @@ impl<B: Backend> TimeMixer<B> {
         self.gated_readout.init_weights(device);
     }
 
+    #[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.model.time_mixer", skip_all))]
     pub fn forward<K: Wkv7Kernel<B>>(&self, time_mixer_input: TimeMixerIO<B>) -> TimeMixerIO<B> {
         let TimeMixerIO {
             embedded_context,

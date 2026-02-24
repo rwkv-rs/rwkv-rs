@@ -6162,6 +6162,7 @@ dependencies = [
  "rwkv-config",
  "rwkv-data",
  "serde",
+ "tracing",
 ]
 
 [[package]]

@@ -69,6 +69,7 @@ impl<B: Backend> ChannelMixer<B> {
         ));
     }
 
+    #[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.model.channel_mixer", skip_all))]
     pub fn forward(&self, channel_mixer_input: ChannelMixerIO<B>) -> ChannelMixerIO<B> {
         let ChannelMixerIO {
             embedded_context,

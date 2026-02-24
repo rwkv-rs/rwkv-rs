@@ -61,6 +61,7 @@ impl<B: Backend> MultiCausalCells<B> {
             .for_each(|cell| cell.init_weights(device));
     }
 
+    #[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.model.cells", skip_all))]
     pub fn forward<K: Wkv7Kernel<B>>(
         &self,
         multi_causal_cells_input: MultiCausalCellsIO<B>,
@@ -190,6 +191,7 @@ impl<B: Backend> CausalCell<B> {
         self.channel_mixer.init_weights(device);
     }
 
+    #[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.model.cell", skip_all, fields(cell_id = self.cell_id)))]
     pub fn forward<K: Wkv7Kernel<B>>(
         &self,
         causal_cell_input: CausalCellIO<B>,

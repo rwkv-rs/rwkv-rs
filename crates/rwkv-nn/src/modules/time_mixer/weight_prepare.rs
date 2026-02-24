@@ -198,6 +198,7 @@ impl<B: Backend> WeightPrepare<B> {
         constant_init(&mut self.param_key_replacement, 1.02);
     }
 
+    #[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.model.weight_prepare", skip_all))]
     pub fn forward(
         &self,
         embedded_context: Tensor<B, 3>,

@@ -10,6 +10,7 @@ bench = false
 
 [features]
 default = ["fusion", "wgpu"]
+trace = ["dep:tracing"]
 fusion = []
 wgpu = ["burn/wgpu"]
 webgpu = ["wgpu", "burn/webgpu"]
@@ -28,6 +29,7 @@ ndarray = { workspace = true }
 ndarray-npy = { workspace = true }
 
 serde = { workspace = true }
+tracing = { workspace = true, optional = true }
 
 itertools = { workspace = true }
 
