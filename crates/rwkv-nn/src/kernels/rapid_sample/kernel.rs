@@ -422,6 +422,23 @@ pub struct RapidSampleRepetitionOutputs {
     pub probs: Tensor<Line<f32>>,
 }
 
+#[derive(CubeLaunch, CubeType)]
+pub struct RapidSampleSamplingParams {
+    pub inv_temp: Tensor<f32>,  // [batch_size]
+    pub top_k: Tensor<u32>,    // [batch_size]
+    pub top_p: Tensor<f32>,    // [batch_size]
+}
+
+#[derive(CubeLaunch, CubeType)]
+pub struct RapidSamplePenaltyParams {
+    pub inv_temp: Tensor<f32>,           // [batch_size]
+    pub top_k: Tensor<u32>,             // [batch_size]
+    pub top_p: Tensor<f32>,             // [batch_size]
+    pub presence_penalty: Tensor<f32>,  // [batch_size]
+    pub repetition_penalty: Tensor<f32>,// [batch_size]
+    pub penalty_decay: Tensor<f32>,     // [batch_size]
+}
+
 #[derive(CubeLaunch, CubeType, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct RapidSampleConfig {
     pub block_size: usize,
@@ -754,10 +771,8 @@ fn sample_from_threshold(
 pub fn rapid_sample_temperature_topk_topp_kernel(
     inputs: &RapidSampleTemperatureInputs,
     outputs: &mut RapidSampleTemperatureOutputs,
+    params: &RapidSampleSamplingParams,
     vocab_size: u32,
-    inv_temp: f32,
-    top_k: u32,
-    top_p: f32,
     #[comptime] config: RapidSampleConfig,
 ) {
     let block_size = comptime![config.block_size];
@@ -769,6 +784,10 @@ pub fn rapid_sample_temperature_topk_topp_kernel(
     if unit_index >= block_size {
         terminate!();
     }
+
+    let inv_temp = params.inv_temp[batch_index];
+    let top_k = params.top_k[batch_index];
+    let top_p = params.top_p[batch_index];
 
     let vocab_size_usize = vocab_size as usize;
     let vocab_size_vec = vocab_size_usize / VEC;
@@ -884,17 +903,11 @@ pub fn rapid_sample_temperature_topk_topp_kernel(
 }
 
 #[cube(launch)]
-#[allow(clippy::too_many_arguments)]
 pub fn rapid_sample_repetition_temperature_topk_topp_kernel(
     inputs: &RapidSampleRepetitionInputs,
     outputs: &mut RapidSampleRepetitionOutputs,
+    params: &RapidSamplePenaltyParams,
     vocab_size: u32,
-    presence_penalty: f32,
-    repetition_penalty: f32,
-    penalty_decay: f32,
-    inv_temp: f32,
-    top_k: u32,
-    top_p: f32,
     #[comptime] config: RapidSampleConfig,
 ) {
     let block_size = comptime![config.block_size];
@@ -906,6 +919,13 @@ pub fn rapid_sample_repetition_temperature_topk_topp_kernel(
     if unit_index >= block_size {
         terminate!();
     }
+
+    let inv_temp = params.inv_temp[batch_index];
+    let top_k = params.top_k[batch_index];
+    let top_p = params.top_p[batch_index];
+    let presence_penalty = params.presence_penalty[batch_index];
+    let repetition_penalty = params.repetition_penalty[batch_index];
+    let penalty_decay = params.penalty_decay[batch_index];
 
     let vocab_size_usize = vocab_size as usize;
     let vocab_size_vec = vocab_size_usize / VEC;

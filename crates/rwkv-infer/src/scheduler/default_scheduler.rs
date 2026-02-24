@@ -3,18 +3,6 @@ use std::time::Instant;
 
 use crate::types::{EntryId, InferEntry, InferEntryState};
 
-#[cfg(feature = "trace")]
-macro_rules! trace_lite_scope {
-    ($name:literal) => {
-        let _rwkv_trace_scope = tracing::trace_span!($name).entered();
-    };
-}
-
-#[cfg(not(feature = "trace"))]
-macro_rules! trace_lite_scope {
-    ($name:literal) => {};
-}
-
 #[derive(Debug)]
 pub struct SchedulerStep {
     pub decode_ids: Vec<EntryId>,
@@ -62,7 +50,7 @@ impl DefaultScheduler {
         &mut self,
         entries: &mut std::collections::HashMap<EntryId, InferEntry>,
     ) -> SchedulerStep {
-        trace_lite_scope!("rwkv.infer.scheduler.default.schedule");
+        rwkv_bench::trace_lite_scope!("rwkv.infer.scheduler.default.schedule");
         #[cfg(feature = "trace")]
         tracing::trace!(
             waiting = self.waiting.len(),

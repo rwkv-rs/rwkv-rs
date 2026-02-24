@@ -31,7 +31,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-use rwkv_lm::inferring::RwkvLmExecutor;
+use rwkv_lm::inferring::RwkvLmModelForward;
 use rwkv_lm::model::AutoRegressiveModelConfig;
 use rwkv_lm::paths;
 
@@ -140,7 +140,7 @@ where
                         ))
                     })?;
 
-                let executor = RwkvLmExecutor::<B>::new(
+                let executor = RwkvLmModelForward::<B>::new(
                     device.clone(),
                     model_runtime,
                     model_cfg.clone(),

@@ -27,13 +27,7 @@ use burn::{
     },
 };
 
-/// Penalty settings used by repetition-aware sampling.
-#[derive(Clone, Copy, Debug)]
-pub struct RapidSamplePenaltyConfig {
-    pub presence_penalty: f32,
-    pub repetition_penalty: f32,
-    pub penalty_decay: f32,
-}
+pub use host::normalize_topk_topp;
 
 /// Unified rapid-sample output.
 #[derive(Clone, Debug)]
@@ -51,39 +45,59 @@ pub type RapidSampleOutputPrimitive<B> = RapidSampleOutput<FloatTensor<B>, IntTe
 
 #[allow(clippy::too_many_arguments)]
 pub trait RapidSampleBackend: Backend {
-    /// Unified rapid sample entry.
+    /// Per-batch rapid sample.
+    ///
+    /// All sampling parameters are per-batch tensors (pre-normalized by caller).
     ///
     /// # Shapes
     /// - `logits`: `[batch_size, vocab_size]`
     /// - `states`: `[batch_size]`
-    /// - `penalties.0`: `[batch_size, vocab_size]` when provided, dtype must be `F32`
+    /// - `inv_temperatures`: `[batch_size]` (pre-computed `1.0 / temperature`)
+    /// - `top_ks`: `[batch_size]` (pre-normalized via `normalize_topk_topp`)
+    /// - `top_ps`: `[batch_size]` (pre-normalized via `normalize_topk_topp`)
+    /// - penalties tuple when provided:
+    ///   - `.0`: `[batch_size, vocab_size]` penalty state, dtype `F32`
+    ///   - `.1`: `[batch_size]` presence_penalty
+    ///   - `.2`: `[batch_size]` repetition_penalty
+    ///   - `.3`: `[batch_size]` penalty_decay
     fn rapid_sample(
         logits: FloatTensor<Self>,
         states: IntTensor<Self>,
-        temperature: f32,
-        top_k: i32,
-        top_p: f32,
-        penalties: Option<(FloatTensor<Self>, RapidSamplePenaltyConfig)>,
+        inv_temperatures: FloatTensor<Self>,
+        top_ks: IntTensor<Self>,
+        top_ps: FloatTensor<Self>,
+        penalties: Option<(
+            FloatTensor<Self>,
+            FloatTensor<Self>,
+            FloatTensor<Self>,
+            FloatTensor<Self>,
+        )>,
     ) -> RapidSampleOutputPrimitive<Self>;
 }
 
 pub fn rapid_sample<B: RapidSampleBackend>(
     logits: Tensor<B, 2>,
     states: Tensor<B, 1, Int>,
-    temperature: f32,
-    top_k: i32,
-    top_p: f32,
-    penalties: Option<(Tensor<B, 2>, RapidSamplePenaltyConfig)>,
+    inv_temperatures: Tensor<B, 1>,
+    top_ks: Tensor<B, 1, Int>,
+    top_ps: Tensor<B, 1>,
+    penalties: Option<(Tensor<B, 2>, Tensor<B, 1>, Tensor<B, 1>, Tensor<B, 1>)>,
 ) -> RapidSampleOutputTensor<B> {
-    let primitive_penalties =
-        penalties.map(|(penalties, config)| (penalties.into_primitive().tensor(), config));
+    let primitive_penalties = penalties.map(|(pen, pp, rp, pd)| {
+        (
+            pen.into_primitive().tensor(),
+            pp.into_primitive().tensor(),
+            rp.into_primitive().tensor(),
+            pd.into_primitive().tensor(),
+        )
+    });
 
     let out = B::rapid_sample(
         logits.into_primitive().tensor(),
         states.into_primitive(),
-        temperature,
-        top_k,
-        top_p,
+        inv_temperatures.into_primitive().tensor(),
+        top_ks.into_primitive(),
+        top_ps.into_primitive().tensor(),
         primitive_penalties,
     );
 

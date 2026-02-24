@@ -9,30 +9,6 @@ use crate::types::{
     EngineEvent, EntryId, FinishMetadata, FinishReason, InferEntry, InferEntryState, SamplingConfig,
 };
 
-#[cfg(feature = "trace")]
-macro_rules! trace_lite_scope {
-    ($name:literal) => {
-        let _rwkv_trace_scope = tracing::trace_span!($name).entered();
-    };
-}
-
-#[cfg(not(feature = "trace"))]
-macro_rules! trace_lite_scope {
-    ($name:literal) => {};
-}
-
-#[cfg(feature = "trace")]
-macro_rules! trace_full_scope {
-    ($name:literal) => {
-        let _rwkv_trace_scope = tracing::info_span!($name).entered();
-    };
-}
-
-#[cfg(not(feature = "trace"))]
-macro_rules! trace_full_scope {
-    ($name:literal) => {};
-}
-
 #[derive(Clone, Debug)]
 pub struct EngineRuntimeConfig {
     pub tokenizer_vocab_path: String,
@@ -54,17 +30,24 @@ impl Default for EngineRuntimeConfig {
     }
 }
 
-/// Model executor hook used by the engine.
-pub trait InferExecutor: Send + 'static {
-    fn prefill(&mut self, batch_positions: &[(usize, &[i32], &[u8])]) -> crate::Result<()>;
-
-    fn decode(
+/// Model forward inference interface. Prefill and decode are unified through this interface.
+pub trait ModelForward: Send + 'static {
+    /// Forward inference + sampling.
+    /// - `batch_positions`: `[(batch_index, &[token_ids], &[context_mask_u8])]`
+    ///   prefill chunk: `token_ids.len() == paragraph_len`
+    ///   decode step: `token_ids.len() == 1`
+    /// - `samplings`: per-position sampling parameters (one per batch_position)
+    /// - `need_sample`: when false, skip unembed+sampling (prefill intermediate chunk), return empty Vec
+    /// Returns: `[(batch_index, sampled_token_id)]`
+    fn forward(
         &mut self,
-        batch_positions: &[(usize, i32)],
-        sampling: SamplingConfig,
+        batch_positions: &[(usize, &[i32], &[u8])],
+        samplings: &[SamplingConfig],
+        need_sample: bool,
     ) -> crate::Result<Vec<(usize, i32)>>;
 
-    fn reset_batch_position(&mut self, batch_index: usize) -> crate::Result<()>;
+    /// Reset recurrent state for the given batch position.
+    fn reset(&mut self, batch_index: usize) -> crate::Result<()>;
 }
 
 struct PendingSubmit {
@@ -85,13 +68,13 @@ pub struct EngineRuntime {
     scheduler: DefaultScheduler,
     entries: HashMap<EntryId, InferEntry>,
     rx: mpsc::Receiver<crate::engine::EngineCommand>,
-    executor: Box<dyn InferExecutor>,
+    executor: Box<dyn ModelForward>,
 }
 
 impl EngineRuntime {
     pub fn spawn(
         cfg: EngineRuntimeConfig,
-        executor: Box<dyn InferExecutor>,
+        executor: Box<dyn ModelForward>,
     ) -> crate::Result<crate::engine::EngineHandle> {
         let tokenizer = Tokenizer::new(&cfg.tokenizer_vocab_path).map_err(|e| {
             crate::Error::bad_request(format!(
@@ -113,7 +96,7 @@ impl EngineRuntime {
         cfg: EngineRuntimeConfig,
         tokenizer: Tokenizer,
         rx: mpsc::Receiver<crate::engine::EngineCommand>,
-        executor: Box<dyn InferExecutor>,
+        executor: Box<dyn ModelForward>,
     ) -> Self {
         let scheduler = DefaultScheduler::new(cfg.max_batch_size, cfg.decode_first);
         Self {
@@ -131,7 +114,7 @@ impl EngineRuntime {
         loop {
             let mut pending_submits = Vec::new();
             {
-                trace_lite_scope!("rwkv.infer.engine.runtime.run");
+                rwkv_bench::trace_lite_scope!("rwkv.infer.engine.runtime.run");
                 while let Ok(cmd) = self.rx.try_recv() {
                     match cmd {
                         crate::engine::EngineCommand::SubmitText {
@@ -176,7 +159,7 @@ impl EngineRuntime {
     }
 
     fn handle_submit_batch(&mut self, submits: Vec<PendingSubmit>) {
-        trace_full_scope!("rwkv.infer.engine.runtime.submit");
+        rwkv_bench::trace_scope!("rwkv.infer.engine.runtime.submit");
         if submits.is_empty() {
             return;
         }
@@ -266,11 +249,11 @@ impl EngineRuntime {
     }
 
     fn handle_cancel(&mut self, entry_id: EntryId) {
-        trace_full_scope!("rwkv.infer.engine.runtime.cancel");
+        rwkv_bench::trace_scope!("rwkv.infer.engine.runtime.cancel");
         if let Some(entry) = self.entries.get_mut(&entry_id) {
             entry.state = InferEntryState::Cancelled;
             if let Some(batch_index) = entry.batch_index.take() {
-                let _ = self.executor.reset_batch_position(batch_index);
+                let _ = self.executor.reset(batch_index);
             }
         }
         self.scheduler.on_done(entry_id);
@@ -278,7 +261,7 @@ impl EngineRuntime {
 
     async fn tick(&mut self) {
         let step = {
-            trace_lite_scope!("rwkv.infer.engine.runtime.tick");
+            rwkv_bench::trace_lite_scope!("rwkv.infer.engine.runtime.tick");
             self.scheduler.schedule(&mut self.entries)
         };
 
@@ -296,9 +279,11 @@ impl EngineRuntime {
             return;
         }
         let prefill_result = {
-            trace_full_scope!("rwkv.infer.engine.runtime.prefill");
+            rwkv_bench::trace_scope!("rwkv.infer.engine.runtime.prefill");
             let paragraph_len = self.cfg.paragraph_len;
             let mut batch_positions: Vec<(usize, Vec<i32>, Vec<u8>)> = Vec::new();
+            let mut last_chunk_entries: Vec<EntryId> = Vec::new();
+            let mut last_chunk_samplings: Vec<SamplingConfig> = Vec::new();
 
             for entry_id in prefill_ids.iter().copied() {
                 let Some(entry) = self.entries.get_mut(&entry_id) else {
@@ -361,6 +346,8 @@ impl EngineRuntime {
                     entry.prefill_padded_token_ids.clear();
                     entry.prefill_pad_len = 0;
                     entry.prefill_chunk_cursor = 0;
+                    last_chunk_entries.push(entry_id);
+                    last_chunk_samplings.push(entry.sampling);
                 }
             }
 
@@ -383,7 +370,10 @@ impl EngineRuntime {
                 .collect();
             #[cfg(feature = "nsys")]
             let _nvtx_prefill = nvtx::range!("rwkv.infer.prefill");
-            self.executor.prefill(&args)
+            // For now, prefill all chunks without sampling.
+            // Last-chunk sampling will be handled by the next decode tick.
+            let default_samplings = vec![SamplingConfig::default(); args.len()];
+            self.executor.forward(&args, &default_samplings, false)
         };
 
         if let Err(err) = prefill_result {
@@ -399,199 +389,175 @@ impl EngineRuntime {
             return;
         }
 
-        let mut groups: HashMap<(u32, i32, u32, u32, u32, u32), Vec<EntryId>> = HashMap::new();
+        let mut batch_inputs: Vec<(usize, i32)> = Vec::new();
+        let mut batch_to_entry: HashMap<usize, EntryId> = HashMap::new();
+        let mut samplings: Vec<SamplingConfig> = Vec::new();
+
         for entry_id in decode_ids.iter().copied() {
-            let Some(entry) = self.entries.get(&entry_id) else {
+            let Some(entry) = self.entries.get_mut(&entry_id) else {
                 continue;
             };
-            let key = (
-                entry.sampling.temperature.to_bits(),
-                entry.sampling.top_k,
-                entry.sampling.top_p.to_bits(),
-                entry.sampling.presence_penalty.to_bits(),
-                entry.sampling.repetition_penalty.to_bits(),
-                entry.sampling.penalty_decay.to_bits(),
-            );
-            groups.entry(key).or_default().push(entry_id);
+            let Some(batch_index) = entry.batch_index else {
+                continue;
+            };
+
+            let last_token_id = entry
+                .generated_token_ids
+                .last()
+                .copied()
+                .or_else(|| entry.input_token_ids.last().copied())
+                .unwrap_or(0);
+
+            samplings.push(entry.sampling);
+            batch_inputs.push((batch_index, last_token_id));
+            batch_to_entry.insert(batch_index, entry_id);
         }
 
-        for entry_ids in groups.values() {
-            let mut batch_inputs: Vec<(usize, i32)> = Vec::new();
-            let mut batch_to_entry: HashMap<usize, EntryId> = HashMap::new();
-            let mut sampling = SamplingConfig::default();
+        if batch_inputs.is_empty() {
+            return;
+        }
 
-            for entry_id in entry_ids.iter().copied() {
-                let Some(entry) = self.entries.get_mut(&entry_id) else {
-                    continue;
-                };
-                let Some(batch_index) = entry.batch_index else {
-                    continue;
-                };
+        #[cfg(feature = "trace")]
+        tracing::info!(
+            target: "rwkv.infer",
+            stage = "decode_step",
+            batch_size = batch_inputs.len(),
+            "dispatch decode batch"
+        );
 
-                let last_token_id = entry
-                    .generated_token_ids
-                    .last()
-                    .copied()
-                    .or_else(|| entry.input_token_ids.last().copied())
-                    .unwrap_or(0);
-
-                sampling = entry.sampling;
-                batch_inputs.push((batch_index, last_token_id));
-                batch_to_entry.insert(batch_index, entry_id);
+        let decode_result = {
+            rwkv_bench::trace_scope!("rwkv.infer.engine.runtime.decode");
+            #[cfg(feature = "nsys")]
+            let _nvtx_decode = nvtx::range!("rwkv.infer.decode");
+            let args: Vec<(usize, Vec<i32>, Vec<u8>)> = batch_inputs
+                .iter()
+                .map(|(batch_index, token_id)| (*batch_index, vec![*token_id], vec![1u8]))
+                .collect();
+            let args_ref: Vec<(usize, &[i32], &[u8])> = args
+                .iter()
+                .map(|(bi, tids, cm)| (*bi, tids.as_slice(), cm.as_slice()))
+                .collect();
+            self.executor.forward(&args_ref, &samplings, true)
+        };
+        let decode_out = match decode_result {
+            Ok(out) => out,
+            Err(err) => {
+                let chain = err.format_chain();
+                log::error!("decode failed: {chain}");
+                self.fail_entries(decode_ids, format!("decode failed: {chain}"))
+                    .await;
+                return;
             }
+        };
 
-            if batch_inputs.is_empty() {
+        for (batch_index, token_id) in decode_out {
+            let Some(entry_id) = batch_to_entry.get(&batch_index).copied() else {
                 continue;
+            };
+            let Some(entry) = self.entries.get_mut(&entry_id) else {
+                continue;
+            };
+            let decode_at = Instant::now();
+            if entry.first_decode_at.is_none() {
+                entry.first_decode_at = Some(decode_at);
             }
+            entry.last_decode_at = Some(decode_at);
 
             #[cfg(feature = "trace")]
             tracing::trace!(
                 target: "rwkv.infer",
-                stage = "decode_group",
-                batch_size = batch_inputs.len(),
-                "dispatch decode group"
+                request_id = %entry.entry_id,
+                batch_index,
+                generated_tokens = entry.generated_token_ids.len(),
+                "decode token"
             );
 
-            #[cfg(feature = "trace")]
-            tracing::info!(
-                target: "rwkv.infer",
-                stage = "decode_step",
-                group_size = batch_inputs.len(),
-                temperature = sampling.temperature,
-                top_k = sampling.top_k,
-                top_p = sampling.top_p,
-                presence_penalty = sampling.presence_penalty,
-                repetition_penalty = sampling.repetition_penalty,
-                penalty_decay = sampling.penalty_decay
+            entry.generated_token_ids.push(token_id);
+            let bytes = self.tokenizer.token_bytes(token_id as u16);
+            entry.generated_bytes.extend_from_slice(bytes);
+
+            let (emit_text, matched_stop) = entry.emit_stream_text();
+            if !emit_text.is_empty() && entry.first_emit_at.is_none() {
+                entry.first_emit_at = Some(Instant::now());
+            }
+            let matched_stop_index = matched_stop.map(|stop| stop.index);
+            let hit_stop_suffix = matched_stop_index.is_some();
+            let hit_max_new_tokens = entry.generated_token_ids.len() >= entry.max_new_tokens;
+            let finish_meta = finish_metadata_for_entry(
+                entry,
+                matched_stop_index,
+                hit_max_new_tokens,
+                Instant::now(),
             );
 
-            let decode_result = {
-                trace_full_scope!("rwkv.infer.engine.runtime.decode");
-                sampling.max_new_tokens = 1;
-                #[cfg(feature = "nsys")]
-                let _nvtx_decode = nvtx::range!("rwkv.infer.decode");
-                self.executor.decode(&batch_inputs, sampling)
-            };
-            let decode_out = match decode_result {
-                Ok(out) => out,
-                Err(err) => {
-                    let chain = err.format_chain();
-                    log::error!("decode failed: {chain}");
-                    self.fail_entries(entry_ids, format!("decode failed: {chain}"))
-                        .await;
-                    continue;
-                }
-            };
-
-            for (batch_index, token_id) in decode_out {
-                let Some(entry_id) = batch_to_entry.get(&batch_index).copied() else {
-                    continue;
-                };
-                let Some(entry) = self.entries.get_mut(&entry_id) else {
-                    continue;
-                };
-                let decode_at = Instant::now();
-                if entry.first_decode_at.is_none() {
-                    entry.first_decode_at = Some(decode_at);
-                }
-                entry.last_decode_at = Some(decode_at);
-
-                #[cfg(feature = "trace")]
-                tracing::trace!(
-                    target: "rwkv.infer",
-                    request_id = %entry.entry_id,
-                    batch_index,
-                    generated_tokens = entry.generated_token_ids.len(),
-                    "decode token"
-                );
-
-                entry.generated_token_ids.push(token_id);
-                let bytes = self.tokenizer.token_bytes(token_id as u16);
-                entry.generated_bytes.extend_from_slice(bytes);
-
-                let (emit_text, matched_stop) = entry.emit_stream_text();
-                if !emit_text.is_empty() && entry.first_emit_at.is_none() {
-                    entry.first_emit_at = Some(Instant::now());
-                }
-                let matched_stop_index = matched_stop.map(|stop| stop.index);
-                let hit_stop_suffix = matched_stop_index.is_some();
-                let hit_max_new_tokens = entry.generated_token_ids.len() >= entry.max_new_tokens;
-                let finish_meta = finish_metadata_for_entry(
-                    entry,
-                    matched_stop_index,
-                    hit_max_new_tokens,
-                    Instant::now(),
-                );
-
-                let tx = entry.stream_tx.clone();
-                if let Some(tx) = tx {
-                    if !emit_text.is_empty() {
-                        #[cfg(feature = "trace")]
-                        tracing::trace!(
-                            request_id = %entry.entry_id,
-                            chars = emit_text.chars().count(),
-                            "stream emit chunk"
-                        );
-                        let _ = tx.send(EngineEvent::Text(emit_text)).await;
-                    }
-
-                    if let Some(meta) = finish_meta.as_ref() {
-                        let flush_lossy = false;
-                        let tail = if hit_stop_suffix {
-                            entry.flush_stream_text_until(entry.stop_trunc_len(), flush_lossy)
-                        } else {
-                            entry.flush_stream_text_until(entry.generated_bytes.len(), flush_lossy)
-                        };
-                        if !tail.is_empty() {
-                            if entry.first_emit_at.is_none() {
-                                entry.first_emit_at = Some(Instant::now());
-                            }
-                            let _ = tx.send(EngineEvent::Text(tail)).await;
-                        }
-                        let _ = tx.send(EngineEvent::Done(meta.clone())).await;
-                    }
-                }
-
-                if let Some(meta) = finish_meta {
+            let tx = entry.stream_tx.clone();
+            if let Some(tx) = tx {
+                if !emit_text.is_empty() {
                     #[cfg(feature = "trace")]
-                    tracing::info!(
+                    tracing::trace!(
                         request_id = %entry.entry_id,
-                        finish_reason = meta.reason.as_openai_str(),
-                        generated_tokens = meta.generated_tokens,
-                        max_new_tokens = meta.max_new_tokens,
-                        queue_wait_ms = meta.timings_ms.as_ref().and_then(|t| t.queue_wait_ms),
-                        schedule_wait_ms = meta.timings_ms.as_ref().and_then(|t| t.schedule_wait_ms),
-                        prefill_first_ms = meta.timings_ms.as_ref().and_then(|t| t.prefill_first_ms),
-                        first_emit_ms = meta.timings_ms.as_ref().and_then(|t| t.first_emit_ms),
-                        prefill_total_ms = meta.timings_ms.as_ref().and_then(|t| t.prefill_total_ms),
-                        decode_total_ms = meta.timings_ms.as_ref().and_then(|t| t.decode_total_ms),
-                        request_total_ms = meta.timings_ms.as_ref().and_then(|t| t.request_total_ms),
-                        "request finished"
+                        chars = emit_text.chars().count(),
+                        "stream emit chunk"
                     );
-                    match meta.reason {
-                        FinishReason::Stop => {
-                            log::info!(
-                                "generation finished: finish_reason=stop matched_stop_suffix_index={} matched_stop_suffix={:?} generated_tokens={} max_tokens={}",
-                                meta.matched_stop_suffix_index.unwrap_or_default(),
-                                meta.matched_stop_suffix.as_deref().unwrap_or(""),
-                                meta.generated_tokens,
-                                meta.max_new_tokens
-                            );
-                        }
-                        FinishReason::Length => {
-                            log::info!(
-                                "generation finished: finish_reason=length generated_tokens={} max_tokens={}",
-                                meta.generated_tokens,
-                                meta.max_new_tokens
-                            );
-                        }
-                    }
-                    entry.state = InferEntryState::Done;
-                    if let Some(finished_batch_index) = entry.batch_index.take() {
-                        let _ = self.executor.reset_batch_position(finished_batch_index);
-                    }
-                    self.scheduler.on_done(entry_id);
+                    let _ = tx.send(EngineEvent::Text(emit_text)).await;
                 }
+
+                if let Some(meta) = finish_meta.as_ref() {
+                    let flush_lossy = false;
+                    let tail = if hit_stop_suffix {
+                        entry.flush_stream_text_until(entry.stop_trunc_len(), flush_lossy)
+                    } else {
+                        entry.flush_stream_text_until(entry.generated_bytes.len(), flush_lossy)
+                    };
+                    if !tail.is_empty() {
+                        if entry.first_emit_at.is_none() {
+                            entry.first_emit_at = Some(Instant::now());
+                        }
+                        let _ = tx.send(EngineEvent::Text(tail)).await;
+                    }
+                    let _ = tx.send(EngineEvent::Done(meta.clone())).await;
+                }
+            }
+
+            if let Some(meta) = finish_meta {
+                #[cfg(feature = "trace")]
+                tracing::info!(
+                    request_id = %entry.entry_id,
+                    finish_reason = meta.reason.as_openai_str(),
+                    generated_tokens = meta.generated_tokens,
+                    max_new_tokens = meta.max_new_tokens,
+                    queue_wait_ms = meta.timings_ms.as_ref().and_then(|t| t.queue_wait_ms),
+                    schedule_wait_ms = meta.timings_ms.as_ref().and_then(|t| t.schedule_wait_ms),
+                    prefill_first_ms = meta.timings_ms.as_ref().and_then(|t| t.prefill_first_ms),
+                    first_emit_ms = meta.timings_ms.as_ref().and_then(|t| t.first_emit_ms),
+                    prefill_total_ms = meta.timings_ms.as_ref().and_then(|t| t.prefill_total_ms),
+                    decode_total_ms = meta.timings_ms.as_ref().and_then(|t| t.decode_total_ms),
+                    request_total_ms = meta.timings_ms.as_ref().and_then(|t| t.request_total_ms),
+                    "request finished"
+                );
+                match meta.reason {
+                    FinishReason::Stop => {
+                        log::info!(
+                            "generation finished: finish_reason=stop matched_stop_suffix_index={} matched_stop_suffix={:?} generated_tokens={} max_tokens={}",
+                            meta.matched_stop_suffix_index.unwrap_or_default(),
+                            meta.matched_stop_suffix.as_deref().unwrap_or(""),
+                            meta.generated_tokens,
+                            meta.max_new_tokens
+                        );
+                    }
+                    FinishReason::Length => {
+                        log::info!(
+                            "generation finished: finish_reason=length generated_tokens={} max_tokens={}",
+                            meta.generated_tokens,
+                            meta.max_new_tokens
+                        );
+                    }
+                }
+                entry.state = InferEntryState::Done;
+                if let Some(finished_batch_index) = entry.batch_index.take() {
+                    let _ = self.executor.reset(finished_batch_index);
+                }
+                self.scheduler.on_done(entry_id);
             }
         }
     }
@@ -605,7 +571,7 @@ impl EngineRuntime {
                 entry.state = InferEntryState::Failed;
                 stream_tx = entry.stream_tx.clone();
                 if let Some(batch_index) = entry.batch_index.take() {
-                    let _ = self.executor.reset_batch_position(batch_index);
+                    let _ = self.executor.reset(batch_index);
                 }
             }
             if let Some(tx) = stream_tx {

@@ -12,17 +12,37 @@ use burn_cubecl::{
 };
 
 use crate::kernels::rapid_sample::{
-    RapidSampleOutput, RapidSamplePenaltyConfig,
+    RapidSampleOutput,
     kernel::{
-        RapidSampleConfig, RapidSampleRepetitionInputsLaunch, RapidSampleRepetitionOutputsLaunch,
+        RapidSampleConfig, RapidSamplePenaltyParamsLaunch,
+        RapidSampleRepetitionInputsLaunch, RapidSampleRepetitionOutputsLaunch,
+        RapidSampleSamplingParamsLaunch,
         RapidSampleTemperatureInputsLaunch, RapidSampleTemperatureOutputsLaunch,
         rapid_sample_repetition_temperature_topk_topp_kernel,
         rapid_sample_temperature_topk_topp_kernel,
     },
 };
 
-const MIN_TEMP: f32 = 0.001;
-const MAX_TEMP: f32 = 1000f32;
+/// Normalize top_k and top_p for a given vocab_size.
+///
+/// Exported so callers can pre-normalize before building GPU tensors.
+pub fn normalize_topk_topp(vocab_size: usize, mut top_k: i32, mut top_p: f32) -> (u32, f32) {
+    if top_k <= 0 || top_k as usize > vocab_size {
+        top_k = vocab_size as i32;
+    }
+
+    if !(0f32..=1f32).contains(&top_p) {
+        top_p = 1f32;
+    }
+
+    if top_p == 0f32 {
+        // Match rapid-sampling behavior: deterministic argmax when top_p==0.
+        top_k = 1;
+        top_p = 1f32;
+    }
+
+    (top_k as u32, top_p)
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rapid_sample_topk_topp_impl<
@@ -33,30 +53,36 @@ pub(crate) fn rapid_sample_topk_topp_impl<
 >(
     logits: FloatTensor<CubeBackend<R, F, I, BT>>,
     states: IntTensor<CubeBackend<R, F, I, BT>>,
-    temperature: f32,
-    top_k: i32,
-    top_p: f32,
+    inv_temperatures: FloatTensor<CubeBackend<R, F, I, BT>>,
+    top_ks: IntTensor<CubeBackend<R, F, I, BT>>,
+    top_ps: FloatTensor<CubeBackend<R, F, I, BT>>,
     penalties: Option<(
         FloatTensor<CubeBackend<R, F, I, BT>>,
-        RapidSamplePenaltyConfig,
+        FloatTensor<CubeBackend<R, F, I, BT>>,
+        FloatTensor<CubeBackend<R, F, I, BT>>,
+        FloatTensor<CubeBackend<R, F, I, BT>>,
     )>,
 ) -> RapidSampleOutput<FloatTensor<CubeBackend<R, F, I, BT>>, IntTensor<CubeBackend<R, F, I, BT>>> {
-    assert!(
-        temperature >= MIN_TEMP && temperature <= MAX_TEMP,
-        "temperature must be in [{MIN_TEMP}, {MAX_TEMP}], got {temperature}"
-    );
-
     let logits = into_contiguous(logits);
     let logits = cast::<R>(logits, DType::F32);
 
     let states = into_contiguous(states);
     let states = cast::<R>(states, DType::U32);
 
+    let inv_temperatures = into_contiguous(inv_temperatures);
+    let inv_temperatures = cast::<R>(inv_temperatures, DType::F32);
+
+    let top_ks = into_contiguous(top_ks);
+    let top_ks = cast::<R>(top_ks, DType::U32);
+
+    let top_ps = into_contiguous(top_ps);
+    let top_ps = cast::<R>(top_ps, DType::F32);
+
     let client = logits.client.clone();
     let device = logits.device.clone();
     let shape = logits.shape.clone();
 
-    assert_eq!(
+    debug_assert_eq!(
         shape.num_dims(),
         2,
         "logits must have shape [batch_size, vocab_size]"
@@ -65,26 +91,23 @@ pub(crate) fn rapid_sample_topk_topp_impl<
     let batch_size = shape.dims[0];
     let vocab_size = shape.dims[1];
 
-    assert!(batch_size > 0, "batch_size must be > 0");
-    assert!(vocab_size > 0, "vocab_size must be > 0");
-    assert_eq!(
+    debug_assert!(batch_size > 0, "batch_size must be > 0");
+    debug_assert!(vocab_size > 0, "vocab_size must be > 0");
+    debug_assert_eq!(
         vocab_size % 4,
         0,
         "vocab_size must be a multiple of 4 for rapid_sample, got {vocab_size}"
     );
 
-    let expected_states_shape = Shape::new([batch_size]);
-    assert_eq!(
-        states.shape, expected_states_shape,
-        "states must have shape [batch_size]"
-    );
-
-    let (top_k, top_p) = normalize_topk_topp(vocab_size, top_k, top_p);
-    let inv_temp = 1f32 / temperature;
+    let expected_1d = Shape::new([batch_size]);
+    debug_assert_eq!(states.shape, expected_1d, "states must have shape [batch_size]");
+    debug_assert_eq!(inv_temperatures.shape, expected_1d, "inv_temperatures must have shape [batch_size]");
+    debug_assert_eq!(top_ks.shape, expected_1d, "top_ks must have shape [batch_size]");
+    debug_assert_eq!(top_ps.shape, expected_1d, "top_ps must have shape [batch_size]");
 
     let max_units_per_cube = client.properties().hardware.max_units_per_cube as usize;
     let block_size = select_block_size(vocab_size, max_units_per_cube);
-    assert!(
+    debug_assert!(
         vocab_size <= block_size * block_size,
         "vocab_size too large for block_size={block_size} (max={}): vocab_size={vocab_size}",
         block_size * block_size
@@ -118,10 +141,12 @@ pub(crate) fn rapid_sample_topk_topp_impl<
                     states.as_tensor_arg(1),
                     probs.as_tensor_arg(4),
                 ),
+                RapidSampleSamplingParamsLaunch::new(
+                    inv_temperatures.as_tensor_arg(1),
+                    top_ks.as_tensor_arg(1),
+                    top_ps.as_tensor_arg(1),
+                ),
                 ScalarArg::new(vocab_size as u32),
-                ScalarArg::new(inv_temp),
-                ScalarArg::new(top_k),
-                ScalarArg::new(top_p),
                 config,
             )
             .expect("rapid_sample_temperature_topk_topp_kernel should never fail");
@@ -132,20 +157,25 @@ pub(crate) fn rapid_sample_topk_topp_impl<
                 penalties: None,
             }
         }
-        Some((penalties, penalty_cfg)) => {
+        Some((penalties, presence_penalty, repetition_penalty, penalty_decay)) => {
             let penalties = into_contiguous(penalties);
-            // Match the reference rapid-sampling contract: penalties are updated in-place as float32.
-            assert_eq!(
+            debug_assert_eq!(
                 penalties.dtype,
                 DType::F32,
                 "rapid_sample: penalties must be F32, got {:?}",
                 penalties.dtype
             );
-
-            assert_eq!(
+            debug_assert_eq!(
                 penalties.shape, shape,
                 "penalties must have the same shape as logits"
             );
+
+            let presence_penalty = into_contiguous(presence_penalty);
+            let presence_penalty = cast::<R>(presence_penalty, DType::F32);
+            let repetition_penalty = into_contiguous(repetition_penalty);
+            let repetition_penalty = cast::<R>(repetition_penalty, DType::F32);
+            let penalty_decay = into_contiguous(penalty_decay);
+            let penalty_decay = cast::<R>(penalty_decay, DType::F32);
 
             rapid_sample_repetition_temperature_topk_topp_kernel::launch(
                 &client,
@@ -158,13 +188,15 @@ pub(crate) fn rapid_sample_topk_topp_impl<
                     states.as_tensor_arg(1),
                     probs.as_tensor_arg(4),
                 ),
+                RapidSamplePenaltyParamsLaunch::new(
+                    inv_temperatures.as_tensor_arg(1),
+                    top_ks.as_tensor_arg(1),
+                    top_ps.as_tensor_arg(1),
+                    presence_penalty.as_tensor_arg(1),
+                    repetition_penalty.as_tensor_arg(1),
+                    penalty_decay.as_tensor_arg(1),
+                ),
                 ScalarArg::new(vocab_size as u32),
-                ScalarArg::new(penalty_cfg.presence_penalty),
-                ScalarArg::new(penalty_cfg.repetition_penalty),
-                ScalarArg::new(penalty_cfg.penalty_decay),
-                ScalarArg::new(inv_temp),
-                ScalarArg::new(top_k),
-                ScalarArg::new(top_p),
                 config,
             )
             .expect("rapid_sample_repetition_temperature_topk_topp_kernel should never fail");
@@ -176,24 +208,6 @@ pub(crate) fn rapid_sample_topk_topp_impl<
             }
         }
     }
-}
-
-fn normalize_topk_topp(vocab_size: usize, mut top_k: i32, mut top_p: f32) -> (u32, f32) {
-    if top_k <= 0 || top_k as usize > vocab_size {
-        top_k = vocab_size as i32;
-    }
-
-    if !(0f32..=1f32).contains(&top_p) {
-        top_p = 1f32;
-    }
-
-    if top_p == 0f32 {
-        // Match rapid-sampling behavior: deterministic argmax when top_p==0.
-        top_k = 1;
-        top_p = 1f32;
-    }
-
-    (top_k as u32, top_p)
 }
 
 fn desired_block_size(vocab_size: usize) -> usize {

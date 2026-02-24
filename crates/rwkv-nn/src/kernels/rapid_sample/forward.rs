@@ -3,7 +3,7 @@ use burn::tensor::ops::{FloatTensor, IntTensor};
 use burn_cubecl::CubeRuntime;
 
 use crate::kernels::rapid_sample::{
-    RapidSampleBackend, RapidSampleOutputPrimitive, RapidSamplePenaltyConfig,
+    RapidSampleBackend, RapidSampleOutputPrimitive,
     host::rapid_sample_topk_topp_impl,
 };
 
@@ -13,17 +13,17 @@ impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> RapidSampl
     fn rapid_sample(
         logits: FloatTensor<Self>,
         states: IntTensor<Self>,
-        temperature: f32,
-        top_k: i32,
-        top_p: f32,
-        penalties: Option<(FloatTensor<Self>, RapidSamplePenaltyConfig)>,
+        inv_temperatures: FloatTensor<Self>,
+        top_ks: IntTensor<Self>,
+        top_ps: FloatTensor<Self>,
+        penalties: Option<(FloatTensor<Self>, FloatTensor<Self>, FloatTensor<Self>, FloatTensor<Self>)>,
     ) -> RapidSampleOutputPrimitive<Self> {
         rapid_sample_topk_topp_impl::<R, F, I, BT>(
             logits,
             states,
-            temperature,
-            top_k,
-            top_p,
+            inv_temperatures,
+            top_ks,
+            top_ps,
             penalties,
         )
     }
@@ -40,17 +40,17 @@ mod fusion_impl {
 
     use super::*;
     use crate::kernels::rapid_sample::{
-        RapidSampleBackend, RapidSampleOutput, RapidSampleOutputPrimitive, RapidSamplePenaltyConfig,
+        RapidSampleBackend, RapidSampleOutput, RapidSampleOutputPrimitive,
     };
 
     impl<B: FusionBackend + RapidSampleBackend> RapidSampleBackend for Fusion<B> {
         fn rapid_sample(
             logits: FloatTensor<Self>,
             states: IntTensor<Self>,
-            temperature: f32,
-            top_k: i32,
-            top_p: f32,
-            penalties: Option<(FloatTensor<Self>, RapidSamplePenaltyConfig)>,
+            inv_temperatures: FloatTensor<Self>,
+            top_ks: IntTensor<Self>,
+            top_ps: FloatTensor<Self>,
+            penalties: Option<(FloatTensor<Self>, FloatTensor<Self>, FloatTensor<Self>, FloatTensor<Self>)>,
         ) -> RapidSampleOutputPrimitive<Self> {
             let client = logits.client.clone();
             let batch_size = logits.shape[0];
@@ -61,9 +61,6 @@ mod fusion_impl {
                     #[derive(Clone, Debug)]
                     struct RapidSampleOp<B1> {
                         desc: CustomOpIr,
-                        temperature: f32,
-                        top_k: i32,
-                        top_p: f32,
                         _b: core::marker::PhantomData<B1>,
                     }
 
@@ -74,18 +71,23 @@ mod fusion_impl {
                                 <B1::FusionRuntime as FusionRuntime>::FusionHandle,
                             >,
                         ) {
-                            let ([logits, states], [token_ids_out, states_out]) =
-                                self.desc.as_fixed();
+                            let (
+                                [logits, states, inv_temperatures, top_ks, top_ps],
+                                [token_ids_out, states_out],
+                            ) = self.desc.as_fixed();
 
                             let logits_tensor = handles.get_float_tensor::<B1>(logits);
                             let states_tensor = handles.get_int_tensor::<B1>(states);
+                            let inv_temp_tensor = handles.get_float_tensor::<B1>(inv_temperatures);
+                            let top_ks_tensor = handles.get_int_tensor::<B1>(top_ks);
+                            let top_ps_tensor = handles.get_float_tensor::<B1>(top_ps);
 
                             let output = B1::rapid_sample(
                                 logits_tensor,
                                 states_tensor,
-                                self.temperature,
-                                self.top_k,
-                                self.top_p,
+                                inv_temp_tensor,
+                                top_ks_tensor,
+                                top_ps_tensor,
                                 None,
                             );
 
@@ -97,6 +99,9 @@ mod fusion_impl {
                     let mut streams = OperationStreams::default();
                     streams.tensor(&logits);
                     streams.tensor(&states);
+                    streams.tensor(&inv_temperatures);
+                    streams.tensor(&top_ks);
+                    streams.tensor(&top_ps);
 
                     let output_desc = [
                         TensorIr::uninit(
@@ -113,15 +118,18 @@ mod fusion_impl {
 
                     let desc = CustomOpIr::new(
                         "rapid_sample",
-                        &[logits.into_ir(), states.into_ir()],
+                        &[
+                            logits.into_ir(),
+                            states.into_ir(),
+                            inv_temperatures.into_ir(),
+                            top_ks.into_ir(),
+                            top_ps.into_ir(),
+                        ],
                         &output_desc,
                     );
 
                     let op = RapidSampleOp::<B> {
                         desc,
-                        temperature,
-                        top_k,
-                        top_p,
                         _b: core::marker::PhantomData,
                     };
 
@@ -137,14 +145,10 @@ mod fusion_impl {
                         penalties: None,
                     }
                 }
-                Some((penalties, penalty_cfg)) => {
+                Some((penalties, presence_penalty, repetition_penalty, penalty_decay)) => {
                     #[derive(Clone, Debug)]
                     struct RapidSamplePenaltyOp<B1> {
                         desc: CustomOpIr,
-                        temperature: f32,
-                        top_k: i32,
-                        top_p: f32,
-                        penalty_cfg: RapidSamplePenaltyConfig,
                         _b: core::marker::PhantomData<B1>,
                     }
 
@@ -158,21 +162,27 @@ mod fusion_impl {
                             >,
                         ) {
                             let (
-                                [logits, states, penalties],
+                                [logits, states, inv_temperatures, top_ks, top_ps, penalties, pp, rp, pd],
                                 [token_ids_out, states_out, penalties_out],
                             ) = self.desc.as_fixed();
 
                             let logits_tensor = handles.get_float_tensor::<B1>(logits);
                             let states_tensor = handles.get_int_tensor::<B1>(states);
+                            let inv_temp_tensor = handles.get_float_tensor::<B1>(inv_temperatures);
+                            let top_ks_tensor = handles.get_int_tensor::<B1>(top_ks);
+                            let top_ps_tensor = handles.get_float_tensor::<B1>(top_ps);
                             let penalties_tensor = handles.get_float_tensor::<B1>(penalties);
+                            let pp_tensor = handles.get_float_tensor::<B1>(pp);
+                            let rp_tensor = handles.get_float_tensor::<B1>(rp);
+                            let pd_tensor = handles.get_float_tensor::<B1>(pd);
 
                             let output = B1::rapid_sample(
                                 logits_tensor,
                                 states_tensor,
-                                self.temperature,
-                                self.top_k,
-                                self.top_p,
-                                Some((penalties_tensor, self.penalty_cfg)),
+                                inv_temp_tensor,
+                                top_ks_tensor,
+                                top_ps_tensor,
+                                Some((penalties_tensor, pp_tensor, rp_tensor, pd_tensor)),
                             );
 
                             handles.register_int_tensor::<B1>(&token_ids_out.id, output.token_ids);
@@ -187,7 +197,13 @@ mod fusion_impl {
                     let mut streams = OperationStreams::default();
                     streams.tensor(&logits);
                     streams.tensor(&states);
+                    streams.tensor(&inv_temperatures);
+                    streams.tensor(&top_ks);
+                    streams.tensor(&top_ps);
                     streams.tensor(&penalties);
+                    streams.tensor(&presence_penalty);
+                    streams.tensor(&repetition_penalty);
+                    streams.tensor(&penalty_decay);
 
                     let output_desc = [
                         TensorIr::uninit(
@@ -209,16 +225,22 @@ mod fusion_impl {
 
                     let desc = CustomOpIr::new(
                         "rapid_sample_penalty",
-                        &[logits.into_ir(), states.into_ir(), penalties.into_ir()],
+                        &[
+                            logits.into_ir(),
+                            states.into_ir(),
+                            inv_temperatures.into_ir(),
+                            top_ks.into_ir(),
+                            top_ps.into_ir(),
+                            penalties.into_ir(),
+                            presence_penalty.into_ir(),
+                            repetition_penalty.into_ir(),
+                            penalty_decay.into_ir(),
+                        ],
                         &output_desc,
                     );
 
                     let op = RapidSamplePenaltyOp::<B> {
                         desc,
-                        temperature,
-                        top_k,
-                        top_p,
-                        penalty_cfg,
                         _b: core::marker::PhantomData,
                     };
 

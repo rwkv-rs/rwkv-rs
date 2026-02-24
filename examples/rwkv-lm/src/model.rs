@@ -12,6 +12,19 @@ use rwkv::nn::kernels::wkv7_common::{KernelInfer, Wkv7Backend};
 use rwkv::nn::modules::time_mixer::param_state::{StateModule, StateModuleConfig};
 use std::mem::take;
 
+/// Controls the unembed layer computation mode.
+/// Cf. albatross `full_output`, extended with `Skip` for chunked prefill.
+pub enum UnembedMode {
+    /// Skip layer_norm + unembed; only update recurrent state. For prefill intermediate chunks.
+    Skip,
+    /// Unembed only the last token position. For prefill final chunk and decode.
+    /// Corresponds to albatross `full_output=False`.
+    LastToken,
+    /// Unembed all token positions. For evaluation/scoring.
+    /// Corresponds to albatross `full_output=True`.
+    Full,
+}
+
 #[cfg(feature = "training")]
 use crate::data::batcher::AutoRegressiveBatch;
 #[cfg(feature = "training")]
@@ -161,8 +174,8 @@ impl<B: Backend> AutoRegressiveModel<B> {
         embedded_token_shift_for_time_mix: &mut Vec<Tensor<B, 2>>,
         state: &mut Vec<Tensor<B, 4>>,
         embedded_token_shift_for_channel_mix: &mut Vec<Tensor<B, 2>>,
-        need_full_logits: bool,
-    ) -> Tensor<B, 3>
+        unembed_mode: UnembedMode,
+    ) -> Option<Tensor<B, 3>>
     where
         B: Wkv7Backend,
     {
@@ -223,15 +236,16 @@ impl<B: Backend> AutoRegressiveModel<B> {
 
         let embedded_context = multi_causal_cells_output.embedded_context;
 
-        if need_full_logits {
-            let embedded_last_token =
-                embedded_context.slice([0..batch_size, (context_length - 1)..context_length]);
-            let embedded_last_token_normalized =
-                self.layer_norm_for_unembed.forward(embedded_last_token);
-            self.unembed.forward(embedded_last_token_normalized)
-        } else {
-            let embedded_context_normalized = self.layer_norm_for_unembed.forward(embedded_context);
-            self.unembed.forward(embedded_context_normalized)
+        match unembed_mode {
+            UnembedMode::Skip => None,
+            UnembedMode::LastToken => {
+                let last =
+                    embedded_context.slice([0..batch_size, (context_length - 1)..context_length]);
+                Some(self.unembed.forward(self.layer_norm_for_unembed.forward(last)))
+            }
+            UnembedMode::Full => {
+                Some(self.unembed.forward(self.layer_norm_for_unembed.forward(embedded_context)))
+            }
         }
     }
 }
