@@ -141,7 +141,10 @@ impl<B: Backend> TimeMixer<B> {
         self.gated_readout.init_weights(device);
     }
 
-    #[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.model.time_mixer", skip_all))]
+    #[cfg_attr(
+        feature = "trace",
+        tracing::instrument(name = "rwkv.infer.model.time_mixer", skip_all)
+    )]
     pub fn forward<K: Wkv7Kernel<B>>(&self, time_mixer_input: TimeMixerIO<B>) -> TimeMixerIO<B> {
         let TimeMixerIO {
             embedded_context,
@@ -158,15 +161,12 @@ impl<B: Backend> TimeMixer<B> {
         let embedded_context = apply_context_mask(embedded_context, context_mask.clone());
         let value_from_first_cell = apply_context_mask(value_from_first_cell, context_mask.clone());
 
-        let output_embedded_token_shift = match embedded_token_shift {
-            Some(_) => Some(get_embedded_token_shift(embedded_context.clone())),
-            None => None,
-        };
+        let output_embedded_token_shift = embedded_token_shift.as_ref().map(|_| get_embedded_token_shift(embedded_context.clone()));
 
         let weight_prepare_output = self.weight_prepare.forward(
             embedded_context.clone(),
             value_from_first_cell.clone(),
-            embedded_token_shift.clone(),
+            embedded_token_shift,
             context_mask.clone(),
         );
 

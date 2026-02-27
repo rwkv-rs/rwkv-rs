@@ -167,7 +167,10 @@ impl<B: Backend> AutoRegressiveModel<B> {
         )
     }
 
-    #[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.model.infer", skip_all))]
+    #[cfg_attr(
+        feature = "trace",
+        tracing::instrument(name = "rwkv.infer.model.infer", skip_all)
+    )]
     pub fn infer(
         &self,
         tokens: Tensor<B, 2, Int>,
@@ -249,11 +252,17 @@ impl<B: Backend> AutoRegressiveModel<B> {
                 rwkv_bench::trace_lite_scope!("rwkv.infer.model.unembed");
                 let last =
                     embedded_context.slice([0..batch_size, (context_length - 1)..context_length]);
-                Some(self.unembed.forward(self.layer_norm_for_unembed.forward(last)))
+                Some(
+                    self.unembed
+                        .forward(self.layer_norm_for_unembed.forward(last)),
+                )
             }
             UnembedMode::Full => {
                 rwkv_bench::trace_lite_scope!("rwkv.infer.model.unembed");
-                Some(self.unembed.forward(self.layer_norm_for_unembed.forward(embedded_context)))
+                Some(
+                    self.unembed
+                        .forward(self.layer_norm_for_unembed.forward(embedded_context)),
+                )
             }
         }
     }

@@ -103,7 +103,10 @@ impl<B: Backend> GatedReadout<B> {
         }
     }
 
-    #[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.model.gated_readout", skip_all))]
+    #[cfg_attr(
+        feature = "trace",
+        tracing::instrument(name = "rwkv.infer.model.gated_readout", skip_all)
+    )]
     pub fn forward(&self, gated_readout_input: GatedReadoutInput<B>) -> Tensor<B, 3> {
         let GatedReadoutInput {
             embedded_context,

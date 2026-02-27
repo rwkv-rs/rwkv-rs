@@ -43,7 +43,10 @@ pub trait Wkv7InferBackend: Backend {
 }
 
 #[allow(clippy::too_many_arguments)]
-#[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.model.wkv7", skip_all))]
+#[cfg_attr(
+    feature = "trace",
+    tracing::instrument(name = "rwkv.infer.model.wkv7", skip_all)
+)]
 pub fn wkv7_infer_forward<B: Wkv7InferBackend>(
     weight_decay: Tensor<B, 4>,
     receptance: Tensor<B, 4>,

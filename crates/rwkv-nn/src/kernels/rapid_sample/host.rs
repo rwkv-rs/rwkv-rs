@@ -14,9 +14,8 @@ use burn_cubecl::{
 use crate::kernels::rapid_sample::{
     RapidSampleOutput,
     kernel::{
-        RapidSampleConfig, RapidSamplePenaltyParamsLaunch,
-        RapidSampleRepetitionInputsLaunch, RapidSampleRepetitionOutputsLaunch,
-        RapidSampleSamplingParamsLaunch,
+        RapidSampleConfig, RapidSamplePenaltyParamsLaunch, RapidSampleRepetitionInputsLaunch,
+        RapidSampleRepetitionOutputsLaunch, RapidSampleSamplingParamsLaunch,
         RapidSampleTemperatureInputsLaunch, RapidSampleTemperatureOutputsLaunch,
         rapid_sample_repetition_temperature_topk_topp_kernel,
         rapid_sample_temperature_topk_topp_kernel,

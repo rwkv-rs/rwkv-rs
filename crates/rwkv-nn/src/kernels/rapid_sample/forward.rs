@@ -3,8 +3,7 @@ use burn::tensor::ops::{FloatTensor, IntTensor};
 use burn_cubecl::CubeRuntime;
 
 use crate::kernels::rapid_sample::{
-    RapidSampleBackend, RapidSampleOutputPrimitive,
-    host::rapid_sample_topk_topp_impl,
+    RapidSampleBackend, RapidSampleOutputPrimitive, host::rapid_sample_topk_topp_impl,
 };
 
 impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> RapidSampleBackend
@@ -16,7 +15,12 @@ impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> RapidSampl
         inv_temperatures: FloatTensor<Self>,
         top_ks: IntTensor<Self>,
         top_ps: FloatTensor<Self>,
-        penalties: Option<(FloatTensor<Self>, FloatTensor<Self>, FloatTensor<Self>, FloatTensor<Self>)>,
+        penalties: Option<(
+            FloatTensor<Self>,
+            FloatTensor<Self>,
+            FloatTensor<Self>,
+            FloatTensor<Self>,
+        )>,
     ) -> RapidSampleOutputPrimitive<Self> {
         rapid_sample_topk_topp_impl::<R, F, I, BT>(
             logits,
@@ -50,7 +54,12 @@ mod fusion_impl {
             inv_temperatures: FloatTensor<Self>,
             top_ks: IntTensor<Self>,
             top_ps: FloatTensor<Self>,
-            penalties: Option<(FloatTensor<Self>, FloatTensor<Self>, FloatTensor<Self>, FloatTensor<Self>)>,
+            penalties: Option<(
+                FloatTensor<Self>,
+                FloatTensor<Self>,
+                FloatTensor<Self>,
+                FloatTensor<Self>,
+            )>,
         ) -> RapidSampleOutputPrimitive<Self> {
             let client = logits.client.clone();
             let batch_size = logits.shape[0];
@@ -162,7 +171,17 @@ mod fusion_impl {
                             >,
                         ) {
                             let (
-                                [logits, states, inv_temperatures, top_ks, top_ps, penalties, pp, rp, pd],
+                                [
+                                    logits,
+                                    states,
+                                    inv_temperatures,
+                                    top_ks,
+                                    top_ps,
+                                    penalties,
+                                    presence_penalty,
+                                    repetition_penalty,
+                                    penalty_decay,
+                                ],
                                 [token_ids_out, states_out, penalties_out],
                             ) = self.desc.as_fixed();
 
@@ -172,9 +191,9 @@ mod fusion_impl {
                             let top_ks_tensor = handles.get_int_tensor::<B1>(top_ks);
                             let top_ps_tensor = handles.get_float_tensor::<B1>(top_ps);
                             let penalties_tensor = handles.get_float_tensor::<B1>(penalties);
-                            let pp_tensor = handles.get_float_tensor::<B1>(pp);
-                            let rp_tensor = handles.get_float_tensor::<B1>(rp);
-                            let pd_tensor = handles.get_float_tensor::<B1>(pd);
+                            let presence_penalty_tensor = handles.get_float_tensor::<B1>(presence_penalty);
+                            let repetition_penalty_tensor = handles.get_float_tensor::<B1>(repetition_penalty);
+                            let penalty_decay_tensor = handles.get_float_tensor::<B1>(penalty_decay);
 
                             let output = B1::rapid_sample(
                                 logits_tensor,
@@ -182,7 +201,7 @@ mod fusion_impl {
                                 inv_temp_tensor,
                                 top_ks_tensor,
                                 top_ps_tensor,
-                                Some((penalties_tensor, pp_tensor, rp_tensor, pd_tensor)),
+                                Some((penalties_tensor, presence_penalty_tensor, repetition_penalty_tensor, penalty_decay_tensor)),
                             );
 
                             handles.register_int_tensor::<B1>(&token_ids_out.id, output.token_ids);

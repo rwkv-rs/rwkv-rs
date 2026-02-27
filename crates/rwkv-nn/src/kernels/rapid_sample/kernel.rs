@@ -424,7 +424,7 @@ pub struct RapidSampleRepetitionOutputs {
 
 #[derive(CubeLaunch, CubeType)]
 pub struct RapidSampleSamplingParams {
-    pub inv_temp: Tensor<f32>,  // [batch_size]
+    pub inv_temp: Tensor<f32>, // [batch_size]
     pub top_k: Tensor<u32>,    // [batch_size]
     pub top_p: Tensor<f32>,    // [batch_size]
 }
@@ -432,11 +432,11 @@ pub struct RapidSampleSamplingParams {
 #[derive(CubeLaunch, CubeType)]
 pub struct RapidSamplePenaltyParams {
     pub inv_temp: Tensor<f32>,           // [batch_size]
-    pub top_k: Tensor<u32>,             // [batch_size]
-    pub top_p: Tensor<f32>,             // [batch_size]
-    pub presence_penalty: Tensor<f32>,  // [batch_size]
-    pub repetition_penalty: Tensor<f32>,// [batch_size]
-    pub penalty_decay: Tensor<f32>,     // [batch_size]
+    pub top_k: Tensor<u32>,              // [batch_size]
+    pub top_p: Tensor<f32>,              // [batch_size]
+    pub presence_penalty: Tensor<f32>,   // [batch_size]
+    pub repetition_penalty: Tensor<f32>, // [batch_size]
+    pub penalty_decay: Tensor<f32>,      // [batch_size]
 }
 
 #[derive(CubeLaunch, CubeType, Clone, Copy, PartialEq, Eq, Hash, Debug)]

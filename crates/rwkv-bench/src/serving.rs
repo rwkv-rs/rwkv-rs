@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::error::Error as _;
 use std::io::IsTerminal;
 use std::path::Path;
@@ -10,7 +10,7 @@ use chrono::Utc;
 use futures::{StreamExt, stream::FuturesUnordered};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, mpsc};
 
 use crate::metrics::{AggregateMetrics, RequestMetrics, StageBreakdownMs, aggregate_metrics};
 use crate::{BenchError, Result};
@@ -123,6 +123,10 @@ fn default_penalty_decay() -> f32 {
     0.996
 }
 
+struct TokenEvent {
+    at: Instant,
+}
+
 #[derive(Default)]
 struct LiveStats {
     processed: usize,
@@ -131,6 +135,7 @@ struct LiveStats {
     output_tokens: usize,
     e2el_sum_s: f64,
     first_error: Option<String>,
+    token_window: VecDeque<Instant>,
 }
 
 impl LiveStats {
@@ -148,10 +153,21 @@ impl LiveStats {
         self.e2el_sum_s += metrics.e2el_s.max(0.0);
     }
 
-    fn status_line(&self, elapsed_s: f64, inflight: usize) -> String {
+    fn record_token(&mut self, at: Instant) {
+        self.token_window.push_back(at);
+    }
+
+    fn instant_tok_s(&mut self, window_secs: f64) -> f64 {
+        let cutoff = Instant::now() - Duration::from_secs_f64(window_secs);
+        while self.token_window.front().map_or(false, |t| *t < cutoff) {
+            self.token_window.pop_front();
+        }
+        self.token_window.len() as f64 / window_secs
+    }
+
+    fn status_line(&self, elapsed_s: f64, inflight: usize, inst_tok_s: f64) -> String {
         let safe_elapsed = elapsed_s.max(1e-9);
         let success_rps = self.completed as f64 / safe_elapsed;
-        let output_tok_s = self.output_tokens as f64 / safe_elapsed;
         let mean_e2el_ms = if self.processed > 0 {
             self.e2el_sum_s * 1000.0 / self.processed as f64
         } else {
@@ -159,7 +175,7 @@ impl LiveStats {
         };
 
         format!(
-            "ok={} fail={} inflight={} succ_rps={success_rps:.1} out_tok/s={output_tok_s:.1} mean_e2el={mean_e2el_ms:.1}ms",
+            "ok={} fail={} inflight={} rps={success_rps:.1} tok/s={inst_tok_s:.1} e2el={mean_e2el_ms:.1}ms",
             self.completed, self.failed, inflight
         )
     }
@@ -335,6 +351,7 @@ async fn run_single_request(
     client: reqwest::Client,
     cfg: ServeConfig,
     request_id: usize,
+    token_tx: Option<mpsc::UnboundedSender<TokenEvent>>,
 ) -> RequestMetrics {
     let prompt = build_prompt(cfg.input_tokens, request_id);
     let start = Instant::now();
@@ -448,6 +465,7 @@ async fn run_single_request(
             while let Some(newline_idx) = sse_buffer.find('\n') {
                 let line = sse_buffer[..newline_idx].trim_end_matches('\r').to_string();
                 sse_buffer.replace_range(..=newline_idx, "");
+                let prev_tokens = metrics.output_tokens;
                 if parse_sse_line(
                     &line,
                     start,
@@ -460,11 +478,17 @@ async fn run_single_request(
                 ) {
                     metrics.success = true;
                 }
+                if metrics.output_tokens > prev_tokens {
+                    if let Some(tx) = &token_tx {
+                        let _ = tx.send(TokenEvent { at: Instant::now() });
+                    }
+                }
             }
         }
 
         if metrics.error.is_none() && !sse_buffer.trim().is_empty() {
             for line in sse_buffer.lines() {
+                let prev_tokens = metrics.output_tokens;
                 if parse_sse_line(
                     line,
                     start,
@@ -476,6 +500,11 @@ async fn run_single_request(
                     &mut saw_terminal,
                 ) {
                     metrics.success = true;
+                }
+                if metrics.output_tokens > prev_tokens {
+                    if let Some(tx) = &token_tx {
+                        let _ = tx.send(TokenEvent { at: Instant::now() });
+                    }
                 }
             }
         }
@@ -539,6 +568,8 @@ pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_text_update = Instant::now();
+    let (token_tx, mut token_rx) = mpsc::unbounded_channel::<TokenEvent>();
+    let mut submitted = 0usize;
 
     for request_id in 0..cfg.num_requests {
         if cfg.request_rate.is_finite() && cfg.request_rate > 0.0 {
@@ -552,11 +583,12 @@ pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
         let client = client.clone();
         let cfg_cloned = cfg.clone();
         let semaphore = semaphore.clone();
+        let tx = token_tx.clone();
         inflight.push(async move {
             let metrics = match semaphore.acquire_owned().await {
                 Ok(permit) => {
                     let _permit = permit;
-                    run_single_request(client, cfg_cloned, request_id).await
+                    run_single_request(client, cfg_cloned, request_id, Some(tx)).await
                 }
                 Err(err) => RequestMetrics {
                     request_id,
@@ -573,17 +605,25 @@ pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
             };
             (request_id, metrics)
         });
+        submitted += 1;
     }
+    // Drop the original sender so the channel closes when all tasks finish
+    drop(token_tx);
 
     let mut requests = Vec::with_capacity(cfg.num_requests);
     while !inflight.is_empty() {
         tokio::select! {
             biased;
             _ = tick.tick() => {
-                let inflight_count = cfg.num_requests.saturating_sub(live_stats.processed);
+                while let Ok(ev) = token_rx.try_recv() {
+                    live_stats.record_token(ev.at);
+                }
+                let inst_tok_s = live_stats.instant_tok_s(5.0);
+                let inflight_count = submitted.saturating_sub(live_stats.processed);
                 let status = live_stats.status_line(
                     bench_start.elapsed().as_secs_f64(),
                     inflight_count,
+                    inst_tok_s,
                 );
                 progress.set_message(status.clone());
                 progress.tick();
@@ -607,10 +647,12 @@ pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
                 };
                 live_stats.observe(&metrics);
                 progress.inc(1);
-                let inflight_count = cfg.num_requests.saturating_sub(live_stats.processed);
+                let inflight_count = submitted.saturating_sub(live_stats.processed);
+                let inst_tok_s = live_stats.instant_tok_s(5.0);
                 progress.set_message(live_stats.status_line(
                     bench_start.elapsed().as_secs_f64(),
                     inflight_count,
+                    inst_tok_s,
                 ));
                 requests.push(metrics);
             }
@@ -620,7 +662,8 @@ pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
     requests.sort_by_key(|request| request.request_id);
 
     let duration_s = bench_start.elapsed().as_secs_f64();
-    progress.finish_with_message(format!("done {}", live_stats.status_line(duration_s, 0)));
+    let final_tok_s = live_stats.instant_tok_s(5.0);
+    progress.finish_with_message(format!("done {}", live_stats.status_line(duration_s, 0, final_tok_s)));
     if let Some(err) = live_stats.first_error.as_deref() {
         eprintln!("first request error: {err}");
     }

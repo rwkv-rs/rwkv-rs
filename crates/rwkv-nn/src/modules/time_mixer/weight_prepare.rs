@@ -198,7 +198,10 @@ impl<B: Backend> WeightPrepare<B> {
         constant_init(&mut self.param_key_replacement, 1.02);
     }
 
-    #[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.model.weight_prepare", skip_all))]
+    #[cfg_attr(
+        feature = "trace",
+        tracing::instrument(name = "rwkv.infer.model.weight_prepare", skip_all)
+    )]
     pub fn forward(
         &self,
         embedded_context: Tensor<B, 3>,
@@ -258,7 +261,7 @@ impl<B: Backend> WeightPrepare<B> {
             embedded_context.clone() + token_shifted_diff.clone() * self.param_value.val();
 
         let learning_rate_input =
-            embedded_context.clone() + token_shifted_diff.clone() * self.param_learning_rate.val();
+            embedded_context + token_shifted_diff.clone() * self.param_learning_rate.val();
 
         let receptance = self.projection_receptance.forward(receptance_input);
 
@@ -274,17 +277,15 @@ impl<B: Backend> WeightPrepare<B> {
 
         let learning_rate = sigmoid(self.param_learning_rate_lora.forward(learning_rate_input));
 
-        let ones_like_k = Tensor::ones_like(&key_precursor);
-
-        let alpha_modulated = ones_like_k.clone()
-            + (learning_rate.clone() - ones_like_k) * self.param_key_replacement.val();
+        let param_key_replacement = self.param_key_replacement.val();
+        let alpha_modulated = learning_rate.clone() * param_key_replacement.clone() + (1.0 - param_key_replacement);
 
         let replacement_key = key_precursor.clone() * alpha_modulated;
 
         let value = if self.cell_id != 0 {
             let nu_t = sigmoid(
                 self.param_value_residual_lora
-                    .clone()
+                    .as_ref()
                     .unwrap()
                     .forward(value_input),
             );
@@ -303,14 +304,13 @@ impl<B: Backend> WeightPrepare<B> {
         let removal_key_reshaped =
             removal_key.reshape([batch_size, context_length, num_heads, head_size]);
 
-        let neg_removal_key_normalized = normalize(removal_key_reshaped, 2.0, -1, 1e-12).reshape([
+        let removal_key_normalized = -normalize(removal_key_reshaped, 2.0, -1, 1e-12).reshape([
             batch_size,
             context_length,
             embedded_dim,
         ]);
-        let removal_key_normalized = -neg_removal_key_normalized.clone();
 
-        let replacement = neg_removal_key_normalized.clone() * learning_rate;
+        let replacement = -removal_key_normalized.clone() * learning_rate;
 
         WeightPrepareOutput {
             token_shifted_diff,
