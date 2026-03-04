@@ -99,10 +99,22 @@ pub(crate) fn rapid_sample_topk_topp_impl<
     );
 
     let expected_1d = Shape::new([batch_size]);
-    debug_assert_eq!(states.shape, expected_1d, "states must have shape [batch_size]");
-    debug_assert_eq!(inv_temperatures.shape, expected_1d, "inv_temperatures must have shape [batch_size]");
-    debug_assert_eq!(top_ks.shape, expected_1d, "top_ks must have shape [batch_size]");
-    debug_assert_eq!(top_ps.shape, expected_1d, "top_ps must have shape [batch_size]");
+    debug_assert_eq!(
+        states.shape, expected_1d,
+        "states must have shape [batch_size]"
+    );
+    debug_assert_eq!(
+        inv_temperatures.shape, expected_1d,
+        "inv_temperatures must have shape [batch_size]"
+    );
+    debug_assert_eq!(
+        top_ks.shape, expected_1d,
+        "top_ks must have shape [batch_size]"
+    );
+    debug_assert_eq!(
+        top_ps.shape, expected_1d,
+        "top_ps must have shape [batch_size]"
+    );
 
     let max_units_per_cube = client.properties().hardware.max_units_per_cube as usize;
     let block_size = select_block_size(vocab_size, max_units_per_cube);

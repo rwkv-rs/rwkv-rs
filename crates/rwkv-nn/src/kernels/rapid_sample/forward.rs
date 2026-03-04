@@ -191,9 +191,12 @@ mod fusion_impl {
                             let top_ks_tensor = handles.get_int_tensor::<B1>(top_ks);
                             let top_ps_tensor = handles.get_float_tensor::<B1>(top_ps);
                             let penalties_tensor = handles.get_float_tensor::<B1>(penalties);
-                            let presence_penalty_tensor = handles.get_float_tensor::<B1>(presence_penalty);
-                            let repetition_penalty_tensor = handles.get_float_tensor::<B1>(repetition_penalty);
-                            let penalty_decay_tensor = handles.get_float_tensor::<B1>(penalty_decay);
+                            let presence_penalty_tensor =
+                                handles.get_float_tensor::<B1>(presence_penalty);
+                            let repetition_penalty_tensor =
+                                handles.get_float_tensor::<B1>(repetition_penalty);
+                            let penalty_decay_tensor =
+                                handles.get_float_tensor::<B1>(penalty_decay);
 
                             let output = B1::rapid_sample(
                                 logits_tensor,
@@ -201,7 +204,12 @@ mod fusion_impl {
                                 inv_temp_tensor,
                                 top_ks_tensor,
                                 top_ps_tensor,
-                                Some((penalties_tensor, presence_penalty_tensor, repetition_penalty_tensor, penalty_decay_tensor)),
+                                Some((
+                                    penalties_tensor,
+                                    presence_penalty_tensor,
+                                    repetition_penalty_tensor,
+                                    penalty_decay_tensor,
+                                )),
                             );
 
                             handles.register_int_tensor::<B1>(&token_ids_out.id, output.token_ids);

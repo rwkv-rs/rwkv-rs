@@ -663,7 +663,10 @@ pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
 
     let duration_s = bench_start.elapsed().as_secs_f64();
     let final_tok_s = live_stats.instant_tok_s(5.0);
-    progress.finish_with_message(format!("done {}", live_stats.status_line(duration_s, 0, final_tok_s)));
+    progress.finish_with_message(format!(
+        "done {}",
+        live_stats.status_line(duration_s, 0, final_tok_s)
+    ));
     if let Some(err) = live_stats.first_error.as_deref() {
         eprintln!("first request error: {err}");
     }

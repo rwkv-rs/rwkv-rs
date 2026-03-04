@@ -27,7 +27,7 @@ struct BatchIndices<B: Backend> {
     /// [active_count] GPU index tensor
     active_indices: Tensor<B, 1, Int>,
     /// [max_batch] float mask: active=0.0, inactive=1.0.
-    /// Multiply any [max_batch, ...] tensor to zero out active rows before additive write-back. 
+    /// Multiply any [max_batch, ...] tensor to zero out active rows before additive write-back.
     mask: Tensor<B, 1>,
 }
 
@@ -40,7 +40,10 @@ impl<B: Backend> BatchIndices<B> {
             mask_data[pos] = 0.0;
         }
         Self {
-            active_indices: Tensor::from_data(TensorData::new(indices_data, [active_count]), device),
+            active_indices: Tensor::from_data(
+                TensorData::new(indices_data, [active_count]),
+                device,
+            ),
             mask: Tensor::from_data(TensorData::new(mask_data, [max_batch]), device),
         }
     }
@@ -48,11 +51,11 @@ impl<B: Backend> BatchIndices<B> {
 
 /// Pre-allocated recurrent state for a batch of RWKV inference slots.
 struct BatchState<B: Backend> {
-    embedded_token_shift_for_time_mix: Vec<Tensor<B, 2>>,    // [num_cells] of [max_batch, embedded_dim]
-    wkv_state: Vec<Tensor<B, 4>>,                            // [num_cells] of [max_batch, heads, hs, hs]
+    embedded_token_shift_for_time_mix: Vec<Tensor<B, 2>>, // [num_cells] of [max_batch, embedded_dim]
+    wkv_state: Vec<Tensor<B, 4>>, // [num_cells] of [max_batch, heads, hs, hs]
     embedded_token_shift_for_channel_mix: Vec<Tensor<B, 2>>, // [num_cells] of [max_batch, embedded_dim]
     rng_states: Tensor<B, 1, Int>,                           // [max_batch]
-    penalties: Tensor<B, 2>,                                  // [max_batch, vocab_size]
+    penalties: Tensor<B, 2>,                                 // [max_batch, vocab_size]
 }
 
 /// Gather state slices for active batch positions into contiguous tensors of shape [active_count, ...].
@@ -63,17 +66,29 @@ fn gather_state<B: Backend>(
     let ts_time = state
         .embedded_token_shift_for_time_mix
         .iter()
-        .map(|cell_state| cell_state.clone().select(0, batch_indices.active_indices.clone()))
+        .map(|cell_state| {
+            cell_state
+                .clone()
+                .select(0, batch_indices.active_indices.clone())
+        })
         .collect();
     let wkv = state
         .wkv_state
         .iter()
-        .map(|cell_state| cell_state.clone().select(0, batch_indices.active_indices.clone()))
+        .map(|cell_state| {
+            cell_state
+                .clone()
+                .select(0, batch_indices.active_indices.clone())
+        })
         .collect();
     let ts_chan = state
         .embedded_token_shift_for_channel_mix
         .iter()
-        .map(|cell_state| cell_state.clone().select(0, batch_indices.active_indices.clone()))
+        .map(|cell_state| {
+            cell_state
+                .clone()
+                .select(0, batch_indices.active_indices.clone())
+        })
         .collect();
     (ts_time, wkv, ts_chan)
 }
@@ -94,23 +109,43 @@ fn scatter_state<B: Backend>(
         .unsqueeze_dim::<3>(2)
         .unsqueeze_dim::<4>(3);
 
-    for (cell_idx, ((token_shift_time, wkv), token_shift_channel)) in ts_time.into_iter().zip(wkv).zip(ts_chan).enumerate() {
+    for (cell_idx, ((token_shift_time, wkv), token_shift_channel)) in
+        ts_time.into_iter().zip(wkv).zip(ts_chan).enumerate()
+    {
         state.embedded_token_shift_for_time_mix[cell_idx] =
             (state.embedded_token_shift_for_time_mix[cell_idx].clone() * mask_2d.clone())
-                .select_assign(0, batch_indices.active_indices.clone(), token_shift_time, IndexingUpdateOp::Add);
+                .select_assign(
+                    0,
+                    batch_indices.active_indices.clone(),
+                    token_shift_time,
+                    IndexingUpdateOp::Add,
+                );
 
         state.wkv_state[cell_idx] = (state.wkv_state[cell_idx].clone() * mask_4d.clone())
-            .select_assign(0, batch_indices.active_indices.clone(), wkv, IndexingUpdateOp::Add);
+            .select_assign(
+                0,
+                batch_indices.active_indices.clone(),
+                wkv,
+                IndexingUpdateOp::Add,
+            );
 
         state.embedded_token_shift_for_channel_mix[cell_idx] =
             (state.embedded_token_shift_for_channel_mix[cell_idx].clone() * mask_2d.clone())
-                .select_assign(0, batch_indices.active_indices.clone(), token_shift_channel, IndexingUpdateOp::Add);
+                .select_assign(
+                    0,
+                    batch_indices.active_indices.clone(),
+                    token_shift_channel,
+                    IndexingUpdateOp::Add,
+                );
     }
 }
 
 /// Run model forward on only the active batch positions.
 /// Returns logits [active_count, vocab] when unembed_mode != Skip, else None.
-#[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.executor.forward", skip_all))]
+#[cfg_attr(
+    feature = "trace",
+    tracing::instrument(name = "rwkv.infer.executor.forward", skip_all)
+)]
 fn forward_active<B: Backend + Wkv7Backend>(
     model: &AutoRegressiveModel<B>,
     state: &mut BatchState<B>,
@@ -139,7 +174,11 @@ fn forward_active<B: Backend + Wkv7Backend>(
     let mut flat_mask = Vec::with_capacity(active_count * context_len);
     for (_, token_ids, context_mask) in batch_positions {
         flat_tokens.extend_from_slice(token_ids);
-        flat_mask.extend(context_mask.iter().map(|&m| if m == 0 { 0.0f32 } else { 1.0f32 }));
+        flat_mask.extend(
+            context_mask
+                .iter()
+                .map(|&m| if m == 0 { 0.0f32 } else { 1.0f32 }),
+        );
     }
 
     let tokens = Tensor::<B, 2, Int>::from_data(
@@ -191,7 +230,10 @@ const MIN_TEMP: f32 = 0.001;
 const MAX_TEMP: f32 = 1000.0;
 
 /// Sample tokens from logits for active positions, with per-position sampling configs.
-#[cfg_attr(feature = "trace", tracing::instrument(name = "rwkv.infer.executor.sample", skip_all))]
+#[cfg_attr(
+    feature = "trace",
+    tracing::instrument(name = "rwkv.infer.executor.sample", skip_all)
+)]
 fn sample_active<B: Backend + RapidSampleBackend>(
     logits: Tensor<B, 2>,
     state: &mut BatchState<B>,
@@ -206,7 +248,10 @@ fn sample_active<B: Backend + RapidSampleBackend>(
         rwkv_bench::trace_lite_scope!("rwkv.infer.executor.sample.build_params");
 
         // Gather RNG states for active positions.
-        let rng_active = state.rng_states.clone().select(0, batch_indices.active_indices.clone());
+        let rng_active = state
+            .rng_states
+            .clone()
+            .select(0, batch_indices.active_indices.clone());
 
         // Build per-batch normalized sampling parameter tensors on host, then upload.
         let mut inv_temps = Vec::with_capacity(active_count);
@@ -225,22 +270,19 @@ fn sample_active<B: Backend + RapidSampleBackend>(
             }
         }
 
-        let inv_temp_tensor = Tensor::<B, 1>::from_data(
-            TensorData::new(inv_temps, [active_count]),
-            device,
-        );
-        let top_k_tensor = Tensor::<B, 1, Int>::from_data(
-            TensorData::new(norm_top_ks, [active_count]),
-            device,
-        );
-        let top_p_tensor = Tensor::<B, 1>::from_data(
-            TensorData::new(norm_top_ps, [active_count]),
-            device,
-        );
+        let inv_temp_tensor =
+            Tensor::<B, 1>::from_data(TensorData::new(inv_temps, [active_count]), device);
+        let top_k_tensor =
+            Tensor::<B, 1, Int>::from_data(TensorData::new(norm_top_ks, [active_count]), device);
+        let top_p_tensor =
+            Tensor::<B, 1>::from_data(TensorData::new(norm_top_ps, [active_count]), device);
 
         // Build penalties: use penalty kernel when ANY entry has penalties enabled.
         let penalties = if any_penalties {
-            let penalties_tensor = state.penalties.clone().select(0, batch_indices.active_indices.clone());
+            let penalties_tensor = state
+                .penalties
+                .clone()
+                .select(0, batch_indices.active_indices.clone());
 
             let mut presence_vals = Vec::with_capacity(active_count);
             let mut repetition_vals = Vec::with_capacity(active_count);
@@ -261,7 +303,13 @@ fn sample_active<B: Backend + RapidSampleBackend>(
             None
         };
 
-        (rng_active, inv_temp_tensor, top_k_tensor, top_p_tensor, penalties)
+        (
+            rng_active,
+            inv_temp_tensor,
+            top_k_tensor,
+            top_p_tensor,
+            penalties,
+        )
     };
 
     #[cfg(feature = "nsys")]
@@ -275,17 +323,20 @@ fn sample_active<B: Backend + RapidSampleBackend>(
         penalties,
     );
 
-    // Scatter RNG states back (1D Int tensor, keep slice_assign — active_count is small).
+    // Scatter RNG states and penalties back using vectorized operations.
     {
         rwkv_bench::trace_lite_scope!("rwkv.infer.executor.sample.scatter");
+
+        // Vectorized RNG scatter: replace N×4 kernel launches with 3 ops total
         let sampled_states = out.states.clone().cast(DType::I32);
-        for (i, &bi) in active_indices.iter().enumerate() {
-            let s = sampled_states.clone().slice([i..i + 1]);
-            state.rng_states = state
-                .rng_states
-                .clone()
-                .slice_assign([bi..bi + 1], s);
-        }
+        let rng_float = state.rng_states.clone().float();
+        let scattered = (rng_float * batch_indices.mask.clone()).select_assign(
+            0,
+            batch_indices.active_indices.clone(),
+            sampled_states.float(),
+            IndexingUpdateOp::Add,
+        );
+        state.rng_states = scattered.int();
 
         // Scatter penalties back via mask + select_assign.
         if let Some(ref updated_penalties) = out.penalties {
@@ -294,8 +345,12 @@ fn sample_active<B: Backend + RapidSampleBackend>(
                 .clone()
                 .unsqueeze_dim::<2>(1)
                 .cast(DType::F32);
-            state.penalties = (state.penalties.clone() * mask_2d)
-                .select_assign(0, batch_indices.active_indices.clone(), updated_penalties.clone(), IndexingUpdateOp::Add);
+            state.penalties = (state.penalties.clone() * mask_2d).select_assign(
+                0,
+                batch_indices.active_indices.clone(),
+                updated_penalties.clone(),
+                IndexingUpdateOp::Add,
+            );
         }
     }
 
@@ -341,15 +396,15 @@ fn reset_position<B: Backend>(
             .slice_assign([batch_index..batch_index + 1], zeros_shift.clone());
     }
 
-    let zeros_state =
-        Tensor::<B, 4>::zeros([1, num_heads, head_size, head_size], device);
+    let zeros_state = Tensor::<B, 4>::zeros([1, num_heads, head_size, head_size], device);
     for s in state.wkv_state.iter_mut() {
-        *s = s.clone().slice_assign([batch_index..batch_index + 1], zeros_state.clone());
+        *s = s
+            .clone()
+            .slice_assign([batch_index..batch_index + 1], zeros_state.clone());
     }
 
     let seed = (batch_index as i32).wrapping_add(1);
-    let seed_tensor =
-        Tensor::<B, 1, Int>::from_data(TensorData::new(vec![seed], [1]), device);
+    let seed_tensor = Tensor::<B, 1, Int>::from_data(TensorData::new(vec![seed], [1]), device);
     state.rng_states = state
         .rng_states
         .clone()
@@ -478,7 +533,15 @@ where
         )?;
 
         if let Some(logits) = logits {
-            sample_active(logits, &mut self.state, &batch_indices, &active_indices, samplings, self.vocab_size, &self.device)
+            sample_active(
+                logits,
+                &mut self.state,
+                &batch_indices,
+                &active_indices,
+                samplings,
+                self.vocab_size,
+                &self.device,
+            )
         } else {
             Ok(Vec::new())
         }
@@ -502,11 +565,7 @@ where
 // ModelEngineFactory — builds engine groups for RuntimeManager
 // ---------------------------------------------------------------------------
 
-fn required_field<T: Copy>(
-    value: Option<T>,
-    field: &str,
-    model_name: &str,
-) -> Result<T> {
+fn required_field<T: Copy>(value: Option<T>, field: &str, model_name: &str) -> Result<T> {
     value.ok_or_else(|| {
         Error::BadRequest(format!(
             "missing {} for model {} in infer config",

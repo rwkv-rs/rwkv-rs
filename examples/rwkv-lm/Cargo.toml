@@ -47,6 +47,7 @@ harness = false
 default = [
     "training",
     "inferring",
+    "fusion",
     "cuda",
     "ddp",
     "pth2mpk",
