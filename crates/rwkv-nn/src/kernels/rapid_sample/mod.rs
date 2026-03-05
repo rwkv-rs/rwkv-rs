@@ -27,7 +27,6 @@ use burn::{
     },
 };
 
-pub use host::normalize_topk_topp;
 
 /// Unified rapid-sample output.
 #[derive(Clone, Debug)]
@@ -81,7 +80,7 @@ pub trait RapidSampleBackend: Backend {
 )]
 pub fn rapid_sample<B: RapidSampleBackend>(
     logits: Tensor<B, 2>,
-    states: Tensor<B, 1, Int>,
+    rng: Tensor<B, 1, Int>,
     inv_temperatures: Tensor<B, 1>,
     top_ks: Tensor<B, 1, Int>,
     top_ps: Tensor<B, 1>,
@@ -98,7 +97,7 @@ pub fn rapid_sample<B: RapidSampleBackend>(
 
     let out = B::rapid_sample(
         logits.into_primitive().tensor(),
-        states.into_primitive(),
+        rng.into_primitive(),
         inv_temperatures.into_primitive().tensor(),
         top_ks.into_primitive(),
         top_ps.into_primitive().tensor(),

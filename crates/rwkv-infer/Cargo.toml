@@ -18,7 +18,6 @@ axum = { workspace = true }
 tower-http = { workspace = true, features = ["trace"] }
 
 # Inference utilities
-dashmap = { workspace = true }
 once_cell = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
@@ -31,6 +30,9 @@ rwkv-config = { path = "../rwkv-config" }
 rwkv-bench = { path = "../rwkv-bench", default-features = false }
 clia-tracing-config = { workspace = true }
 iceoryx2 = { workspace = true, optional = true }
+itertools = { workspace = true }
+
+burn = { workspace = true, default-features = false, features = ["std", "autodiff", "cubecl"] }
 
 [features]
 default = ["http"]
@@ -39,5 +41,3 @@ ipc-iceoryx2 = ["dep:iceoryx2"]
 trace = ["dep:tracing", "rwkv-bench/trace"]
 nsys = ["trace", "dep:nvtx"]
 
-[dev-dependencies]
-tower = { workspace = true }

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::iter::repeat_n;
 use std::time::{Duration, Instant};
 
 use rwkv_data::tokenizer::Tokenizer;
@@ -33,15 +34,18 @@ impl Default for EngineRuntimeConfig {
 /// Model forward inference interface. Prefill and decode are unified through this interface.
 pub trait ModelForward: Send + 'static {
     /// Forward inference + sampling.
-    /// - `batch_positions`: `[(batch_index, &[token_ids], &[context_mask_u8])]`
-    ///   prefill chunk: `token_ids.len() == paragraph_len`
-    ///   decode step: `token_ids.len() == 1`
-    /// - `samplings`: per-position sampling parameters (one per batch_position)
+    /// - `batch_ids` / `contexts` / `masks`: parallel slices with identical length.
+    ///   Each index represents one active batch position:
+    ///   - prefill chunk: `contexts[i].len() == paragraph_len`
+    ///   - decode step: `contexts[i].len() == 1`
+    /// - `samplings`: per-position sampling parameters (one per active position)
     /// - `need_sample`: when false, skip unembed+sampling (prefill intermediate chunk), return empty Vec
     /// Returns: `[(batch_index, sampled_token_id)]`
     fn forward(
         &mut self,
-        batch_positions: &[(usize, &[i32], &[u8])],
+        batch_ids: &[usize],
+        contexts: &[&[i32]],
+        masks: &[&[u8]],
         samplings: &[SamplingConfig],
         need_sample: bool,
     ) -> crate::Result<Vec<(usize, i32)>>;
@@ -281,7 +285,10 @@ impl EngineRuntime {
         let prefill_result = {
             rwkv_bench::trace_scope!("rwkv.infer.engine.runtime.prefill");
             let paragraph_len = self.cfg.paragraph_len;
-            let mut batch_positions: Vec<(usize, Vec<i32>, Vec<u8>)> = Vec::new();
+            let mut batch_ids: Vec<usize> = Vec::new();
+            let mut contexts: Vec<Vec<i32>> = Vec::new();
+            let mut context_masks: Vec<Vec<u8>> = Vec::new();
+            let mut sampling_configs: Vec<SamplingConfig> = Vec::new();
             let mut last_chunk_entries: Vec<EntryId> = Vec::new();
             let mut last_chunk_samplings: Vec<SamplingConfig> = Vec::new();
 
@@ -302,8 +309,7 @@ impl EngineRuntime {
                     let prefill_len = entry.input_token_ids.len();
                     let pad_len = (paragraph_len - (prefill_len % paragraph_len)) % paragraph_len;
                     entry.prefill_pad_len = pad_len;
-                    entry.prefill_padded_token_ids = std::iter::repeat(0)
-                        .take(pad_len)
+                    entry.prefill_padded_token_ids = repeat_n(0, pad_len)
                         .chain(entry.input_token_ids.iter().copied())
                         .collect();
                     entry.prefill_chunk_cursor = 0;
@@ -337,7 +343,10 @@ impl EngineRuntime {
                     }
                 }
 
-                batch_positions.push((batch_index, token_ids, context_mask));
+                batch_ids.push(batch_index);
+                contexts.push(token_ids);
+                context_masks.push(context_mask);
+                sampling_configs.push(entry.sampling);
                 entry.prefill_chunk_cursor += 1;
                 entry.last_prefill_at = Some(chunk_issued_at);
 
@@ -351,29 +360,28 @@ impl EngineRuntime {
                 }
             }
 
-            if batch_positions.is_empty() {
+            if batch_ids.is_empty() {
                 return;
             }
 
             #[cfg(feature = "trace")]
             tracing::info!(
                 stage = "prefill_step",
-                batch_size = batch_positions.len(),
+                batch_size = batch_ids.len(),
                 "dispatch prefill batch"
             );
 
-            let args: Vec<(usize, &[i32], &[u8])> = batch_positions
-                .iter()
-                .map(|(batch_index, token_ids, context_mask)| {
-                    (*batch_index, token_ids.as_slice(), context_mask.as_slice())
-                })
-                .collect();
+            let contexts_ref: Vec<&[i32]> = contexts.iter().map(|ctx| ctx.as_slice()).collect();
+            let masks_ref: Vec<&[u8]> = context_masks.iter().map(|mask| mask.as_slice()).collect();
             #[cfg(feature = "nsys")]
             let _nvtx_prefill = nvtx::range!("rwkv.infer.prefill");
-            // For now, prefill all chunks without sampling.
-            // Last-chunk sampling will be handled by the next decode tick.
-            let default_samplings = vec![SamplingConfig::default(); args.len()];
-            self.executor.forward(&args, &default_samplings, false)
+            self.executor.forward(
+                &batch_ids,
+                &contexts_ref,
+                &masks_ref,
+                &sampling_configs,
+                false,
+            )
         };
 
         if let Err(err) = prefill_result {
@@ -389,9 +397,11 @@ impl EngineRuntime {
             return;
         }
 
-        let mut batch_inputs: Vec<(usize, i32)> = Vec::new();
+        let mut batch_ids: Vec<usize> = Vec::new();
+        let mut contexts: Vec<Vec<i32>> = Vec::new();
+        let mut context_masks: Vec<Vec<u8>> = Vec::new();
         let mut batch_to_entry: HashMap<usize, EntryId> = HashMap::new();
-        let mut samplings: Vec<SamplingConfig> = Vec::new();
+        let mut sampling_configs: Vec<SamplingConfig> = Vec::new();
 
         for entry_id in decode_ids.iter().copied() {
             let Some(entry) = self.entries.get_mut(&entry_id) else {
@@ -408,12 +418,14 @@ impl EngineRuntime {
                 .or_else(|| entry.input_token_ids.last().copied())
                 .unwrap_or(0);
 
-            samplings.push(entry.sampling);
-            batch_inputs.push((batch_index, last_token_id));
+            batch_ids.push(batch_index);
+            contexts.push(vec![last_token_id]);
+            context_masks.push(vec![1u8]);
+            sampling_configs.push(entry.sampling);
             batch_to_entry.insert(batch_index, entry_id);
         }
 
-        if batch_inputs.is_empty() {
+        if batch_ids.is_empty() {
             return;
         }
 
@@ -421,7 +433,7 @@ impl EngineRuntime {
         tracing::info!(
             target: "rwkv.infer",
             stage = "decode_step",
-            batch_size = batch_inputs.len(),
+            batch_size = batch_ids.len(),
             "dispatch decode batch"
         );
 
@@ -429,15 +441,9 @@ impl EngineRuntime {
             rwkv_bench::trace_scope!("rwkv.infer.engine.runtime.decode");
             #[cfg(feature = "nsys")]
             let _nvtx_decode = nvtx::range!("rwkv.infer.decode");
-            let args: Vec<(usize, Vec<i32>, Vec<u8>)> = batch_inputs
-                .iter()
-                .map(|(batch_index, token_id)| (*batch_index, vec![*token_id], vec![1u8]))
-                .collect();
-            let args_ref: Vec<(usize, &[i32], &[u8])> = args
-                .iter()
-                .map(|(bi, tids, cm)| (*bi, tids.as_slice(), cm.as_slice()))
-                .collect();
-            self.executor.forward(&args_ref, &samplings, true)
+            let contexts_ref: Vec<&[i32]> = contexts.iter().map(|context| context.as_slice()).collect();
+            let masks_ref: Vec<&[u8]> = context_masks.iter().map(|mask| mask.as_slice()).collect();
+            self.executor.forward(&batch_ids, &contexts_ref, &masks_ref, &sampling_configs, true)
         };
         let decode_out = match decode_result {
             Ok(out) => out,

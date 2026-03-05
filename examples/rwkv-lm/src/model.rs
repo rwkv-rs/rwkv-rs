@@ -173,8 +173,8 @@ impl<B: Backend> AutoRegressiveModel<B> {
     )]
     pub fn infer(
         &self,
-        tokens: Tensor<B, 2, Int>,
-        context_mask: Option<Tensor<B, 2>>,
+        contexts: Tensor<B, 2, Int>,
+        context_masks: Option<Tensor<B, 2>>,
         embedded_token_shift_for_time_mix: &mut Vec<Tensor<B, 2>>,
         state: &mut Vec<Tensor<B, 4>>,
         embedded_token_shift_for_channel_mix: &mut Vec<Tensor<B, 2>>,
@@ -201,13 +201,13 @@ impl<B: Backend> AutoRegressiveModel<B> {
 
         let device = &self.embed.devices()[0];
 
-        let tokens = tokens.to_device(device);
-        let context_mask = context_mask.map(|m| m.to_device(device));
+        let contexts = contexts.to_device(device);
+        let context_masks = context_masks.map(|m| m.to_device(device));
 
-        let [batch_size, context_length] = tokens.dims();
+        let [batch_size, context_length] = contexts.dims();
         assert!(context_length > 0, "tokens must be non-empty");
 
-        if let Some(mask) = context_mask.as_ref() {
+        if let Some(mask) = context_masks.as_ref() {
             let [mask_batch_size, mask_context_length] = mask.dims();
             assert_eq!(
                 (batch_size, context_length),
@@ -218,7 +218,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
 
         let embedded_context = {
             rwkv_bench::trace_lite_scope!("rwkv.infer.model.embed");
-            self.embed.forward(tokens)
+            self.embed.forward(contexts)
         };
         let embedded_context = {
             rwkv_bench::trace_lite_scope!("rwkv.infer.model.layer_norm_pre");
@@ -227,7 +227,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
 
         let multi_causal_cells_input = MultiCausalCellsIO {
             embedded_context,
-            context_mask: context_mask.clone(),
+            context_mask: context_masks.clone(),
             embedded_token_shift_for_time_mix: Some(take(embedded_token_shift_for_time_mix)),
             state: Some(take(state)),
             embedded_token_shift_for_channel_mix: Some(take(embedded_token_shift_for_channel_mix)),

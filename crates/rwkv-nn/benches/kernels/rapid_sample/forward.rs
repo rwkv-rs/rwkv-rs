@@ -3,7 +3,7 @@ use std::hint::black_box;
 use burn::prelude::Backend;
 use burn::tensor::{Int, Tensor};
 use divan::Bencher;
-use rwkv_nn::kernels::rapid_sample::{normalize_topk_topp, rapid_sample};
+use rwkv_nn::kernels::rapid_sample::rapid_sample;
 
 #[path = "../../common/mod.rs"]
 mod common;
@@ -14,9 +14,9 @@ fn build_sampling_params<B2: Backend>(
     case: &common::RapidSampleCase,
     device: &B2::Device,
 ) -> (Tensor<B2, 1>, Tensor<B2, 1, Int>, Tensor<B2, 1>) {
-    let (tk, tp) = normalize_topk_topp(case.vocab_size, case.top_k, case.top_p);
+    let (tk, tp) = (case.top_k, case.top_p);
     let inv_temps = Tensor::<B2, 1>::ones([case.batch_size], device);
-    let top_ks = Tensor::<B2, 1, Int>::full([case.batch_size], tk as i32, device);
+    let top_ks = Tensor::<B2, 1, Int>::full([case.batch_size], tk, device);
     let top_ps = Tensor::<B2, 1>::full([case.batch_size], tp, device);
     (inv_temps, top_ks, top_ps)
 }

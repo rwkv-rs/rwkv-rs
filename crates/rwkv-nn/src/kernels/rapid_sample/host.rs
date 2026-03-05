@@ -22,26 +22,6 @@ use crate::kernels::rapid_sample::{
     },
 };
 
-/// Normalize top_k and top_p for a given vocab_size.
-///
-/// Exported so callers can pre-normalize before building GPU tensors.
-pub fn normalize_topk_topp(vocab_size: usize, mut top_k: i32, mut top_p: f32) -> (u32, f32) {
-    if top_k <= 0 || top_k as usize > vocab_size {
-        top_k = vocab_size as i32;
-    }
-
-    if !(0f32..=1f32).contains(&top_p) {
-        top_p = 1f32;
-    }
-
-    if top_p == 0f32 {
-        // Match rapid-sampling behavior: deterministic argmax when top_p==0.
-        top_k = 1;
-        top_p = 1f32;
-    }
-
-    (top_k as u32, top_p)
-}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rapid_sample_topk_topp_impl<
