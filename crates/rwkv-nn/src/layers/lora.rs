@@ -97,7 +97,11 @@ impl<B: Backend> LoRA<B> {
     }
 
     pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
-        let x = x.matmul(self.w_a.val().unsqueeze_dim(0));
+        // Group view operations before compute block for better fusion
+        let w_a = self.w_a.val().unsqueeze_dim(0);
+        let w_b = self.w_b.val().unsqueeze_dim(0);
+
+        let x = x.matmul(w_a);
 
         let x = match self.activation_fn {
             ActivationFn::Sigmoid => sigmoid(x),
@@ -105,7 +109,7 @@ impl<B: Backend> LoRA<B> {
             ActivationFn::NoOP => x,
         };
 
-        let x = x.matmul(self.w_b.val().unsqueeze_dim(0));
+        let x = x.matmul(w_b);
 
         match &self.bias {
             Some(bias) => bias.val() + x,

@@ -12,6 +12,19 @@ use rwkv::nn::kernels::wkv7_common::{KernelInfer, Wkv7Backend};
 use rwkv::nn::modules::time_mixer::param_state::{StateModule, StateModuleConfig};
 use std::mem::take;
 
+/// Controls the unembed layer computation mode.
+/// Cf. albatross `full_output`, extended with `Skip` for chunked prefill.
+pub enum UnembedMode {
+    /// Skip layer_norm + unembed; only update recurrent state. For prefill intermediate chunks.
+    Skip,
+    /// Unembed only the last token position. For prefill final chunk and decode.
+    /// Corresponds to albatross `full_output=False`.
+    LastToken,
+    /// Unembed all token positions. For evaluation/scoring.
+    /// Corresponds to albatross `full_output=True`.
+    Full,
+}
+
 #[cfg(feature = "training")]
 use crate::data::batcher::AutoRegressiveBatch;
 #[cfg(feature = "training")]
@@ -154,15 +167,19 @@ impl<B: Backend> AutoRegressiveModel<B> {
         )
     }
 
+    #[cfg_attr(
+        feature = "trace",
+        tracing::instrument(name = "rwkv.infer.model.infer", skip_all)
+    )]
     pub fn infer(
         &self,
-        tokens: Tensor<B, 2, Int>,
-        context_mask: Option<Tensor<B, 2>>,
+        contexts: Tensor<B, 2, Int>,
+        context_masks: Option<Tensor<B, 2>>,
         embedded_token_shift_for_time_mix: &mut Vec<Tensor<B, 2>>,
         state: &mut Vec<Tensor<B, 4>>,
         embedded_token_shift_for_channel_mix: &mut Vec<Tensor<B, 2>>,
-        need_full_logits: bool,
-    ) -> Tensor<B, 3>
+        unembed_mode: UnembedMode,
+    ) -> Option<Tensor<B, 3>>
     where
         B: Wkv7Backend,
     {
@@ -184,13 +201,13 @@ impl<B: Backend> AutoRegressiveModel<B> {
 
         let device = &self.embed.devices()[0];
 
-        let tokens = tokens.to_device(device);
-        let context_mask = context_mask.map(|m| m.to_device(device));
+        let contexts = contexts.to_device(device);
+        let context_masks = context_masks.map(|m| m.to_device(device));
 
-        let [batch_size, context_length] = tokens.dims();
+        let [batch_size, context_length] = contexts.dims();
         assert!(context_length > 0, "tokens must be non-empty");
 
-        if let Some(mask) = context_mask.as_ref() {
+        if let Some(mask) = context_masks.as_ref() {
             let [mask_batch_size, mask_context_length] = mask.dims();
             assert_eq!(
                 (batch_size, context_length),
@@ -199,12 +216,18 @@ impl<B: Backend> AutoRegressiveModel<B> {
             );
         }
 
-        let embedded_context = self.embed.forward(tokens);
-        let embedded_context = self.layer_norm_for_first_cell.forward(embedded_context);
+        let embedded_context = {
+            rwkv_bench::trace_lite_scope!("rwkv.infer.model.embed");
+            self.embed.forward(contexts)
+        };
+        let embedded_context = {
+            rwkv_bench::trace_lite_scope!("rwkv.infer.model.layer_norm_pre");
+            self.layer_norm_for_first_cell.forward(embedded_context)
+        };
 
         let multi_causal_cells_input = MultiCausalCellsIO {
             embedded_context,
-            context_mask: context_mask.clone(),
+            context_mask: context_masks.clone(),
             embedded_token_shift_for_time_mix: Some(take(embedded_token_shift_for_time_mix)),
             state: Some(take(state)),
             embedded_token_shift_for_channel_mix: Some(take(embedded_token_shift_for_channel_mix)),
@@ -223,15 +246,24 @@ impl<B: Backend> AutoRegressiveModel<B> {
 
         let embedded_context = multi_causal_cells_output.embedded_context;
 
-        if need_full_logits {
-            let embedded_last_token =
-                embedded_context.slice([0..batch_size, (context_length - 1)..context_length]);
-            let embedded_last_token_normalized =
-                self.layer_norm_for_unembed.forward(embedded_last_token);
-            self.unembed.forward(embedded_last_token_normalized)
-        } else {
-            let embedded_context_normalized = self.layer_norm_for_unembed.forward(embedded_context);
-            self.unembed.forward(embedded_context_normalized)
+        match unembed_mode {
+            UnembedMode::Skip => None,
+            UnembedMode::LastToken => {
+                rwkv_bench::trace_lite_scope!("rwkv.infer.model.unembed");
+                let last =
+                    embedded_context.slice([0..batch_size, (context_length - 1)..context_length]);
+                Some(
+                    self.unembed
+                        .forward(self.layer_norm_for_unembed.forward(last)),
+                )
+            }
+            UnembedMode::Full => {
+                rwkv_bench::trace_lite_scope!("rwkv.infer.model.unembed");
+                Some(
+                    self.unembed
+                        .forward(self.layer_norm_for_unembed.forward(embedded_context)),
+                )
+            }
         }
     }
 }

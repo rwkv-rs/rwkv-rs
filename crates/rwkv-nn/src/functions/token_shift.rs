@@ -17,6 +17,11 @@ pub fn token_shift<B: Backend>(
         &embedded_context.device(),
     ));
 
+    // Decode path is typically T=1; skip generic concat/mask plumbing in this case.
+    if context_length == 1 {
+        return embedded_token_shift.unsqueeze_dim(1);
+    }
+
     // Standard previous-token shift: [shift, x[:, 0..T-1]].
     let shifted = Tensor::cat(
         vec![

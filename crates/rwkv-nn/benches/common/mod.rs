@@ -6,7 +6,6 @@ use burn::{
     prelude::Backend,
     tensor::{Distribution, Int},
 };
-use rwkv_nn::kernels::rapid_sample::RapidSamplePenaltyConfig;
 use rwkv_nn::kernels::wkv7_common::Wkv7ForwardInput;
 
 #[cfg(feature = "cuda")]
@@ -235,12 +234,4 @@ pub fn random_penalties<B: Backend>(case: &RapidSampleCase, device: &B::Device) 
         Distribution::Normal(0.0, 1.0),
         device,
     )
-}
-
-pub fn default_penalty_config() -> RapidSamplePenaltyConfig {
-    RapidSamplePenaltyConfig {
-        presence_penalty: 0.1,
-        repetition_penalty: 0.2,
-        penalty_decay: 0.996,
-    }
 }

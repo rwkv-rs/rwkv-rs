@@ -5,4 +5,5 @@ mod sampling;
 pub use entry::{EngineEvent, FinishMetadata, FinishReason};
 pub use entry::{EntryId, InferEntry, InferEntryState, TimingBreakdownMs};
 pub use request::{InferRequest, InferRequestKind};
-pub use sampling::SamplingConfig;
+pub use sampling::{SamplingConfig, SamplingConfigsTensor};
+pub use sampling::sampling_configs_to_tensor;

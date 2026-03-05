@@ -12,7 +12,7 @@ pub fn apply_context_mask<B: Backend>(
         let [batch_size, context_length, _embedded_dim] = embedded_context.dims();
         let [mask_batch_size, mask_context_length] = context_mask.dims();
 
-        assert_eq!(
+        debug_assert_eq!(
             (batch_size, context_length),
             (mask_batch_size, mask_context_length),
             "context_mask shape mismatch with embedded_context"

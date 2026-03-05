@@ -31,9 +31,9 @@ pub struct ServeArgs {
     pub model: String,
     #[arg(long, value_enum, default_value_t = EndpointArg::Completions)]
     pub endpoint: EndpointArg,
-    #[arg(long, default_value_t = 1000)]
+    #[arg(long, default_value_t = 640)]
     pub num_requests: usize,
-    #[arg(long, default_value_t = 64)]
+    #[arg(long, default_value_t = 320)]
     pub concurrency: usize,
     #[arg(long, default_value_t = 0.0)]
     pub request_rate: f64,

@@ -6109,9 +6109,10 @@ name = "rwkv-infer"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "burn",
  "clia-tracing-config",
- "dashmap",
  "iceoryx2",
+ "itertools 0.14.0",
  "log",
  "nvtx",
  "once_cell",
@@ -6124,7 +6125,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml",
- "tower",
  "tower-http",
  "tracing",
  "uuid",
@@ -6138,6 +6138,7 @@ dependencies = [
  "clap",
  "clia-tracing-config",
  "derive-new 0.7.0",
+ "itertools 0.14.0",
  "log",
  "nvtx",
  "rwkv",
@@ -6162,6 +6163,7 @@ dependencies = [
  "rwkv-config",
  "rwkv-data",
  "serde",
+ "tracing",
 ]
 
 [[package]]

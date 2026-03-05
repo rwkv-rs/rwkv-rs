@@ -75,33 +75,33 @@ fn wkv7_infer_forward_impl_inner<
     let num_heads = shape.dims[2];
     let dim = shape.dims[3];
 
-    assert!(batch_size > 0, "batch size must be > 0");
-    assert!(context_length > 0, "context length must be > 0");
-    assert!(num_heads > 0, "num_heads must be > 0");
-    assert!(dim > 0, "head size must be > 0");
+    debug_assert!(batch_size > 0, "batch size must be > 0");
+    debug_assert!(context_length > 0, "context length must be > 0");
+    debug_assert!(num_heads > 0, "num_heads must be > 0");
+    debug_assert!(dim > 0, "head size must be > 0");
 
     let expected_initial_state_shape = Shape::new([batch_size, num_heads, dim, dim]);
-    assert_eq!(
+    debug_assert_eq!(
         initial_state.shape, expected_initial_state_shape,
         "initial_state shape must be [batch_size, num_heads, head_size, head_size]"
     );
-    assert_eq!(
+    debug_assert_eq!(
         receptance.shape, shape,
         "receptance shape mismatch with weight_decay"
     );
-    assert_eq!(key.shape, shape, "key shape mismatch with weight_decay");
-    assert_eq!(value.shape, shape, "value shape mismatch with weight_decay");
-    assert_eq!(
+    debug_assert_eq!(key.shape, shape, "key shape mismatch with weight_decay");
+    debug_assert_eq!(value.shape, shape, "value shape mismatch with weight_decay");
+    debug_assert_eq!(
         removal.shape, shape,
         "removal shape mismatch with weight_decay"
     );
-    assert_eq!(
+    debug_assert_eq!(
         replacement.shape, shape,
         "replacement shape mismatch with weight_decay"
     );
 
     let expected_context_mask_shape = Shape::new([batch_size, context_length]);
-    assert_eq!(
+    debug_assert_eq!(
         context_mask.shape, expected_context_mask_shape,
         "context_mask shape must be [batch_size, context_length]"
     );
