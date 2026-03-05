@@ -1,6 +1,18 @@
 [book]
 title = "The RWKV Book"
-authors = [
-    "Caizus",
-]
-language = "en"
+authors = ["Caizus and contributors"]
+language = "zh"
+src = "src"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+mathjax-support = true
+git-repository-url = "https://github.com/rwkv-rs/rwkv-rs"
+edit-url-template = "https://github.com/rwkv-rs/rwkv-rs/edit/main/rwkv-rs-book/{path}"
+
+[preprocessor.gettext]
+after = ["links"]
+
+[build]
+extra-watch-dirs = ["po"]
