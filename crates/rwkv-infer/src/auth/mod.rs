@@ -4,7 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use crate::server::OpenAiErrorResponse;
+use crate::access::http_api::OpenAiErrorResponse;
 
 #[derive(Clone, Debug, Default)]
 pub struct AuthConfig {

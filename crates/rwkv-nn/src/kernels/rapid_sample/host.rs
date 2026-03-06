@@ -22,7 +22,6 @@ use crate::kernels::rapid_sample::{
     },
 };
 
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rapid_sample_topk_topp_impl<
     R: CubeRuntime,
@@ -145,6 +144,7 @@ pub(crate) fn rapid_sample_topk_topp_impl<
             RapidSampleOutput {
                 token_ids,
                 states,
+                probs,
                 penalties: None,
             }
         }
@@ -195,6 +195,7 @@ pub(crate) fn rapid_sample_topk_topp_impl<
             RapidSampleOutput {
                 token_ids,
                 states,
+                probs,
                 penalties: Some(penalties),
             }
         }

@@ -82,7 +82,7 @@ mod fusion_impl {
                         ) {
                             let (
                                 [logits, states, inv_temperatures, top_ks, top_ps],
-                                [token_ids_out, states_out],
+                                [token_ids_out, states_out, probs_out],
                             ) = self.desc.as_fixed();
 
                             let logits_tensor = handles.get_float_tensor::<B1>(logits);
@@ -102,6 +102,7 @@ mod fusion_impl {
 
                             handles.register_int_tensor::<B1>(&token_ids_out.id, output.token_ids);
                             handles.register_int_tensor::<B1>(&states_out.id, output.states);
+                            handles.register_float_tensor::<B1>(&probs_out.id, output.probs);
                         }
                     }
 
@@ -122,6 +123,11 @@ mod fusion_impl {
                             client.create_empty_handle(),
                             Shape::new([batch_size]),
                             DType::U32,
+                        ),
+                        TensorIr::uninit(
+                            client.create_empty_handle(),
+                            Shape::new([batch_size, vocab_size]),
+                            DType::F32,
                         ),
                     ];
 
@@ -145,12 +151,14 @@ mod fusion_impl {
                     let mut outputs =
                         client.register(streams, OperationIr::Custom(op.desc.clone()), op);
 
+                    let probs = outputs.pop().expect("missing probs");
                     let states = outputs.pop().expect("missing states");
                     let token_ids = outputs.pop().expect("missing token_ids");
 
                     RapidSampleOutput {
                         token_ids,
                         states,
+                        probs,
                         penalties: None,
                     }
                 }
@@ -182,7 +190,7 @@ mod fusion_impl {
                                     repetition_penalty,
                                     penalty_decay,
                                 ],
-                                [token_ids_out, states_out, penalties_out],
+                                [token_ids_out, states_out, penalties_out, probs_out],
                             ) = self.desc.as_fixed();
 
                             let logits_tensor = handles.get_float_tensor::<B1>(logits);
@@ -218,6 +226,7 @@ mod fusion_impl {
                                 &penalties_out.id,
                                 output.penalties.expect("penalties output required"),
                             );
+                            handles.register_float_tensor::<B1>(&probs_out.id, output.probs);
                         }
                     }
 
@@ -242,6 +251,11 @@ mod fusion_impl {
                             client.create_empty_handle(),
                             Shape::new([batch_size]),
                             DType::U32,
+                        ),
+                        TensorIr::uninit(
+                            client.create_empty_handle(),
+                            Shape::new([batch_size, vocab_size]),
+                            DType::F32,
                         ),
                         TensorIr::uninit(
                             client.create_empty_handle(),
@@ -274,6 +288,7 @@ mod fusion_impl {
                     let mut outputs =
                         client.register(streams, OperationIr::Custom(op.desc.clone()), op);
 
+                    let probs = outputs.pop().expect("missing probs");
                     let penalties = outputs.pop().expect("missing penalties");
                     let states = outputs.pop().expect("missing states");
                     let token_ids = outputs.pop().expect("missing token_ids");
@@ -281,6 +296,7 @@ mod fusion_impl {
                     RapidSampleOutput {
                         token_ids,
                         states,
+                        probs,
                         penalties: Some(penalties),
                     }
                 }

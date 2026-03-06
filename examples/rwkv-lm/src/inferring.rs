@@ -2,21 +2,24 @@ use itertools::izip;
 use rwkv::{
     config::{raw::infer::GenerationConfig, validated::model::FinalModelConfig},
     custom::{
+        Tensor,
         cubecl::device::DeviceId,
         module::Module,
         prelude::{Backend, DeviceOps, Int, TensorData},
         record::{FullPrecisionSettings, NamedMpkFileRecorder},
         tensor::{DType, IndexingUpdateOp},
-        Tensor,
     },
     infer::{
-        engine::{EngineRuntime, EngineRuntimeConfig, ModelForward},
-        service::{builder::build_model_group_engines, ModelEngineFactory, ModelRuntimeGroup},
-        types::{sampling_configs_to_tensor, SamplingConfigsTensor},
-        Error, Result, SamplingConfig,
+        Error, Result,
+        inference_core::{
+            InferenceExecutionConfig, InferenceExecutionLoop, ModelForward, SampledToken,
+            SamplingConfig, SamplingConfigsTensor, TokenLogprobsConfig,
+            build_sampled_token_logprob, sampling_configs_to_tensor,
+        },
+        model_pool::{LoadedModelGroup, ModelEngineFactory, build_model_group_engines},
     },
     nn::kernels::{
-        rapid_sample::{rapid_sample, RapidSampleBackend},
+        rapid_sample::{RapidSampleBackend, rapid_sample},
         wkv7_common::Wkv7Backend,
     },
 };
@@ -68,16 +71,14 @@ impl<B: Backend + Wkv7Backend + RapidSampleBackend> RwkvLmForward<B> {
         let head_size = model_cfg.head_size_auto;
 
         let init_embedded_token_shift = || {
-            (0..num_cells).map(|_| Tensor::zeros(
-                [max_batch_size, embedded_dim],
-                &device
-            )).collect::<Vec<_>>()
+            (0..num_cells)
+                .map(|_| Tensor::zeros([max_batch_size, embedded_dim], &device))
+                .collect::<Vec<_>>()
         };
         let init_state = || {
-            (0..num_cells).map(|_| Tensor::zeros(
-                [max_batch_size, num_heads, head_size, head_size],
-                &device
-            )).collect::<Vec<_>>()
+            (0..num_cells)
+                .map(|_| Tensor::zeros([max_batch_size, num_heads, head_size, head_size], &device))
+                .collect::<Vec<_>>()
         };
 
         let rng = Tensor::<B, 1, Int>::from_data(
@@ -120,8 +121,9 @@ where
         contexts: &[&[i32]],
         context_masks: &[&[u8]],
         sampling_configs: &[SamplingConfig],
+        token_logprobs: &[Option<TokenLogprobsConfig>],
         need_sample: bool,
-    ) -> Result<Vec<(usize, i32)>> {
+    ) -> Result<Vec<SampledToken>> {
         rwkv_bench::trace_scope!("rwkv.infer.executor.forward_step");
         if batch_ids.len() != contexts.len() || contexts.len() != context_masks.len() {
             return Err(Error::BadRequest(
@@ -160,6 +162,13 @@ where
                 batch_ids.len()
             )));
         }
+        if token_logprobs.len() != batch_ids.len() {
+            return Err(Error::BadRequest(format!(
+                "forward: token_logprobs length {} does not match batch size {}",
+                token_logprobs.len(),
+                batch_ids.len()
+            )));
+        }
 
         let batch_size = batch_ids.len();
 
@@ -168,7 +177,10 @@ where
             for &batch_id in batch_ids {
                 batch_masks[batch_id] = 0.0;
             }
-            Tensor::from_data(TensorData::new(batch_masks, [self.max_batch_size]), &self.device)
+            Tensor::from_data(
+                TensorData::new(batch_masks, [self.max_batch_size]),
+                &self.device,
+            )
         };
 
         let batch_ids_tensor: Tensor<B, 1, Int> = Tensor::from_data(
@@ -291,7 +303,11 @@ where
                     presence_penalties,
                     repetition_penalties,
                     penalties_decay,
-                } = sampling_configs_to_tensor::<B>(sampling_configs, self.vocab_size, &self.device);
+                } = sampling_configs_to_tensor::<B>(
+                    sampling_configs,
+                    self.vocab_size,
+                    &self.device,
+                );
 
                 let sample_output = rapid_sample::<B>(
                     logits.squeeze_dim(1),
@@ -324,18 +340,44 @@ where
                     // Scatter penalties back via mask + select_assign.
                     if let Some(ref updated_penalties) = sample_output.penalties {
                         let penalties_mask_2d = batch_masks_2d.clone().cast(DType::F32);
-                        self.penalties = (self.penalties.clone() * penalties_mask_2d).select_assign(
-                            0,
-                            batch_ids_tensor.clone(),
-                            updated_penalties.clone(),
-                            IndexingUpdateOp::Add,
-                        );
+                        self.penalties = (self.penalties.clone() * penalties_mask_2d)
+                            .select_assign(
+                                0,
+                                batch_ids_tensor.clone(),
+                                updated_penalties.clone(),
+                                IndexingUpdateOp::Add,
+                            );
                     }
                 }
 
                 let token_ids = sample_output.token_ids.to_data().to_vec::<i32>().unwrap();
+                let probs = token_logprobs
+                    .iter()
+                    .any(|cfg| cfg.is_some())
+                    .then(|| sample_output.probs.to_data().to_vec::<f32>().unwrap());
 
-                Ok(batch_ids.iter().copied().zip(token_ids).collect())
+                Ok(batch_ids
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(row_index, batch_index)| {
+                        let token_id = token_ids[row_index];
+                        let logprob = token_logprobs[row_index].as_ref().map(|cfg| {
+                            let probs = probs.as_ref().expect(
+                                "probability buffer must exist when logprobs are requested",
+                            );
+                            let row_start = row_index * self.vocab_size;
+                            let row_end = row_start + self.vocab_size;
+                            build_sampled_token_logprob(&probs[row_start..row_end], token_id, cfg)
+                        });
+
+                        SampledToken {
+                            batch_index,
+                            token_id,
+                            logprob,
+                        }
+                    })
+                    .collect())
             }
             None => Ok(Vec::new()),
         }
@@ -391,7 +433,7 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// ModelEngineFactory — builds engine groups for RuntimeManager
+// ModelEngineFactory — builds model groups for LoadedModelRegistry
 // ---------------------------------------------------------------------------
 
 pub struct RwkvLmEngineFactory<B> {
@@ -400,7 +442,9 @@ pub struct RwkvLmEngineFactory<B> {
 
 impl<B> RwkvLmEngineFactory<B> {
     pub fn new() -> Self {
-        Self { _marker: PhantomData}
+        Self {
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -412,7 +456,7 @@ where
         &self,
         models: &[GenerationConfig],
         model_cfgs: &HashMap<String, Arc<FinalModelConfig>>,
-    ) -> Result<HashMap<String, ModelRuntimeGroup>> {
+    ) -> Result<HashMap<String, LoadedModelGroup>> {
         build_model_group_engines(models, |generation_cfg| {
             let model_cfg = model_cfgs.get(&generation_cfg.model_name).ok_or_else(|| {
                 Error::Internal(format!(
@@ -460,8 +504,8 @@ where
                     device.clone(),
                 );
 
-                let engine = EngineRuntime::spawn(
-                    EngineRuntimeConfig {
+                let engine = InferenceExecutionLoop::spawn(
+                    InferenceExecutionConfig {
                         tokenizer_vocab_path: generation_cfg.tokenizer_vocab_path.clone(),
                         max_batch_size,
                         paragraph_len,

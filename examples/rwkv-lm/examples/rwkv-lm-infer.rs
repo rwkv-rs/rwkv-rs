@@ -11,11 +11,11 @@ fn main() {
 use axum::serve;
 use rwkv::config::{default_cfg_dir, get_arg_value};
 use rwkv::custom::prelude::Backend;
-use rwkv::infer::auth::AuthConfig;
+use rwkv::infer::access::http_api::{HttpApiRouterBuilder, HttpApiState};
 #[cfg(feature = "ipc-iceoryx2")]
-use rwkv::infer::ipc::IpcServer;
-use rwkv::infer::server::{AppState, RouterBuilder};
-use rwkv::infer::service::RuntimeManager;
+use rwkv::infer::access::ipc_api::IpcServer;
+use rwkv::infer::auth::AuthConfig;
+use rwkv::infer::model_pool::LoadedModelRegistry;
 use rwkv::nn::kernels::rapid_sample::RapidSampleBackend;
 use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
 use std::path::PathBuf;
@@ -76,26 +76,26 @@ where
     #[cfg(feature = "trace")]
     println!("trace mode: {trace_mode:?}");
 
-    let runtime_manager = Arc::new(RuntimeManager::bootstrap(
+    let loaded_model_registry = Arc::new(LoadedModelRegistry::bootstrap(
         config_dir,
         infer_cfg,
         Arc::new(RwkvLmEngineFactory::<B>::new()),
     )?);
 
-    let app = AppState {
+    let app = HttpApiState {
         auth_cfg: AuthConfig {
-            api_key: runtime_manager.api_key(),
+            api_key: loaded_model_registry.api_key(),
         },
-        runtime_manager: runtime_manager.clone(),
+        runtime_manager: loaded_model_registry.clone(),
     };
 
     #[cfg(feature = "ipc-iceoryx2")]
-    let _ipc_server_thread = if runtime_manager.ipc_enabled() {
+    let _ipc_server_thread = if loaded_model_registry.ipc_enabled() {
         let server =
-            IpcServer::from_runtime_manager(runtime_manager.clone(), app.auth_cfg.clone())?;
+            IpcServer::from_runtime_manager(loaded_model_registry.clone(), app.auth_cfg.clone())?;
         log::info!(
             "starting iceoryx2 ipc service: {}",
-            runtime_manager.ipc_service_name()
+            loaded_model_registry.ipc_service_name()
         );
         Some(server.spawn()?)
     } else {
@@ -103,15 +103,15 @@ where
     };
 
     #[cfg(not(feature = "ipc-iceoryx2"))]
-    if runtime_manager.ipc_enabled() {
+    if loaded_model_registry.ipc_enabled() {
         return Err(rwkv::infer::Error::bad_request(
             "ipc is enabled in infer config but feature `ipc-iceoryx2` is not enabled",
         ));
     }
 
-    let router = RouterBuilder::new(app).build().await?;
+    let router = HttpApiRouterBuilder::new(app).build().await?;
 
-    let bind_addr = runtime_manager.http_bind_addr();
+    let bind_addr = loaded_model_registry.http_bind_addr();
     let listener = TcpListener::bind(&bind_addr).await.map_err(|e| {
         rwkv::infer::Error::Internal(format!("failed to bind http listener {}: {e}", bind_addr))
     })?;
@@ -141,16 +141,6 @@ mod vulkan {
     }
 }
 
-#[cfg(feature = "metal")]
-mod metal {
-    use super::{ElemType, launch};
-    use rwkv::custom::backend::Metal;
-
-    pub async fn run() {
-        launch::<Metal<ElemType, i32>>().await.unwrap();
-    }
-}
-
 #[cfg(feature = "cuda")]
 mod cuda {
     use super::{ElemType, launch};
@@ -164,24 +154,33 @@ mod cuda {
 #[cfg(feature = "rocm")]
 mod rocm {
     use super::{ElemType, launch};
-    use rwkv::custom::backend::Rocm;
+    use rwkv::custom::backend::Hip;
 
     pub async fn run() {
-        launch::<Rocm<ElemType, i32>>().await.unwrap();
+        launch::<Hip<ElemType, i32>>().await.unwrap();
     }
 }
 
-#[cfg(feature = "inferring")]
+#[cfg(feature = "metal")]
+mod metal {
+    use super::{ElemType, launch};
+    use rwkv::custom::backend::Metal;
+
+    pub async fn run() {
+        launch::<Metal<ElemType, i32>>().await.unwrap();
+    }
+}
+
 #[tokio::main]
-pub async fn main() {
+async fn main() {
     #[cfg(feature = "wgpu")]
     wgpu::run().await;
+    #[cfg(feature = "vulkan")]
+    vulkan::run().await;
     #[cfg(feature = "cuda")]
     cuda::run().await;
     #[cfg(feature = "rocm")]
     rocm::run().await;
-    #[cfg(feature = "vulkan")]
-    vulkan::run().await;
     #[cfg(feature = "metal")]
     metal::run().await;
 }

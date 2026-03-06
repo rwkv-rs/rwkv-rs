@@ -274,7 +274,8 @@ impl<B: Backend> WeightPrepare<B> {
 
         let learning_rate = sigmoid(self.param_learning_rate_lora.forward(learning_rate_input));
 
-        let alpha_modulated = self.param_key_replacement.val() * (learning_rate.clone() - 1.0) + 1.0;
+        let alpha_modulated =
+            self.param_key_replacement.val() * (learning_rate.clone() - 1.0) + 1.0;
 
         let replacement_key = key_precursor.clone() * alpha_modulated;
 

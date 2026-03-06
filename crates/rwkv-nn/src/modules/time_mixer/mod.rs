@@ -161,7 +161,9 @@ impl<B: Backend> TimeMixer<B> {
         let embedded_context = apply_context_mask(embedded_context, context_mask.clone());
         let value_from_first_cell = apply_context_mask(value_from_first_cell, context_mask.clone());
 
-        let output_embedded_token_shift = embedded_token_shift.as_ref().map(|_| get_embedded_token_shift(embedded_context.clone()));
+        let output_embedded_token_shift = embedded_token_shift
+            .as_ref()
+            .map(|_| get_embedded_token_shift(embedded_context.clone()));
 
         let weight_prepare_output = self.weight_prepare.forward(
             embedded_context.clone(),

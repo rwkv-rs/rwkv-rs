@@ -27,7 +27,6 @@ use burn::{
     },
 };
 
-
 /// Unified rapid-sample output.
 #[derive(Clone, Debug)]
 pub struct RapidSampleOutput<FT, IT> {
@@ -35,6 +34,8 @@ pub struct RapidSampleOutput<FT, IT> {
     pub token_ids: IT,
     /// Updated RNG states, shape `[batch_size]`.
     pub states: IT,
+    /// Post-sampling probabilities, shape `[batch_size, vocab_size]`.
+    pub probs: FT,
     /// Updated penalties, shape `[batch_size, vocab_size]` when enabled.
     pub penalties: Option<FT>,
 }
@@ -107,6 +108,7 @@ pub fn rapid_sample<B: RapidSampleBackend>(
     RapidSampleOutput {
         token_ids: Tensor::from_primitive(out.token_ids),
         states: Tensor::from_primitive(out.states),
+        probs: Tensor::from_primitive(TensorPrimitive::Float(out.probs)),
         penalties: out
             .penalties
             .map(|penalties| Tensor::from_primitive(TensorPrimitive::Float(penalties))),
