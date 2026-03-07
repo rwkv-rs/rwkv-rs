@@ -81,7 +81,6 @@ impl ModelRequestRouter {
         sampling: SamplingConfig,
         stop_suffixes: Vec<String>,
         token_logprobs: Option<TokenLogprobsConfig>,
-        stream: bool,
     ) -> crate::Result<InferenceSubmitResult> {
         self.submit_text_with_trace(
             model_name,
@@ -89,7 +88,6 @@ impl ModelRequestRouter {
             sampling,
             stop_suffixes,
             token_logprobs,
-            stream,
             None,
         )
         .await
@@ -102,19 +100,8 @@ impl ModelRequestRouter {
         sampling: SamplingConfig,
         stop_suffixes: Vec<String>,
         token_logprobs: Option<TokenLogprobsConfig>,
-        stream: bool,
         validate_ms: Option<u64>,
     ) -> crate::Result<InferenceSubmitResult> {
-        #[cfg(feature = "trace")]
-        tracing::info!(
-            target: "rwkv.infer",
-            model = %model_name,
-            stream,
-            max_new_tokens = sampling.max_new_tokens,
-            validate_ms,
-            "dispatch submit request"
-        );
-
         let group = self.model_groups.get(model_name).ok_or_else(|| {
             crate::Error::BadRequest(format!(
                 "unknown model_name: {model_name}. available: {:?}",
@@ -129,12 +116,8 @@ impl ModelRequestRouter {
                 sampling,
                 stop_suffixes,
                 token_logprobs,
-                stream,
                 validate_ms,
             )
             .await
     }
 }
-
-pub type ModelRuntimeGroup = LoadedModelGroup;
-pub type Service = ModelRequestRouter;

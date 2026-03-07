@@ -16,7 +16,7 @@ use crate::access::http_api::{
 };
 use crate::inference_core::InferenceSubmitResult as SubmitOutput;
 use crate::inference_core::{
-    EngineEvent, EntryId, FinishMetadata, OutputToken, StreamDelta, TokenLogprobsConfig,
+    EngineEvent, EntryId, FinishMetadata, InferenceOutput, StreamDelta, TokenLogprobsConfig,
 };
 use crate::model_pool::LoadedModelRegistry as RuntimeManager;
 use crate::response_store::{
@@ -112,11 +112,10 @@ impl HttpApiService {
                 sampling,
                 stop_suffixes,
                 token_logprobs.clone(),
-                true,
                 Some(validate_ms),
             )
             .await?;
-        let (_entry_id, rx) = expect_submit_stream(submit)?;
+        let (_entry_id, rx) = expect_submit_receiver(submit)?;
 
         Ok(CompletionRun {
             id: format!("cmpl_{}", Uuid::new_v4().as_simple()),
@@ -188,11 +187,10 @@ impl HttpApiService {
                 sampling,
                 stop_suffixes,
                 token_logprobs.clone(),
-                true,
                 Some(validate_ms),
             )
             .await?;
-        let (_entry_id, rx) = expect_submit_stream(submit)?;
+        let (_entry_id, rx) = expect_submit_receiver(submit)?;
 
         Ok(ChatCompletionRun {
             id: format!("chatcmpl_{}", Uuid::new_v4().as_simple()),
@@ -258,12 +256,11 @@ impl HttpApiService {
                         sampling,
                         stop_suffixes,
                         None,
-                        true,
                         Some(validate_ms),
                     )
                     .await;
                 let mut rx = match submit {
-                    Ok(SubmitOutput::Stream { rx, .. }) => rx,
+                    Ok(SubmitOutput::Receiver { rx, .. }) => rx,
                     Ok(other) => {
                         GLOBAL_BACKGROUND_TASKS.fail(
                             &task.task_id,
@@ -310,11 +307,10 @@ impl HttpApiService {
                 sampling,
                 stop_suffixes,
                 None,
-                true,
                 Some(validate_ms),
             )
             .await?;
-        let (_entry_id, mut rx) = expect_submit_stream(submit)?;
+        let (_entry_id, mut rx) = expect_submit_receiver(submit)?;
         let out = collect_stream_output(&mut rx).await?.text;
 
         GLOBAL_RESPONSE_CACHE.put(CachedResponse {
@@ -463,7 +459,7 @@ impl CompletionRun {
 
     fn completion_logprobs(
         &self,
-        tokens: &[OutputToken],
+        tokens: &[InferenceOutput],
         text_offset: usize,
     ) -> Option<CompletionLogprobs> {
         self.token_logprobs
@@ -571,7 +567,7 @@ impl ChatCompletionRun {
         ))
     }
 
-    fn chat_logprobs(&self, tokens: &[OutputToken]) -> Option<ChatCompletionLogprobs> {
+    fn chat_logprobs(&self, tokens: &[InferenceOutput]) -> Option<ChatCompletionLogprobs> {
         self.token_logprobs
             .as_ref()
             .map(|_| ChatCompletionLogprobs {
@@ -598,7 +594,7 @@ impl ChatCompletionRun {
 
 pub struct CollectedStream {
     pub text: String,
-    pub tokens: Vec<OutputToken>,
+    pub tokens: Vec<InferenceOutput>,
     pub finish_meta: FinishMetadata,
 }
 
@@ -651,7 +647,7 @@ pub async fn collect_stream_output(
     })
 }
 
-fn build_completion_logprobs(tokens: &[OutputToken], text_offset: usize) -> CompletionLogprobs {
+fn build_completion_logprobs(tokens: &[InferenceOutput], text_offset: usize) -> CompletionLogprobs {
     let mut offsets = Vec::with_capacity(tokens.len());
     let mut current_offset = text_offset;
     for token in tokens {
@@ -676,14 +672,12 @@ fn build_completion_logprobs(tokens: &[OutputToken], text_offset: usize) -> Comp
     }
 }
 
-fn expect_submit_stream(
+fn expect_submit_receiver(
     submit: SubmitOutput,
 ) -> crate::Result<(EntryId, mpsc::Receiver<EngineEvent>)> {
     match submit {
-        SubmitOutput::Stream { entry_id, rx } => Ok((entry_id, rx)),
-        other => Err(crate::Error::internal(format!(
-            "unexpected engine output: {other:?}"
-        ))),
+        SubmitOutput::Receiver { entry_id, rx } => Ok((entry_id, rx)),
+        SubmitOutput::Error { message, .. } => Err(crate::Error::bad_request(message)),
     }
 }
 

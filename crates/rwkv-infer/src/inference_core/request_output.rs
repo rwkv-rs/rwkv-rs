@@ -5,24 +5,24 @@ pub type InferenceRequestId = Uuid;
 pub type EntryId = InferenceRequestId;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct OutputTokenCandidate {
+pub struct InferenceOutputCandidate {
     pub token: String,
     pub bytes: Vec<u8>,
     pub logprob: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct OutputToken {
+pub struct InferenceOutput {
     pub token: String,
     pub bytes: Vec<u8>,
     pub logprob: Option<f32>,
-    pub top_logprobs: Vec<OutputTokenCandidate>,
+    pub top_logprobs: Vec<InferenceOutputCandidate>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StreamDelta {
     pub text: String,
-    pub tokens: Vec<OutputToken>,
+    pub tokens: Vec<InferenceOutput>,
 }
 
 #[derive(Clone, Debug)]

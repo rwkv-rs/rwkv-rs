@@ -12,7 +12,7 @@ use axum::{
 
 pub use openai_schema::*;
 pub use router::{AppState, HttpApiRouterBuilder, HttpApiState, RouterBuilder};
-pub use service::{ApiService, HttpApiService};
+pub use service::{ApiService, HttpApiService, collect_stream_output};
 
 pub fn infer_error_response(err: crate::Error) -> Response {
     let status = if err.is_client_error() {

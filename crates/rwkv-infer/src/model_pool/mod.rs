@@ -7,5 +7,4 @@ pub use loaded_model_registry::RuntimeManager as LoadedModelRegistry;
 pub use loaded_model_registry::{
     ModelEngineFactory, ModelsReloadPatch, ModelsReloadResult, RuntimeManager,
 };
-pub use request_router::{ModelRuntimeGroup, Service};
-pub use request_router::{ModelRuntimeGroup as LoadedModelGroup, Service as ModelRequestRouter};
+pub use request_router::{LoadedModelGroup, ModelRequestRouter};

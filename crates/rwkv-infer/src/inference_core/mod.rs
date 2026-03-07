@@ -1,32 +1,29 @@
 pub mod batch_scheduler;
+pub mod byte_decoder;
 pub mod execution_loop;
 pub mod logprobs;
+pub mod output_token;
 pub mod request_output;
 pub mod request_state;
 pub mod request_submit;
 pub mod sampling;
+pub mod special_token;
+pub mod stop_suffix_matcher;
+pub mod tokenizer_loop;
 
-pub use batch_scheduler::{DefaultScheduler, SchedulerStep};
-pub use batch_scheduler::{
-    DefaultScheduler as BatchScheduler, SchedulerStep as BatchScheduleDecision,
-};
-pub use execution_loop::{
-    EngineRuntime as InferenceExecutionLoop, EngineRuntimeConfig as InferenceExecutionConfig,
-};
-pub use execution_loop::{EngineRuntime, EngineRuntimeConfig, ModelForward};
+pub use batch_scheduler::{Scheduler, SchedulerStep};
+pub use execution_loop::{InferenceExecutionConfig, InferenceExecutionLoop, ModelForward};
 pub use logprobs::{
     SampledToken, SampledTokenLogprob, SampledTokenTopLogprob, TokenLogprobsConfig,
     build_sampled_token_logprob,
 };
+pub use output_token::{OutputToken, OutputTokenCandidate};
 pub use request_output::{
-    EngineEvent, EntryId, FinishMetadata, FinishReason, InferenceRequestId, OutputToken,
-    OutputTokenCandidate, StreamDelta, TimingBreakdownMs,
+    EngineEvent, EntryId, FinishMetadata, FinishReason, InferenceOutput, InferenceOutputCandidate,
+    InferenceRequestId, StreamDelta, TimingBreakdownMs,
 };
-pub use request_state::{ActiveRequest, ActiveRequestState, StopMatch};
-pub use request_state::{InferEntry, InferEntryState};
-pub use request_submit::{EngineCommand, EngineHandle, SubmitOutput};
-pub use request_submit::{
-    EngineCommand as InferenceSubmitCommand, EngineHandle as InferenceSubmitHandle,
-    SubmitOutput as InferenceSubmitResult,
-};
+pub use request_state::{PrefillStepKind, RequestPhase, RequestState};
+pub use request_submit::{InferenceSubmitCommand, InferenceSubmitHandle, InferenceSubmitResult};
 pub use sampling::{SamplingConfig, SamplingConfigsTensor, sampling_configs_to_tensor};
+pub use special_token::{END_TOKEN_ID, PREFILL_PAD_TOKEN_ID};
+pub use stop_suffix_matcher::{StopMatch, StopSuffixMatcher};
