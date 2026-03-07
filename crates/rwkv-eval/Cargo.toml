@@ -6,3 +6,14 @@ description = "Evaluation harness placeholder for running benchmark suites again
 license = "Apache-2.0"
 
 [dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
+walkdir = { workspace = true }
+indicatif = { workspace = true }
+parquet = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+rwkv-config = { path = "../rwkv-config" }
+async-openai = { version = "0.33.0", default-features = false, features = ["rustls", "completions", "chat-completion"] }

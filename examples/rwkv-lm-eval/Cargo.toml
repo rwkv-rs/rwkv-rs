@@ -12,3 +12,5 @@ workspace = true
 
 [dependencies]
 rwkv-eval = { path = "../../crates/rwkv-eval" }
+rwkv-config = { path = "../../crates/rwkv-config" }
+tokio = { workspace = true }

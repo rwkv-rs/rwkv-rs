@@ -14,6 +14,7 @@ use rwkv::nn::kernels::l2wrap::L2WrapBackend;
 use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
 use rwkv::train::learner::init::{BackendDeviceInit, init_cfg, init_devices, init_log};
 use rwkv_lm::paths;
+use rwkv_lm::training::train;
 use std::path::PathBuf;
 
 #[cfg(not(any(feature = "f32", feature = "flex32", feature = "f16")))]
@@ -56,7 +57,7 @@ where
 
     let devices = init_devices::<B>(&train_cfg_builder);
 
-    rwkv_lm::training::train::<B>(devices, model_cfg_builder, train_cfg_builder, &exp_log_path);
+    train::<B>(devices, model_cfg_builder, train_cfg_builder, &exp_log_path);
 }
 
 #[cfg(feature = "wgpu")]
