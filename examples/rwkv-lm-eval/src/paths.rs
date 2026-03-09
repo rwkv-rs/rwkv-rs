@@ -8,6 +8,6 @@ pub fn config_dir() -> PathBuf {
     crate_root().join("config")
 }
 
-pub fn datasets_dir() -> PathBuf {
+pub fn datasets_path() -> PathBuf {
     crate_root().join("datasets")
 }

@@ -13,7 +13,7 @@ use async_openai::{
     },
 };
 use rwkv_config::{
-    raw::eval::{EvalModelConfig, LlmServiceConfig},
+    raw::eval::{ApiConfig, ApiConfig},
     validated::eval::FinalEvalConfig,
 };
 
@@ -41,7 +41,7 @@ impl ModelSelector {
 #[derive(Clone, Debug)]
 pub struct ResolvedModelTarget {
     pub selector: ModelSelector,
-    pub config: EvalModelConfig,
+    pub config: ApiConfig,
 }
 
 impl ResolvedModelTarget {
@@ -64,7 +64,7 @@ pub struct ModelRuntime {
 
 #[derive(Clone)]
 pub struct EvalRuntime {
-    datasets_dir: PathBuf,
+    datasets_path: PathBuf,
     models: Vec<ModelRuntime>,
     judger: ServiceRuntime,
     checker: ServiceRuntime,
@@ -72,12 +72,12 @@ pub struct EvalRuntime {
 
 #[derive(Clone)]
 struct ServiceRuntime {
-    config: LlmServiceConfig,
+    config: ApiConfig,
     client: OpenAiClient,
 }
 
 impl EvalRuntime {
-    pub async fn new(cfg: &FinalEvalConfig, datasets_dir: PathBuf) -> Result<Self, EvalError> {
+    pub async fn new(cfg: &FinalEvalConfig, datasets_path: PathBuf) -> Result<Self, EvalError> {
         let mut model_services = HashMap::new();
         for model in cfg.models.iter() {
             model_services.insert(
@@ -128,7 +128,7 @@ impl EvalRuntime {
         };
 
         let runtime = Self {
-            datasets_dir,
+            datasets_path,
             models,
             judger,
             checker,
@@ -138,8 +138,8 @@ impl EvalRuntime {
         Ok(runtime)
     }
 
-    pub fn datasets_dir(&self) -> &PathBuf {
-        &self.datasets_dir
+    pub fn datasets_path(&self) -> &PathBuf {
+        &self.datasets_path
     }
 
     pub fn models(&self) -> &[ModelRuntime] {

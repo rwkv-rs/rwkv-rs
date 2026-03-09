@@ -10,31 +10,23 @@ use crate::datasets::{Benchmark, BenchmarkSplit};
 use crate::error::BenchmarkError;
 use crate::evaluators::{Evaluator, MmluEvaluator};
 
-const DATASET: &str = "cais/mmlu";
-const DATASET_REPO: &str = "datasets/cais/mmlu";
-const CONFIG: &str = "all";
-const DEV_SPLIT: &str = "dev";
-const TEST_SPLIT: &str = "test";
-const AVG_K: usize = 1;
-const PASS_K: usize = 1;
-const WITH_LLM_JUDGER: bool = false;
-const SPLITS: [BenchmarkSplit; 2] = [BenchmarkSplit::Dev, BenchmarkSplit::Test];
+// const DATASET: &str = "cais/mmlu";
+// const DATASET_REPO: &str = "";
+// const CONFIG: &str = "all";
+// const DEV_SPLIT: &str = "dev";
+// const TEST_SPLIT: &str = "test";
+// const AVG_K: usize = 1;
+// const PASS_K: usize = 1;
+// const WITH_LLM_JUDGER: bool = false;
+// const SPLITS: [BenchmarkSplit; 2] = [BenchmarkSplit::Dev, BenchmarkSplit::Test];
 
 pub struct Mmlu {
     dataset_root: PathBuf,
-    dev: MmluSplit,
-    test: MmluSplit,
+    dev: Vec<MmluItem>,
+    test: Vec<MmluItem>,
 }
 
-#[derive(Default)]
-struct MmluSplit {
-    questions: Vec<String>,
-    subjects: Vec<String>,
-    choices_list: Vec<Vec<String>>,
-    answers: Vec<u8>,
-}
-
-struct MmluRowData {
+struct MmluItem {
     question: String,
     subject: String,
     choices: Vec<String>,
@@ -45,8 +37,8 @@ impl Mmlu {
     pub fn new<P: AsRef<Path>>(dataset_root: P) -> Self {
         Self {
             dataset_root: dataset_root.as_ref().to_path_buf(),
-            dev: MmluSplit::default(),
-            test: MmluSplit::default(),
+            dev: Vec::new(),
+            test: Vec::new(),
         }
     }
 
@@ -66,8 +58,8 @@ impl Mmlu {
         self.split_root().join("test-00000-of-00001.parquet")
     }
 
-    fn load_split(path: &Path) -> MmluSplit {
-        let rows = read_parquet_items(path, parse_item);
+    fn load_split(path: &Path) ->  {
+        let rows: Vec<MmluItem> = read_parquet_items(path, parse_item);
         let mut split = MmluSplit::default();
         for row in rows {
             split.questions.push(row.question);
@@ -77,18 +69,10 @@ impl Mmlu {
         }
         split
     }
-
-    fn split(&self, split: BenchmarkSplit) -> &MmluSplit {
-        match split {
-            BenchmarkSplit::Dev => &self.dev,
-            BenchmarkSplit::Test => &self.test,
-            _ => panic!("mmlu only supports dev/test splits"),
-        }
-    }
 }
 
-fn parse_item(row: &Row) -> MmluRowData {
-    MmluRowData {
+fn parse_item(row: &Row) -> MmluItem {
+    MmluItem {
         question: get_string(row, "question"),
         subject: get_string(row, "subject"),
         choices: get_string_list(row, "choices"),
@@ -125,7 +109,7 @@ impl Benchmark for Mmlu {
         let runtime = Runtime::new().unwrap();
         let downloaded_path = runtime.block_on(download_hf_files(
             self.dataset_root(),
-            DATASET_REPO,
+            "datasets/cais/mmlu",
             &[
                 "all/dev-00000-of-00001.parquet",
                 "all/test-00000-of-00001.parquet",

@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use rwkv_config::get_arg_value;
-use rwkv_eval::{init::init_cfg, runner::run_eval};
+use rwkv_eval::{init::init_cfg, runner::};
+use rwkv_lm_eval::evaluating::evaluating;
 use rwkv_lm_eval::paths;
 
 
@@ -14,17 +15,14 @@ async fn main() {
     let eval_cfg_name = get_arg_value(&args, "--eval-config").unwrap_or_else(|| "example".into());
 
     let eval_cfg_builder = init_cfg(&config_dir, &eval_cfg_name);
-    eval_cfg_builder.check();
-    let eval_cfg = eval_cfg_builder.build_local();
 
     println!(
-        "eval cfg: {eval_cfg_name} (config_dir: {config_dir})",
-        eval_cfg_name = eval_cfg_name,
+        "eval cfg: {eval_cfg_name} (config_dir: {})",
         config_dir = config_dir.display(),
     );
-    println!("datasets dir: {}", paths::datasets_dir().display());
+    println!("datasets dir: {}", paths::datasets_path().display());
 
-    let report = run_eval(&eval_cfg, paths::datasets_dir())
+    let report = evaluating(&eval_cfg_builder, paths::datasets_path())
         .await
         .unwrap_or_else(|error| panic!("failed to run eval: {error}"));
 

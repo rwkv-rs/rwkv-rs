@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fill_default;
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RawEvalConfig {
     pub experiment_name: String,
     pub experiment_desc: String,
@@ -13,31 +13,21 @@ pub struct RawEvalConfig {
     pub extra_benchmark_name: Vec<String>,
     pub upload_to_space: Option<bool>,
     pub git_hash: String,
-    pub models: Vec<EvalModelConfig>,
-    pub llm_judger: LlmServiceConfig,
-    pub llm_checker: LlmServiceConfig,
-    pub space_db: Option<SpaceDbConfig>,
+    pub models: Vec<ApiConfig>,
+    pub llm_judger: ApiConfig,
+    pub llm_checker: ApiConfig,
+    pub space_db: SpaceDbConfig,
 }
 
 impl RawEvalConfig {
     pub fn fill_default(&mut self) {
         fill_default!(self, upload_to_space: false);
-
-        for model in &mut self.models {
-            model.fill_default();
-        }
-
-        self.llm_judger.fill_default();
-        self.llm_checker.fill_default();
-
-        if let Some(space_db) = self.space_db.as_mut() {
-            space_db.fill_default();
-        }
+        self.space_db.fill_default();
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct EvalModelConfig {
+pub struct ApiConfig {
     pub model_arch_version: String,
     pub model_data_version: String,
     pub model_num_params: String,
@@ -46,24 +36,6 @@ pub struct EvalModelConfig {
     pub api_key: String,
     pub model: String,
     pub max_batch_size: Option<usize>,
-}
-
-impl EvalModelConfig {
-    pub fn fill_default(&mut self) {
-        fill_default!(self, max_batch_size: 1usize);
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct LlmServiceConfig {
-    pub base_url: String,
-    #[serde(skip_serializing)]
-    pub api_key: String,
-    pub model: String,
-}
-
-impl LlmServiceConfig {
-    pub fn fill_default(&mut self) {}
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
