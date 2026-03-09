@@ -4,7 +4,7 @@ use std::path::Path;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::record::{Field, Row};
 
-pub(crate) fn read_parquet_items<T, P, F>(path: P, mut parse: F) -> Vec<T>
+pub fn read_parquet_items<T, P, F>(path: P, mut parse: F) -> Vec<T>
 where
     P: AsRef<Path>,
     F: FnMut(&Row) -> T,
@@ -22,14 +22,14 @@ where
         .collect()
 }
 
-pub(crate) fn get_string(row: &Row, name: &str) -> String {
+pub fn get_string(row: &Row, name: &str) -> String {
     match get_field(row, name) {
         Field::Str(value) => value.clone(),
         _ => panic!("`{name}` should be string"),
     }
 }
 
-pub(crate) fn get_string_list(row: &Row, name: &str) -> Vec<String> {
+pub fn get_string_list(row: &Row, name: &str) -> Vec<String> {
     match get_field(row, name) {
         Field::ListInternal(list) => list
             .elements()
@@ -43,7 +43,7 @@ pub(crate) fn get_string_list(row: &Row, name: &str) -> Vec<String> {
     }
 }
 
-pub(crate) fn get_u8(row: &Row, name: &str) -> u8 {
+pub fn get_u8(row: &Row, name: &str) -> u8 {
     match get_field(row, name) {
         Field::Byte(value) => u8::try_from(*value).unwrap(),
         Field::Short(value) => u8::try_from(*value).unwrap(),
