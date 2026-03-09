@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use rwkv_config::get_arg_value;
-use rwkv_eval::{init::init_cfg, runner::};
+use rwkv_eval::init::init_cfg;
 use rwkv_lm_eval::evaluating::evaluating;
 use rwkv_lm_eval::paths;
 

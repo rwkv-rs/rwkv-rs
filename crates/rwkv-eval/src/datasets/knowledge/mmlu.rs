@@ -1,12 +1,23 @@
 use std::path::{Path, PathBuf};
-
+use linkme::distributed_slice;
 use parquet::record::Row;
 use tokio::runtime::Runtime;
 
+use crate::datasets::{Benchmark, BenchmarkInfo, BenchmarkName, Field, ALL_BENCHMARKS};
 use crate::datasets::hf_downloader::download_hf_files;
 use crate::datasets::hf_viewer::get_split_row_count;
 use crate::datasets::parquet_utils::{get_string, get_string_list, get_u8, read_parquet_items};
-use crate::datasets::Benchmark;
+
+
+#[distributed_slice(ALL_BENCHMARKS)]
+static MBPP_META: BenchmarkInfo = BenchmarkInfo {
+    name: BenchmarkName("mmlu"),
+    field: Field::Knowledge,
+    display_name: "MMLU",
+    avg_ks: &[1],
+    pass_ks: &[1],
+    with_llm_judger: false,
+};
 
 
 pub struct Mmlu {
@@ -34,17 +45,27 @@ impl Mmlu {
     }
 }
 
-fn parse_item(row: &Row) -> MmluItem {
-    MmluItem {
-        question: get_string(row, "question"),
-        subject: get_string(row, "subject"),
-        choices: get_string_list(row, "choices"),
-        answer: get_u8(row, "answer"),
-    }
-}
-
 impl Benchmark for Mmlu {
     type Item = MmluItem;
+
+    fn load(&mut self) {
+        let parse_item = |row: &Row| MmluItem {
+            question: get_string(row, "question"),
+            subject: get_string(row, "subject"),
+            choices: get_string_list(row, "choices"),
+            answer: get_u8(row, "answer"),
+        };
+        self.dev = read_parquet_items(
+            self.dataset_root
+                .join("mmlu/all/dev-00000-of-00001.parquet"),
+            parse_item,
+        );
+        self.test = read_parquet_items(
+            self.dataset_root
+                .join("mmlu/all/test-00000-of-00001.parquet"),
+            parse_item,
+        );
+    }
 
     fn check(&self) -> bool {
         let runtime = Runtime::new().unwrap();
@@ -57,7 +78,7 @@ impl Benchmark for Mmlu {
 
         self.dev.len() != remote_dev_len || self.test.len() != remote_test_len
     }
-    
+
     fn download(&self) {
         let runtime = Runtime::new().unwrap();
         let downloaded_path = runtime.block_on(download_hf_files(
@@ -73,20 +94,12 @@ impl Benchmark for Mmlu {
         println!("mmlu dataset: {}", downloaded_path.display());
     }
 
-    fn load(&mut self) {
-        self.dev = read_parquet_items(self.dataset_root.join(
-            "mmlu/all/dev-00000-of-00001.parquet"
-        ), parse_item);
-        self.test = read_parquet_items(self.dataset_root.join(
-            "mmlu/all/test-00000-of-00001.parquet"
-        ), parse_item);
-    }
-
-    fn get_expected_context(&self, item: Self::Item) -> String {
-        let choices = item.choices.iter().enumerate()
-            .map(|(i, choice)| {
-                format!("{}. {}", char::from(b'A' + i as u8), choice)
-            })
+    fn get_expected_context(&self, item: &Self::Item) -> String {
+        let choices = item
+            .choices
+            .iter()
+            .enumerate()
+            .map(|(i, choice)| format!("{}. {}", char::from(b'A' + i as u8), choice))
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -104,12 +117,10 @@ impl Benchmark for Mmlu {
         )
     }
 
-    fn get_ref_answer(&self, item: Self::Item) -> String {
+    fn get_ref_answer(&self, item: &Self::Item) -> String {
         let answer = item.answer;
         char::from(b'A' + answer).to_string()
     }
 
-    fn get_evaluator(&self) {
-        
-    }
+    fn get_evaluator(&self) {}
 }

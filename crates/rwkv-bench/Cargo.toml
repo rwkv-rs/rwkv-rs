@@ -32,5 +32,5 @@ tracing-subscriber = { workspace = true, optional = true }
 tracing-tracy = { workspace = true, optional = true }
 
 plotters = { workspace = true, default-features = false, features = ["line_series", "point_series", "svg_backend"] }
-reqwest = { workspace = true, default-features = false, features = ["json", "rustls-tls", "stream"] }
+reqwest = { workspace = true, default-features = false, features = ["json", "rustls", "stream"] }
 serde_json = { workspace = true }
