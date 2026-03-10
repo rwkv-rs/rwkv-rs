@@ -24,8 +24,8 @@ pub use access::local_api::{LocalInferenceClient, RwkvInferClient};
 pub use error::{Error, Result};
 pub use inference_core::{
     InferenceExecutionConfig, InferenceExecutionLoop, InferenceSubmitCommand,
-    InferenceSubmitHandle, InferenceSubmitResult, ModelForward, SamplingConfig,
-    TokenLogprobsConfig,
+    InferenceSubmitHandle, InferenceSubmitResult, ModelForward, RequestedTokenLogprobsConfig,
+    SamplingConfig, TokenLogprobsConfig,
 };
 pub use model_pool::{
     LoadedModelGroup, LoadedModelRegistry, ModelEngineFactory, ModelRequestRouter,

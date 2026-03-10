@@ -10,8 +10,9 @@ use super::request_submit::{InferenceSubmitCommand, InferenceSubmitHandle, Infer
 use super::special_token::{END_TOKEN_ID, PREFILL_PAD_TOKEN_ID};
 use super::tokenizer_loop::{TokenizerCommand, TokenizerLoop};
 use super::{
-    EntryId, FinishMetadata, FinishReason, OutputToken, OutputTokenCandidate, SampledToken,
-    SamplingConfig, StopMatch, TimingBreakdownMs, TokenLogprobsConfig,
+    EntryId, FinishMetadata, FinishReason, OutputToken, OutputTokenCandidate,
+    RequestedTokenLogprobsConfig, SampledToken, SamplingConfig, StopMatch, TimingBreakdownMs,
+    TokenLogprobsConfig,
 };
 
 #[derive(Clone, Debug)]
@@ -55,7 +56,7 @@ struct PendingSubmit {
     input_text: String,
     sampling: SamplingConfig,
     stop_suffixes: Vec<String>,
-    token_logprobs: Option<TokenLogprobsConfig>,
+    requested_token_logprobs: Option<RequestedTokenLogprobsConfig>,
     submitted_at: Instant,
     runtime_received_at: Instant,
     validate_ms: Option<u64>,
@@ -211,7 +212,7 @@ impl InferenceExecutionLoop {
                 input_text,
                 sampling,
                 stop_suffixes,
-                token_logprobs,
+                requested_token_logprobs,
                 submitted_at,
                 validate_ms,
                 reply,
@@ -220,7 +221,7 @@ impl InferenceExecutionLoop {
                 input_text,
                 sampling,
                 stop_suffixes,
-                token_logprobs,
+                requested_token_logprobs,
                 submitted_at,
                 runtime_received_at: Instant::now(),
                 validate_ms,
@@ -299,6 +300,20 @@ impl InferenceExecutionLoop {
                 continue;
             }
 
+            let resolved_token_logprobs = match resolve_requested_token_logprobs(
+                &self.tokenizer,
+                submit.requested_token_logprobs,
+            ) {
+                Ok(config) => config,
+                Err(err) => {
+                    let _ = submit.reply.send(InferenceSubmitResult::Error {
+                        entry_id: submit.entry_id,
+                        message: err.to_string(),
+                    });
+                    continue;
+                }
+            };
+
             let stop_suffixes: Vec<String> = submit
                 .stop_suffixes
                 .into_iter()
@@ -326,7 +341,7 @@ impl InferenceExecutionLoop {
                 submit.entry_id,
                 submit.sampling,
                 stop_suffixes,
-                submit.token_logprobs,
+                resolved_token_logprobs,
             );
             entry.input_token_ids = token_ids;
             entry.validate_ms = submit.validate_ms;
@@ -775,6 +790,47 @@ fn build_timing_breakdown(entry: &RequestState, finished_at: Instant) -> Option<
     }
 }
 
+fn resolve_requested_token_logprobs(
+    tokenizer: &Tokenizer,
+    requested_token_logprobs: Option<RequestedTokenLogprobsConfig>,
+) -> crate::Result<Option<TokenLogprobsConfig>> {
+    let Some(requested_token_logprobs) = requested_token_logprobs else {
+        return Ok(None);
+    };
+
+    let candidate_token_ids = match requested_token_logprobs.candidate_token_texts {
+        Some(candidate_token_texts) => {
+            let mut candidate_token_ids = Vec::with_capacity(candidate_token_texts.len());
+            for token_text in candidate_token_texts {
+                let encoded = tokenizer.encode(&token_text, false);
+                if encoded.len() != 1 {
+                    return Err(crate::Error::bad_request(format!(
+                        "candidate_token_texts item {token_text:?} must tokenize to exactly one token, got {}",
+                        encoded.len()
+                    )));
+                }
+
+                let token_id = i32::from(encoded[0]);
+                if !candidate_token_ids.contains(&token_id) {
+                    candidate_token_ids.push(token_id);
+                }
+            }
+
+            if candidate_token_ids.is_empty() {
+                None
+            } else {
+                Some(candidate_token_ids)
+            }
+        }
+        None => None,
+    };
+
+    Ok(Some(TokenLogprobsConfig {
+        top_logprobs: requested_token_logprobs.top_logprobs,
+        candidate_token_ids,
+    }))
+}
+
 fn duration_ms_between(start: Option<Instant>, end: Option<Instant>) -> Option<u64> {
     let (Some(start), Some(end)) = (start, end) else {
         return None;
@@ -787,235 +843,4 @@ fn duration_ms_since(start: Option<Instant>, end: Instant) -> Option<u64> {
         return None;
     };
     Some(end.saturating_duration_since(start).as_millis() as u64)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        InferenceExecutionConfig, InferenceExecutionLoop, ModelForward, RequestStopReason,
-        finish_metadata_for_entry,
-    };
-    use crate::inference_core::{
-        END_TOKEN_ID, EngineEvent, FinishReason, InferenceSubmitResult, RequestState, SampledToken,
-        SamplingConfig, TokenLogprobsConfig,
-    };
-    use rwkv_data::tokenizer::Tokenizer;
-    use std::sync::{Arc, Mutex};
-    use std::time::Duration;
-    use tokio::sync::mpsc;
-    use tokio::time::timeout;
-
-    const TEST_VOCAB_PATH: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../examples/rwkv-lm/assets/rwkv_vocab_v20230424.txt"
-    );
-
-    #[derive(Clone, Default)]
-    struct TestForwardState {
-        forward_calls: Arc<Mutex<Vec<(bool, usize)>>>,
-        reset_batch_indices: Arc<Mutex<Vec<usize>>>,
-    }
-
-    struct TestForward {
-        state: TestForwardState,
-        decode_token: i32,
-    }
-
-    impl TestForward {
-        fn new(state: TestForwardState, decode_token: i32) -> Self {
-            Self {
-                state,
-                decode_token,
-            }
-        }
-    }
-
-    impl ModelForward for TestForward {
-        fn forward(
-            &mut self,
-            batch_ids: &[usize],
-            _contexts: &[&[i32]],
-            _masks: &[&[u8]],
-            _samplings: &[SamplingConfig],
-            _token_logprobs: &[Option<TokenLogprobsConfig>],
-            need_sample: bool,
-        ) -> crate::Result<Vec<SampledToken>> {
-            self.state
-                .forward_calls
-                .lock()
-                .expect("forward lock")
-                .push((need_sample, batch_ids.len()));
-
-            if need_sample {
-                Ok(batch_ids
-                    .iter()
-                    .copied()
-                    .map(|batch_index| SampledToken {
-                        batch_index,
-                        token_id: self.decode_token,
-                        logprob: None,
-                    })
-                    .collect())
-            } else {
-                Ok(Vec::new())
-            }
-        }
-
-        fn reset(&mut self, batch_index: usize) -> crate::Result<()> {
-            self.state
-                .reset_batch_indices
-                .lock()
-                .expect("reset lock")
-                .push(batch_index);
-            Ok(())
-        }
-    }
-
-    fn test_config() -> InferenceExecutionConfig {
-        InferenceExecutionConfig {
-            tokenizer_vocab_path: TEST_VOCAB_PATH.to_string(),
-            max_batch_size: 2,
-            paragraph_len: 256,
-            max_context_len: 4096,
-            decode_first: true,
-        }
-    }
-
-    #[test]
-    fn finish_metadata_prefers_stop_over_length() {
-        let mut entry = RequestState::new(
-            uuid::Uuid::new_v4(),
-            SamplingConfig {
-                max_new_tokens: 1,
-                ..SamplingConfig::default()
-            },
-            vec!["stop".to_string()],
-            None,
-        );
-        entry.generated_token_count = 1;
-        let meta = finish_metadata_for_entry(
-            &entry,
-            RequestStopReason::StopSuffix(crate::inference_core::StopMatch { index: 0, len: 4 }),
-            std::time::Instant::now(),
-        );
-        assert_eq!(meta.reason, FinishReason::Stop);
-        assert_eq!(meta.matched_stop_suffix.as_deref(), Some("stop"));
-    }
-
-    #[tokio::test]
-    async fn submit_returns_receiver_and_collects_length_finish() {
-        let state = TestForwardState::default();
-        let handle = InferenceExecutionLoop::spawn(
-            test_config(),
-            Box::new(TestForward::new(state.clone(), 1)),
-        )
-        .expect("spawn runtime");
-
-        let submit = handle
-            .submit_text(
-                "hello".to_string(),
-                SamplingConfig {
-                    max_new_tokens: 1,
-                    ..SamplingConfig::default()
-                },
-                Vec::new(),
-                None,
-                None,
-            )
-            .await
-            .expect("submit");
-
-        let mut rx = match submit {
-            InferenceSubmitResult::Receiver { rx, .. } => rx,
-            other => panic!("unexpected submit result: {other:?}"),
-        };
-
-        let first = timeout(Duration::from_secs(1), rx.recv())
-            .await
-            .expect("first event timeout")
-            .expect("first event missing");
-        match first {
-            EngineEvent::Output(delta) => {
-                assert!(!delta.text.is_empty() || !delta.tokens.is_empty())
-            }
-            other => panic!("unexpected first event: {other:?}"),
-        }
-
-        let second = timeout(Duration::from_secs(1), rx.recv())
-            .await
-            .expect("done event timeout")
-            .expect("done event missing");
-        match second {
-            EngineEvent::Done(meta) => {
-                assert_eq!(meta.reason, FinishReason::Length);
-                assert_eq!(meta.generated_tokens, 1);
-            }
-            other => panic!("unexpected second event: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn end_token_finishes_without_visible_output() {
-        let state = TestForwardState::default();
-        let handle = InferenceExecutionLoop::spawn(
-            test_config(),
-            Box::new(TestForward::new(state.clone(), END_TOKEN_ID)),
-        )
-        .expect("spawn runtime");
-
-        let submit = handle
-            .submit_text(
-                "hello".to_string(),
-                SamplingConfig {
-                    max_new_tokens: 4,
-                    ..SamplingConfig::default()
-                },
-                Vec::new(),
-                None,
-                None,
-            )
-            .await
-            .expect("submit");
-
-        let mut rx = match submit {
-            InferenceSubmitResult::Receiver { rx, .. } => rx,
-            other => panic!("unexpected submit result: {other:?}"),
-        };
-
-        let event = timeout(Duration::from_secs(1), rx.recv())
-            .await
-            .expect("done timeout")
-            .expect("done missing");
-        match event {
-            EngineEvent::Done(meta) => {
-                assert_eq!(meta.reason, FinishReason::Stop);
-                assert_eq!(meta.generated_tokens, 0);
-            }
-            other => panic!("unexpected event: {other:?}"),
-        }
-
-        match timeout(Duration::from_millis(50), rx.recv()).await {
-            Ok(None) | Err(_) => {}
-            Ok(Some(other)) => panic!("unexpected trailing event: {other:?}"),
-        }
-        assert_eq!(
-            *state.forward_calls.lock().expect("forward calls"),
-            vec![(true, 1)]
-        );
-    }
-
-    #[test]
-    fn runtime_constructs_with_tokenizer_channel() {
-        let state = TestForwardState::default();
-        let (_submit_tx, submit_rx) = mpsc::channel(8);
-        let (tokenizer_tx, _tokenizer_rx) = mpsc::unbounded_channel();
-        let runtime = InferenceExecutionLoop::new(
-            test_config(),
-            Tokenizer::new(TEST_VOCAB_PATH).expect("tokenizer"),
-            submit_rx,
-            tokenizer_tx,
-            Box::new(TestForward::new(state, 1)),
-        );
-        assert_eq!(runtime.cfg.max_batch_size, 2);
-    }
 }

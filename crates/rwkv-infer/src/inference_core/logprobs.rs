@@ -1,6 +1,12 @@
 use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RequestedTokenLogprobsConfig {
+    pub top_logprobs: usize,
+    pub candidate_token_texts: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TokenLogprobsConfig {
     pub top_logprobs: usize,
     pub candidate_token_ids: Option<Vec<i32>>,
@@ -46,7 +52,7 @@ fn sort_logprob_candidates(candidates: &mut [SampledTokenTopLogprob]) {
 ///
 /// `SampledTokenLogprob::logprob` always reports the sampled token's own logprob.
 /// `top_logprobs` returns the union of the top-N candidates, the sampled token
-/// when top-N output is requested, and any explicit `candidate_token_ids`.
+/// when top-N output is requested, and any explicit resolved candidate token ids.
 pub fn build_sampled_token_logprob(
     probs: &[f32],
     sampled_token_id: i32,

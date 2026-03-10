@@ -14,8 +14,8 @@ pub mod tokenizer_loop;
 pub use batch_scheduler::{Scheduler, SchedulerStep};
 pub use execution_loop::{InferenceExecutionConfig, InferenceExecutionLoop, ModelForward};
 pub use logprobs::{
-    SampledToken, SampledTokenLogprob, SampledTokenTopLogprob, TokenLogprobsConfig,
-    build_sampled_token_logprob,
+    RequestedTokenLogprobsConfig, SampledToken, SampledTokenLogprob, SampledTokenTopLogprob,
+    TokenLogprobsConfig, build_sampled_token_logprob,
 };
 pub use output_token::{OutputToken, OutputTokenCandidate};
 pub use request_output::{

@@ -3,7 +3,7 @@ use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
-use super::{EngineEvent, EntryId, SamplingConfig, TokenLogprobsConfig};
+use super::{EngineEvent, EntryId, RequestedTokenLogprobsConfig, SamplingConfig};
 
 #[derive(Debug)]
 pub enum InferenceSubmitCommand {
@@ -12,7 +12,7 @@ pub enum InferenceSubmitCommand {
         input_text: String,
         sampling: SamplingConfig,
         stop_suffixes: Vec<String>,
-        token_logprobs: Option<TokenLogprobsConfig>,
+        requested_token_logprobs: Option<RequestedTokenLogprobsConfig>,
         submitted_at: Instant,
         validate_ms: Option<u64>,
         reply: oneshot::Sender<InferenceSubmitResult>,
@@ -49,7 +49,7 @@ impl InferenceSubmitHandle {
         input_text: String,
         sampling: SamplingConfig,
         stop_suffixes: Vec<String>,
-        token_logprobs: Option<TokenLogprobsConfig>,
+        requested_token_logprobs: Option<RequestedTokenLogprobsConfig>,
         validate_ms: Option<u64>,
     ) -> crate::Result<InferenceSubmitResult> {
         let entry_id = Uuid::new_v4();
@@ -62,7 +62,7 @@ impl InferenceSubmitHandle {
                 input_text,
                 sampling,
                 stop_suffixes,
-                token_logprobs,
+                requested_token_logprobs,
                 submitted_at,
                 validate_ms,
                 reply: reply_tx,

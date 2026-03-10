@@ -15,9 +15,7 @@ use crate::access::http_api::{
     ResponsesResource, StopField,
 };
 use crate::inference_core::InferenceSubmitResult as SubmitOutput;
-use crate::inference_core::{
-    EngineEvent, EntryId, FinishMetadata, InferenceOutput, StreamDelta, TokenLogprobsConfig,
-};
+use crate::inference_core::{EngineEvent, EntryId, FinishMetadata, InferenceOutput, StreamDelta};
 use crate::model_pool::LoadedModelRegistry as RuntimeManager;
 use crate::response_store::{
     BackgroundTaskState, CachedResponse, GLOBAL_BACKGROUND_TASKS, GLOBAL_RESPONSE_CACHE,
@@ -73,18 +71,18 @@ impl HttpApiService {
         }
 
         let service = self.runtime_manager.current_request_router();
-        let vocab_size = service.model_vocab_size(&req.model).ok_or_else(|| {
-            crate::Error::bad_request(format!(
+        if service.model_vocab_size(&req.model).is_none() {
+            return Err(crate::Error::bad_request(format!(
                 "unknown model_name: {}. available: {:?}",
                 req.model.as_str(),
                 service.model_names()
-            ))
-        })?;
-        let token_logprobs = crate::access::http_api::validation::validate_completion_logprobs(
-            req.logprobs,
-            req.candidate_token_ids,
-            vocab_size,
-        )?;
+            )));
+        }
+        let requested_token_logprobs =
+            crate::access::http_api::validation::validate_completion_logprobs(
+                req.logprobs,
+                req.candidate_token_texts,
+            )?;
         let stream_requested = req.stream.unwrap_or(false);
         let validate_start = Instant::now();
         let sampling = crate::access::http_api::validation::validate_sampling_config(
@@ -111,7 +109,7 @@ impl HttpApiService {
                 req.prompt,
                 sampling,
                 stop_suffixes,
-                token_logprobs.clone(),
+                requested_token_logprobs.clone(),
                 Some(validate_ms),
             )
             .await?;
@@ -122,7 +120,7 @@ impl HttpApiService {
             created: current_unix_seconds(),
             model: req.model,
             stream_requested,
-            token_logprobs,
+            include_logprobs: requested_token_logprobs.is_some(),
             rx,
         })
     }
@@ -146,18 +144,17 @@ impl HttpApiService {
         }
 
         let service = self.runtime_manager.current_request_router();
-        let vocab_size = service.model_vocab_size(&req.model).ok_or_else(|| {
-            crate::Error::bad_request(format!(
+        if service.model_vocab_size(&req.model).is_none() {
+            return Err(crate::Error::bad_request(format!(
                 "unknown model_name: {}. available: {:?}",
                 req.model.as_str(),
                 service.model_names()
-            ))
-        })?;
-        let token_logprobs = crate::access::http_api::validation::validate_chat_logprobs(
+            )));
+        }
+        let requested_token_logprobs = crate::access::http_api::validation::validate_chat_logprobs(
             req.logprobs,
             req.top_logprobs,
-            req.candidate_token_ids,
-            vocab_size,
+            req.candidate_token_texts,
         )?;
         let stream_requested = req.stream.unwrap_or(false);
         let validate_start = Instant::now();
@@ -186,7 +183,7 @@ impl HttpApiService {
                 prompt,
                 sampling,
                 stop_suffixes,
-                token_logprobs.clone(),
+                requested_token_logprobs.clone(),
                 Some(validate_ms),
             )
             .await?;
@@ -197,7 +194,7 @@ impl HttpApiService {
             created: current_unix_seconds(),
             model: req.model,
             stream_requested,
-            token_logprobs,
+            include_logprobs: requested_token_logprobs.is_some(),
             rx,
         })
     }
@@ -405,7 +402,7 @@ pub struct CompletionRun {
     pub created: u64,
     pub model: String,
     pub stream_requested: bool,
-    pub token_logprobs: Option<TokenLogprobsConfig>,
+    pub include_logprobs: bool,
     pub rx: mpsc::Receiver<EngineEvent>,
 }
 
@@ -462,9 +459,8 @@ impl CompletionRun {
         tokens: &[InferenceOutput],
         text_offset: usize,
     ) -> Option<CompletionLogprobs> {
-        self.token_logprobs
-            .as_ref()
-            .map(|_| build_completion_logprobs(tokens, text_offset))
+        self.include_logprobs
+            .then(|| build_completion_logprobs(tokens, text_offset))
     }
 }
 
@@ -474,7 +470,7 @@ pub struct ChatCompletionRun {
     pub created: u64,
     pub model: String,
     pub stream_requested: bool,
-    pub token_logprobs: Option<TokenLogprobsConfig>,
+    pub include_logprobs: bool,
     pub rx: mpsc::Receiver<EngineEvent>,
 }
 
@@ -568,27 +564,25 @@ impl ChatCompletionRun {
     }
 
     fn chat_logprobs(&self, tokens: &[InferenceOutput]) -> Option<ChatCompletionLogprobs> {
-        self.token_logprobs
-            .as_ref()
-            .map(|_| ChatCompletionLogprobs {
-                content: tokens
-                    .iter()
-                    .map(|token| ChatCompletionTokenLogprob {
-                        token: token.token.clone(),
-                        bytes: token.bytes.clone(),
-                        logprob: token.logprob.unwrap_or(f32::NEG_INFINITY),
-                        top_logprobs: token
-                            .top_logprobs
-                            .iter()
-                            .map(|candidate| ChatCompletionTokenTopLogprob {
-                                token: candidate.token.clone(),
-                                bytes: candidate.bytes.clone(),
-                                logprob: candidate.logprob,
-                            })
-                            .collect(),
-                    })
-                    .collect(),
-            })
+        self.include_logprobs.then(|| ChatCompletionLogprobs {
+            content: tokens
+                .iter()
+                .map(|token| ChatCompletionTokenLogprob {
+                    token: token.token.clone(),
+                    bytes: token.bytes.clone(),
+                    logprob: token.logprob.unwrap_or(f32::NEG_INFINITY),
+                    top_logprobs: token
+                        .top_logprobs
+                        .iter()
+                        .map(|candidate| ChatCompletionTokenTopLogprob {
+                            token: candidate.token.clone(),
+                            bytes: candidate.bytes.clone(),
+                            logprob: candidate.logprob,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        })
     }
 }
 

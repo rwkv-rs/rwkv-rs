@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::inference_core::{InferenceSubmitHandle, InferenceSubmitResult};
-use crate::inference_core::{SamplingConfig, TokenLogprobsConfig};
+use crate::inference_core::{RequestedTokenLogprobsConfig, SamplingConfig};
 
 #[derive(Clone)]
 pub struct LoadedModelGroup {
@@ -80,14 +80,14 @@ impl ModelRequestRouter {
         input_text: String,
         sampling: SamplingConfig,
         stop_suffixes: Vec<String>,
-        token_logprobs: Option<TokenLogprobsConfig>,
+        requested_token_logprobs: Option<RequestedTokenLogprobsConfig>,
     ) -> crate::Result<InferenceSubmitResult> {
         self.submit_text_with_trace(
             model_name,
             input_text,
             sampling,
             stop_suffixes,
-            token_logprobs,
+            requested_token_logprobs,
             None,
         )
         .await
@@ -99,7 +99,7 @@ impl ModelRequestRouter {
         input_text: String,
         sampling: SamplingConfig,
         stop_suffixes: Vec<String>,
-        token_logprobs: Option<TokenLogprobsConfig>,
+        requested_token_logprobs: Option<RequestedTokenLogprobsConfig>,
         validate_ms: Option<u64>,
     ) -> crate::Result<InferenceSubmitResult> {
         let group = self.model_groups.get(model_name).ok_or_else(|| {
@@ -115,7 +115,7 @@ impl ModelRequestRouter {
                 input_text,
                 sampling,
                 stop_suffixes,
-                token_logprobs,
+                requested_token_logprobs,
                 validate_ms,
             )
             .await

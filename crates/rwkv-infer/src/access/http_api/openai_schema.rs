@@ -89,7 +89,7 @@ pub struct CompletionRequest {
     pub penalty_decay: Option<f32>,
     pub stop: Option<StopField>,
     pub logprobs: Option<u8>,
-    pub candidate_token_ids: Option<Vec<i32>>,
+    pub candidate_token_texts: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -141,7 +141,7 @@ pub struct ChatCompletionRequest {
     pub stop: Option<StopField>,
     pub logprobs: Option<bool>,
     pub top_logprobs: Option<u8>,
-    pub candidate_token_ids: Option<Vec<i32>>,
+    pub candidate_token_texts: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

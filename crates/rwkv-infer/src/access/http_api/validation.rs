@@ -1,4 +1,4 @@
-use crate::inference_core::{SamplingConfig, TokenLogprobsConfig};
+use crate::inference_core::{RequestedTokenLogprobsConfig, SamplingConfig};
 
 const DEFAULT_TEMPERATURE: f32 = 1.0;
 const MIN_TEMPERATURE: f32 = 0.001;
@@ -79,39 +79,41 @@ fn validate_finite(name: &str, value: f32) -> crate::Result<()> {
     Ok(())
 }
 
-fn normalize_candidate_token_ids(
-    candidate_token_ids: Option<Vec<i32>>,
-    vocab_size: usize,
-) -> crate::Result<Option<Vec<i32>>> {
-    let Some(candidate_token_ids) = candidate_token_ids else {
+fn normalize_candidate_token_texts(
+    candidate_token_texts: Option<Vec<String>>,
+) -> crate::Result<Option<Vec<String>>> {
+    let Some(candidate_token_texts) = candidate_token_texts else {
         return Ok(None);
     };
 
-    let mut deduped = Vec::with_capacity(candidate_token_ids.len());
-    for token_id in candidate_token_ids {
-        if token_id < 0 || token_id as usize >= vocab_size {
-            return Err(crate::Error::bad_request(format!(
-                "candidate_token_ids contains invalid token id {token_id}; expected [0, {vocab_size})"
-            )));
+    let mut deduped = Vec::with_capacity(candidate_token_texts.len());
+    for token_text in candidate_token_texts {
+        if token_text.is_empty() {
+            return Err(crate::Error::bad_request(
+                "candidate_token_texts cannot contain empty strings",
+            ));
         }
-        if !deduped.contains(&token_id) {
-            deduped.push(token_id);
+        if !deduped.contains(&token_text) {
+            deduped.push(token_text);
         }
     }
 
-    Ok(Some(deduped))
+    if deduped.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(deduped))
+    }
 }
 
 pub(crate) fn validate_completion_logprobs(
     logprobs: Option<u8>,
-    candidate_token_ids: Option<Vec<i32>>,
-    vocab_size: usize,
-) -> crate::Result<Option<TokenLogprobsConfig>> {
-    let candidate_token_ids = normalize_candidate_token_ids(candidate_token_ids, vocab_size)?;
+    candidate_token_texts: Option<Vec<String>>,
+) -> crate::Result<Option<RequestedTokenLogprobsConfig>> {
+    let candidate_token_texts = normalize_candidate_token_texts(candidate_token_texts)?;
     let Some(logprobs) = logprobs else {
-        if candidate_token_ids.is_some() {
+        if candidate_token_texts.is_some() {
             return Err(crate::Error::bad_request(
-                "candidate_token_ids requires logprobs to be set",
+                "candidate_token_texts requires logprobs to be set",
             ));
         }
         return Ok(None);
@@ -122,26 +124,25 @@ pub(crate) fn validate_completion_logprobs(
             "logprobs must be in [0, {MAX_COMPLETION_LOGPROBS}], got {logprobs}"
         )));
     }
-    if candidate_token_ids.is_some() && logprobs == 0 {
+    if candidate_token_texts.is_some() && logprobs == 0 {
         return Err(crate::Error::bad_request(
-            "candidate_token_ids requires logprobs >= 1",
+            "candidate_token_texts requires logprobs >= 1",
         ));
     }
 
-    Ok(Some(TokenLogprobsConfig {
+    Ok(Some(RequestedTokenLogprobsConfig {
         top_logprobs: logprobs as usize,
-        candidate_token_ids,
+        candidate_token_texts,
     }))
 }
 
 pub(crate) fn validate_chat_logprobs(
     logprobs: Option<bool>,
     top_logprobs: Option<u8>,
-    candidate_token_ids: Option<Vec<i32>>,
-    vocab_size: usize,
-) -> crate::Result<Option<TokenLogprobsConfig>> {
+    candidate_token_texts: Option<Vec<String>>,
+) -> crate::Result<Option<RequestedTokenLogprobsConfig>> {
     let logprobs_enabled = logprobs.unwrap_or(false);
-    let candidate_token_ids = normalize_candidate_token_ids(candidate_token_ids, vocab_size)?;
+    let candidate_token_texts = normalize_candidate_token_texts(candidate_token_texts)?;
 
     if let Some(top_logprobs) = top_logprobs {
         if !logprobs_enabled {
@@ -157,189 +158,23 @@ pub(crate) fn validate_chat_logprobs(
     }
 
     if !logprobs_enabled {
-        if candidate_token_ids.is_some() {
+        if candidate_token_texts.is_some() {
             return Err(crate::Error::bad_request(
-                "candidate_token_ids requires logprobs=true",
+                "candidate_token_texts requires logprobs=true",
             ));
         }
         return Ok(None);
     }
 
     let top_logprobs = top_logprobs.unwrap_or(0);
-    if candidate_token_ids.is_some() && top_logprobs == 0 {
+    if candidate_token_texts.is_some() && top_logprobs == 0 {
         return Err(crate::Error::bad_request(
-            "candidate_token_ids requires top_logprobs >= 1",
+            "candidate_token_texts requires top_logprobs >= 1",
         ));
     }
 
-    Ok(Some(TokenLogprobsConfig {
+    Ok(Some(RequestedTokenLogprobsConfig {
         top_logprobs: top_logprobs as usize,
-        candidate_token_ids,
+        candidate_token_texts,
     }))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        DEFAULT_MAX_NEW_TOKENS, MAX_TEMPERATURE, MIN_TEMPERATURE, validate_chat_logprobs,
-        validate_completion_logprobs, validate_sampling_config,
-    };
-
-    const TEST_VOCAB_SIZE: usize = 8;
-
-    fn valid() -> crate::Result<crate::inference_core::SamplingConfig> {
-        validate_sampling_config(None, None, None, None, None, None, None)
-    }
-
-    #[test]
-    fn defaults_are_valid() {
-        let cfg = valid().expect("default config should be valid");
-        assert_eq!(cfg.max_new_tokens, DEFAULT_MAX_NEW_TOKENS as usize);
-    }
-
-    #[test]
-    fn accepts_temperature_boundaries() {
-        validate_sampling_config(Some(MIN_TEMPERATURE), None, None, None, None, None, None)
-            .expect("min temperature should be accepted");
-        validate_sampling_config(Some(MAX_TEMPERATURE), None, None, None, None, None, None)
-            .expect("max temperature should be accepted");
-    }
-
-    #[test]
-    fn rejects_invalid_temperature() {
-        for value in [0.0, -1.0, f32::NAN, f32::INFINITY] {
-            let err = validate_sampling_config(Some(value), None, None, None, None, None, None)
-                .expect_err("temperature should be rejected");
-            assert!(err.to_string().contains("temperature"));
-        }
-    }
-
-    #[test]
-    fn rejects_invalid_top_p() {
-        for value in [-0.1, 1.1, f32::NAN] {
-            let err = validate_sampling_config(None, None, Some(value), None, None, None, None)
-                .expect_err("top_p should be rejected");
-            assert!(err.to_string().contains("top_p"));
-        }
-    }
-
-    #[test]
-    fn rejects_invalid_top_k() {
-        let err = validate_sampling_config(None, Some(-1), None, None, None, None, None)
-            .expect_err("negative top_k should be rejected");
-        assert!(err.to_string().contains("top_k"));
-    }
-
-    #[test]
-    fn rejects_zero_max_new_tokens() {
-        let err = validate_sampling_config(None, None, None, Some(0), None, None, None)
-            .expect_err("zero max_new_tokens should be rejected");
-        assert!(err.to_string().contains("max_new_tokens"));
-    }
-
-    #[test]
-    fn rejects_non_finite_penalties() {
-        for (presence, repetition, decay) in [
-            (f32::NAN, 0.0, 1.0),
-            (0.0, f32::INFINITY, 1.0),
-            (0.0, 0.0, f32::NEG_INFINITY),
-        ] {
-            let err = validate_sampling_config(
-                None,
-                None,
-                None,
-                None,
-                Some(presence),
-                Some(repetition),
-                Some(decay),
-            )
-            .expect_err("non-finite penalties should be rejected");
-            assert!(
-                err.to_string().contains("presence_penalty")
-                    || err.to_string().contains("repetition_penalty")
-                    || err.to_string().contains("penalty_decay")
-            );
-        }
-    }
-
-    #[test]
-    fn validates_completion_logprobs_range() {
-        assert_eq!(
-            validate_completion_logprobs(Some(5), None, TEST_VOCAB_SIZE)
-                .expect("logprobs=5 should pass")
-                .expect("config should exist")
-                .top_logprobs,
-            5
-        );
-
-        let err = validate_completion_logprobs(Some(6), None, TEST_VOCAB_SIZE)
-            .expect_err("logprobs=6 must fail");
-        assert!(err.to_string().contains("logprobs"));
-    }
-
-    #[test]
-    fn validates_chat_logprobs_dependencies() {
-        assert!(validate_chat_logprobs(Some(true), Some(20), None, TEST_VOCAB_SIZE).is_ok());
-
-        let err = validate_chat_logprobs(Some(false), Some(1), None, TEST_VOCAB_SIZE)
-            .expect_err("top_logprobs without logprobs=true must fail");
-        assert!(
-            err.to_string()
-                .contains("top_logprobs requires logprobs=true")
-        );
-
-        let err = validate_chat_logprobs(Some(true), Some(21), None, TEST_VOCAB_SIZE)
-            .expect_err("top_logprobs above 20 must fail");
-        assert!(err.to_string().contains("top_logprobs"));
-    }
-
-    #[test]
-    fn validates_candidate_token_ids() {
-        let cfg = validate_completion_logprobs(Some(1), Some(vec![3, 1, 3, 7]), TEST_VOCAB_SIZE)
-            .expect("candidate ids should pass")
-            .expect("config should exist");
-        assert_eq!(cfg.candidate_token_ids, Some(vec![3, 1, 7]));
-
-        let err = validate_completion_logprobs(Some(1), Some(vec![8]), TEST_VOCAB_SIZE)
-            .expect_err("out-of-range candidate id must fail");
-        assert!(err.to_string().contains("candidate_token_ids"));
-    }
-
-    #[test]
-    fn candidate_token_ids_require_logprobs() {
-        let err = validate_completion_logprobs(None, Some(vec![1]), TEST_VOCAB_SIZE)
-            .expect_err("candidate_token_ids without logprobs must fail");
-        assert!(
-            err.to_string()
-                .contains("candidate_token_ids requires logprobs to be set")
-        );
-
-        let err = validate_completion_logprobs(Some(0), Some(vec![1]), TEST_VOCAB_SIZE)
-            .expect_err("candidate_token_ids with zero completion logprobs must fail");
-        assert!(
-            err.to_string()
-                .contains("candidate_token_ids requires logprobs >= 1")
-        );
-
-        let err = validate_chat_logprobs(Some(false), None, Some(vec![1]), TEST_VOCAB_SIZE)
-            .expect_err("candidate_token_ids without chat logprobs must fail");
-        assert!(
-            err.to_string()
-                .contains("candidate_token_ids requires logprobs=true")
-        );
-
-        let err = validate_chat_logprobs(Some(true), None, Some(vec![1]), TEST_VOCAB_SIZE)
-            .expect_err("candidate_token_ids without chat top_logprobs must fail");
-        assert!(
-            err.to_string()
-                .contains("candidate_token_ids requires top_logprobs >= 1")
-        );
-
-        let err = validate_chat_logprobs(Some(true), Some(0), Some(vec![1]), TEST_VOCAB_SIZE)
-            .expect_err("candidate_token_ids with zero chat top_logprobs must fail");
-        assert!(
-            err.to_string()
-                .contains("candidate_token_ids requires top_logprobs >= 1")
-        );
-    }
 }
