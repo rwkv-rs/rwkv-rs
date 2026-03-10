@@ -1,13 +1,15 @@
-use std::path::{Path, PathBuf};
-use async_openai::types::completions::CreateCompletionRequest as BaseCompletionRequest;
 use linkme::distributed_slice;
 use parquet::record::Row;
+use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
-use crate::datasets::{Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, ALL_BENCHMARKS};
 use crate::datasets::hf_downloader::download_hf_files;
 use crate::datasets::hf_viewer::get_split_row_count;
 use crate::datasets::parquet_utils::{get_string, get_string_list, get_u8, read_parquet_items};
+use crate::datasets::{
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+};
+use crate::inferers::CompletionRequest;
 use crate::runtime::OpenAiClient;
 
 #[distributed_slice(ALL_BENCHMARKS)]
@@ -16,12 +18,18 @@ static MMLU_INFO: BenchmarkInfo = BenchmarkInfo {
     field: Field::Knowledge,
     display_name: "MMLU",
     cot_mode: &[CoTMode::NoCoT, CoTMode::FakeCoT, CoTMode::CoT],
-    sampling_config: ,
+    sampling_config: SamplingConfig {
+        temperature: 0.5,
+        top_k: 50,
+        top_p: 0.3,
+        presence_penalty: 1.0,
+        repetition_penalty: 0.1,
+        penalty_decay: 0.99,
+    },
     avg_ks: &[1],
     pass_ks: &[1],
     with_llm_judger: false,
 };
-
 
 pub struct Mmlu {
     dataset_root: PathBuf,
@@ -135,7 +143,7 @@ impl Benchmark for Mmlu {
         char::from(b'A' + answer).to_string()
     }
 
-    fn answer_and_judge(
+    async fn answer_and_judge(
         &self,
         model_name: String,
         model_client: &OpenAiClient,
@@ -146,22 +154,21 @@ impl Benchmark for Mmlu {
     ) -> bool {
         let expected_context = self.get_expected_context(item, cot_mode);
         if cot_mode == CoTMode::CoT {
-            let prompt_for_cot = expected_context.split_once(
-                "<|completions_of_cot|>"
-            ).unwrap().0.to_string();
+            let prompt_for_cot = expected_context
+                .split_once("<|completions_of_cot|>")
+                .unwrap()
+                .0
+                .to_string();
 
-            let base = BaseCompletionRequest {
-                model: model_name,
-                prompt: prompt_for_cot.into(),
+            let req = CompletionRequest::new(
+                model_name,
+                prompt_for_cot.into(),
+                vec!["</think>".to_string()],
+                4096,
+                &MMLU_INFO.sampling_config,
+            );
 
-                ..Default::default()
-            };
-
-            let req = MyCompletionRequest {
-                base,
-            };
-
-
+            let resp = model_client.completions().create_byot(&req).await.unwrap();
         }
         true
     }

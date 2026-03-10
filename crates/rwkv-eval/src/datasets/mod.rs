@@ -7,17 +7,18 @@ pub mod knowledge;
 pub mod maths;
 pub mod parquet_utils;
 
-
 use linkme::distributed_slice;
 use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
 use crate::runtime::OpenAiClient;
+
 
 pub struct BenchmarkInfo {
     pub name: BenchmarkName,
     pub field: Field,
     pub display_name: &'static str,
     pub cot_mode: &'static [CoTMode],
+    pub sampling_config: SamplingConfig,
     pub avg_ks: &'static [u8],
     pub pass_ks: &'static [u8],
     pub with_llm_judger: bool,
@@ -42,6 +43,15 @@ pub enum CoTMode {
     CoT,
 }
 
+pub struct SamplingConfig {
+    pub temperature: f32,
+    pub top_k: i32,
+    pub top_p: f32,
+
+    pub presence_penalty: f32,
+    pub repetition_penalty: f32,
+    pub penalty_decay: f32,
+}
 
 
 pub trait Benchmark: Send + Sync {
@@ -53,7 +63,7 @@ pub trait Benchmark: Send + Sync {
 
     fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String;
     fn get_ref_answer(&self, item: &Self::Item) -> String;
-    fn answer_and_judge(
+    async fn answer_and_judge(
         &self,
         model_name: String,
         model_client: &OpenAiClient,
