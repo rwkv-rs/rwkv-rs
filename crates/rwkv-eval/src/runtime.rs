@@ -302,7 +302,7 @@ fn build_client(base_url: &str, api_key: &str) -> OpenAiClient {
 fn normalize_api_base(base_url: &str) -> String {
     let mut value = base_url.trim().trim_end_matches('/').to_string();
     if !value.contains("://") {
-        value = format!("http://{value}");
+        value = format!("https://{value}");
     }
     if !value.ends_with("/v1") {
         value.push_str("/v1");

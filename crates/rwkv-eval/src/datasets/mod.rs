@@ -11,15 +11,20 @@ pub mod parquet_utils;
 use linkme::distributed_slice;
 use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
+use crate::runtime::OpenAiClient;
 
 pub struct BenchmarkInfo {
     pub name: BenchmarkName,
     pub field: Field,
     pub display_name: &'static str,
+    pub cot_mode: &'static [CoTMode],
     pub avg_ks: &'static [u8],
     pub pass_ks: &'static [u8],
     pub with_llm_judger: bool,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BenchmarkName(pub &'static str);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Field {
@@ -30,9 +35,14 @@ pub enum Field {
     FunctionCalling,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BenchmarkName(pub &'static str);
+pub enum CoTMode {
+    NoCoT,
+    FakeCoT,
+    CoT,
+}
+
+
 
 pub trait Benchmark: Send + Sync {
     type Item;
@@ -41,9 +51,17 @@ pub trait Benchmark: Send + Sync {
     fn check(&self) -> bool;  // return need_download
     fn download(&self);
 
-    fn get_expected_context(&self, item: &Self::Item) -> String;
+    fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String;
     fn get_ref_answer(&self, item: &Self::Item) -> String;
-    fn get_evaluator(&self);
+    fn answer_and_judge(
+        &self,
+        model_name: String,
+        model_client: &OpenAiClient,
+        judger_client: Option<&OpenAiClient>,
+        cot_mode: CoTMode,
+        fim_mode: bool,
+        item: &Self::Item,
+    ) -> bool;
 }
 
 

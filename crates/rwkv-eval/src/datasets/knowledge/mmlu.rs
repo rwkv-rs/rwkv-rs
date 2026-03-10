@@ -1,19 +1,22 @@
 use std::path::{Path, PathBuf};
+use async_openai::types::completions::CreateCompletionRequest as BaseCompletionRequest;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use tokio::runtime::Runtime;
 
-use crate::datasets::{Benchmark, BenchmarkInfo, BenchmarkName, Field, ALL_BENCHMARKS};
+use crate::datasets::{Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, ALL_BENCHMARKS};
 use crate::datasets::hf_downloader::download_hf_files;
 use crate::datasets::hf_viewer::get_split_row_count;
 use crate::datasets::parquet_utils::{get_string, get_string_list, get_u8, read_parquet_items};
-
+use crate::runtime::OpenAiClient;
 
 #[distributed_slice(ALL_BENCHMARKS)]
-static MBPP_META: BenchmarkInfo = BenchmarkInfo {
+static MMLU_INFO: BenchmarkInfo = BenchmarkInfo {
     name: BenchmarkName("mmlu"),
     field: Field::Knowledge,
     display_name: "MMLU",
+    cot_mode: &[CoTMode::NoCoT, CoTMode::FakeCoT, CoTMode::CoT],
+    sampling_config: ,
     avg_ks: &[1],
     pass_ks: &[1],
     with_llm_judger: false,
@@ -94,7 +97,7 @@ impl Benchmark for Mmlu {
         println!("mmlu dataset: {}", downloaded_path.display());
     }
 
-    fn get_expected_context(&self, item: &Self::Item) -> String {
+    fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
         let choices = item
             .choices
             .iter()
@@ -103,18 +106,28 @@ impl Benchmark for Mmlu {
             .collect::<Vec<_>>()
             .join("\n");
 
-        format!(
+        let user_part = format!(
             concat!(
                 "User: You are a very talented expert in {subject}.\n",
                 "Answer this question and finish with a single option letter.\n",
                 "Question: {question}\n",
-                "Choices:\n{choices}\n",
-                "Assistant: Therefore, the answer is"
+                "Choices:\n{choices}\n\n",
             ),
             subject = item.subject,
             question = item.question,
             choices = choices,
-        )
+        );
+
+        let assistant_part = match cot_mode {
+            CoTMode::NoCoT => "Assistant: Therefore, the answer is <|logits|>",
+            CoTMode::FakeCoT => "Assistant: <think>\n</think>\nTherefore, the answer is <|logits|>",
+            CoTMode::CoT => concat!(
+                "Assistant: <think<|completions_of_cot|></think>\n",
+                "Therefore, the answer is <|logits_of_choices|>."
+            ),
+        };
+
+        format!("User: {user_part}\n\nAssistant: {assistant_part}")
     }
 
     fn get_ref_answer(&self, item: &Self::Item) -> String {
@@ -122,5 +135,34 @@ impl Benchmark for Mmlu {
         char::from(b'A' + answer).to_string()
     }
 
-    fn get_evaluator(&self) {}
+    fn answer_and_judge(
+        &self,
+        model_name: String,
+        model_client: &OpenAiClient,
+        judger_client: Option<&OpenAiClient>,
+        cot_mode: CoTMode,
+        fim_mode: bool,
+        item: &Self::Item,
+    ) -> bool {
+        let expected_context = self.get_expected_context(item, cot_mode);
+        if cot_mode == CoTMode::CoT {
+            let prompt_for_cot = expected_context.split_once(
+                "<|completions_of_cot|>"
+            ).unwrap().0.to_string();
+
+            let base = BaseCompletionRequest {
+                model: model_name,
+                prompt: prompt_for_cot.into(),
+
+                ..Default::default()
+            };
+
+            let req = MyCompletionRequest {
+                base,
+            };
+
+
+        }
+        true
+    }
 }
