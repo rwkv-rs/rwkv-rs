@@ -1,15 +1,18 @@
-use async_openai::config::OpenAIConfig;
 use async_openai::Client;
+use async_openai::config::OpenAIConfig;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
-use crate::datasets::hf_downloader::download_hf_files;
-use crate::datasets::hf_viewer::get_split_row_count;
 use crate::datasets::knowledge::{get_expected_context, get_final_answer, get_ref_answer};
-use crate::datasets::parquet_utils::{get_string, get_string_list, get_u8, read_parquet_items};
-use crate::datasets::{get_completions_of_cot, get_prompt_for_cot, get_prompt_for_final_answer, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig, ALL_BENCHMARKS};
+use crate::datasets::{
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    get_completions_of_cot, get_prompt_for_cot, get_prompt_for_final_answer,
+};
+use crate::datasets::utils::hf::downloader::download_hf_files;
+use crate::datasets::utils::hf::viewer::get_split_row_count;
+use crate::datasets::utils::parquet::{get_string, get_string_list, get_u8, read_parquet_items};
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static MMLU_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -37,7 +40,7 @@ pub struct Mmlu {
     test: Vec<MmluItem>,
 }
 
-struct MmluItem {
+pub struct MmluItem {
     question: String,
     subject: String,
     choices: Vec<String>,
@@ -105,12 +108,7 @@ impl Benchmark for Mmlu {
     }
 
     fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
-        get_expected_context(
-            &item.subject,
-            &item.question,
-            &item.choices,
-            cot_mode
-        )
+        get_expected_context(&item.subject, &item.question, &item.choices, cot_mode)
     }
 
     fn get_ref_answer(&self, item: &Self::Item) -> String {
@@ -152,10 +150,7 @@ impl Benchmark for Mmlu {
             }
 
             CoTMode::FakeCoT | CoTMode::NoCoT => {
-                let prompt_for_final_answer = get_prompt_for_final_answer(
-                    &expected_context,
-                    None,
-                );
+                let prompt_for_final_answer = get_prompt_for_final_answer(&expected_context, None);
 
                 get_final_answer(
                     model_client,

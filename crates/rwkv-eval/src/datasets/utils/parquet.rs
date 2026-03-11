@@ -29,6 +29,14 @@ pub fn get_string(row: &Row, name: &str) -> String {
     }
 }
 
+pub fn get_optional_string(row: &Row, name: &str) -> Option<String> {
+    match get_field(row, name) {
+        Field::Null => None,
+        Field::Str(value) => Some(value.clone()),
+        _ => panic!("`{name}` should be string or null"),
+    }
+}
+
 pub fn get_string_list(row: &Row, name: &str) -> Vec<String> {
     match get_field(row, name) {
         Field::ListInternal(list) => list
@@ -53,6 +61,20 @@ pub fn get_u8(row: &Row, name: &str) -> u8 {
         Field::UShort(value) => u8::try_from(*value).unwrap(),
         Field::UInt(value) => u8::try_from(*value).unwrap(),
         Field::ULong(value) => u8::try_from(*value).unwrap(),
+        _ => panic!("`{name}` should be integer"),
+    }
+}
+
+pub fn get_i64(row: &Row, name: &str) -> i64 {
+    match get_field(row, name) {
+        Field::Byte(value) => i64::from(*value),
+        Field::Short(value) => i64::from(*value),
+        Field::Int(value) => i64::from(*value),
+        Field::Long(value) => *value,
+        Field::UByte(value) => i64::from(*value),
+        Field::UShort(value) => i64::from(*value),
+        Field::UInt(value) => i64::from(*value),
+        Field::ULong(value) => i64::try_from(*value).unwrap(),
         _ => panic!("`{name}` should be integer"),
     }
 }

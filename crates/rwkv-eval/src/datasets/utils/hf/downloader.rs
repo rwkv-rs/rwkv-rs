@@ -12,6 +12,12 @@ use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use walkdir::WalkDir;
 
+#[derive(Debug, Clone)]
+pub struct UrlDownloadFile {
+    pub relative_path: PathBuf,
+    pub url: String,
+}
+
 pub async fn download_hf_repo<P: AsRef<Path>>(
     path: P,
     repo: &str,
@@ -130,6 +136,103 @@ pub async fn download_hf_repo<P: AsRef<Path>>(
 
     pb.finish_with_message("Done");
     repo_dir
+}
+
+pub async fn download_url_files<P: AsRef<Path>>(
+    path: P,
+    root_name: &str,
+    files: &[UrlDownloadFile],
+    tasks: usize,
+) -> PathBuf {
+    assert_ne!(tasks, 0, "tasks 不能为 0");
+    assert!(!files.is_empty(), "files 不能为空");
+
+    let path = path.as_ref();
+    create_dir_all(path).unwrap_or_else(|e| {
+        panic!("创建目标目录失败: {}. error: {}", path.display(), e);
+    });
+
+    let root_dir = path.join(root_name);
+    create_dir_all(&root_dir).unwrap_or_else(|e| {
+        panic!("创建根目录失败: {}. error: {}", root_dir.display(), e);
+    });
+
+    let pb = ProgressBar::new(files.len() as u64);
+    pb.set_style(
+        ProgressStyle::with_template("{msg}\n{bar:40.cyan/blue} {pos}/{len} ({per_sec}, {eta})")
+            .unwrap()
+            .progress_chars("=>-"),
+    );
+    pb.set_message(format!("Downloading URL files ({} files)", files.len()));
+
+    let client = Client::new();
+    let sem = Arc::new(Semaphore::new(tasks));
+
+    let mut handles = Vec::with_capacity(files.len());
+    for file in files.iter().cloned() {
+        let permit = sem
+            .clone()
+            .acquire_owned()
+            .await
+            .unwrap_or_else(|e| panic!("获取下载并发许可失败: {}", e));
+        let client = client.clone();
+        let pb = pb.clone();
+        let root_dir = root_dir.clone();
+
+        handles.push(tokio::spawn(async move {
+            let _permit = permit;
+            let out_path = root_dir.join(&file.relative_path);
+
+            let body = retry(
+                &format!("下载文件 {}", file.relative_path.display()),
+                || {
+                    let client = client.clone();
+                    let url = file.url.clone();
+                    async move {
+                        let resp = client
+                            .get(&url)
+                            .send()
+                            .await
+                            .map_err(|e| format!("请求发送失败: {}", e))?;
+                        let status = resp.status();
+                        if !status.is_success() {
+                            return Err(format!("HTTP 状态码异常: {}", status));
+                        }
+                        resp.bytes()
+                            .await
+                            .map_err(|e| format!("读取响应体失败: {}", e))
+                    }
+                },
+            )
+            .await;
+
+            if let Some(parent) = out_path.parent() {
+                create_dir_all(parent).unwrap_or_else(|e| {
+                    panic!("创建文件父目录失败: {}. error: {}", parent.display(), e);
+                });
+            }
+
+            let mut output = File::create(&out_path).unwrap_or_else(|e| {
+                panic!("创建输出文件失败: {}. error: {}", out_path.display(), e);
+            });
+            output.write_all(&body).unwrap_or_else(|e| {
+                panic!("写入文件失败: {}. error: {}", out_path.display(), e);
+            });
+            output.flush().unwrap_or_else(|e| {
+                panic!("刷新文件失败: {}. error: {}", out_path.display(), e);
+            });
+            pb.inc(1);
+        }));
+    }
+
+    for handle in handles {
+        handle
+            .await
+            .unwrap_or_else(|e| panic!("下载任务 join 失败: {}", e));
+    }
+
+    pb.finish_with_message("Done");
+    root_dir
 }
 
 pub async fn download_hf_files<P: AsRef<Path>>(

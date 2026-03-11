@@ -1,1 +1,214 @@
+use async_openai::Client;
+use async_openai::config::OpenAIConfig;
+use linkme::distributed_slice;
+use serde::Deserialize;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use tokio::runtime::Runtime;
 
+use crate::datasets::knowledge::{
+    get_expected_context, get_ref_answer_from_letter, judge_multiple_choice_by_letter,
+};
+use crate::datasets::{
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+};
+use crate::datasets::utils::collect_files_with_extension;
+use crate::datasets::utils::csv::read_csv_items;
+use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
+
+const LOCAL_ROOT_NAME: &str = "cmmlu";
+const ARCHIVE_NAME: &str = "cmmlu_v1_0_1.zip";
+const ARCHIVE_URL: &str =
+    "https://huggingface.co/datasets/haonan-li/cmmlu/resolve/main/cmmlu_v1_0_1.zip";
+
+#[distributed_slice(ALL_BENCHMARKS)]
+static CMMLU_INFO: BenchmarkInfo = BenchmarkInfo {
+    name: BenchmarkName("cmmlu"),
+    field: Field::Knowledge,
+    display_name: "CMMLU",
+    cot_mode: &[CoTMode::NoCoT, CoTMode::FakeCoT, CoTMode::CoT],
+    sampling_config: SamplingConfig {
+        temperature: 0.5,
+        top_k: 50,
+        top_p: 0.3,
+        presence_penalty: 1.0,
+        repetition_penalty: 0.1,
+        penalty_decay: 0.99,
+    },
+    avg_ks: &[1],
+    pass_ks: &[1],
+    with_llm_judger: false,
+};
+
+pub struct Cmmlu {
+    dataset_root: PathBuf,
+    dev: Vec<CmmluItem>,
+    test: Vec<CmmluItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CmmluCsvRow {
+    #[serde(rename = "")]
+    row_id: Option<i64>,
+    #[serde(rename = "Question")]
+    question: String,
+    #[serde(rename = "A")]
+    a: String,
+    #[serde(rename = "B")]
+    b: String,
+    #[serde(rename = "C")]
+    c: String,
+    #[serde(rename = "D")]
+    d: String,
+    #[serde(rename = "Answer")]
+    answer: String,
+}
+
+#[allow(dead_code)]
+pub struct CmmluItem {
+    row_id: Option<i64>,
+    question: String,
+    a: String,
+    b: String,
+    c: String,
+    d: String,
+    answer: String,
+    subject_name: String,
+}
+
+impl Cmmlu {
+    pub fn new<P: AsRef<Path>>(dataset_root: P) -> Self {
+        Self {
+            dataset_root: dataset_root.as_ref().to_path_buf(),
+            dev: Vec::new(),
+            test: Vec::new(),
+        }
+    }
+}
+
+impl Benchmark for Cmmlu {
+    type Item = CmmluItem;
+
+    fn load(&mut self) {
+        self.dev.clear();
+        self.test.clear();
+
+        let root_dir = self.dataset_root.join(LOCAL_ROOT_NAME);
+        for split in ["dev", "test"] {
+            let split_dir = root_dir.join(split);
+            for path in collect_files_with_extension(&split_dir, "csv") {
+                let subject_name = path
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .unwrap()
+                    .to_string();
+
+                let rows = read_csv_items::<CmmluCsvRow, _>(&path)
+                    .into_iter()
+                    .map(|row| CmmluItem {
+                        row_id: row.row_id,
+                        question: row.question,
+                        a: row.a,
+                        b: row.b,
+                        c: row.c,
+                        d: row.d,
+                        answer: row.answer,
+                        subject_name: subject_name.clone(),
+                    })
+                    .collect::<Vec<_>>();
+
+                match split {
+                    "dev" => self.dev.extend(rows),
+                    "test" => self.test.extend(rows),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn check(&self) -> bool {
+        let root_dir = self.dataset_root.join(LOCAL_ROOT_NAME);
+        let dev_dir = root_dir.join("dev");
+        let test_dir = root_dir.join("test");
+
+        !dev_dir.exists()
+            || !test_dir.exists()
+            || collect_files_with_extension(&dev_dir, "csv").is_empty()
+            || collect_files_with_extension(&test_dir, "csv").is_empty()
+    }
+
+    fn download(&self) {
+        let runtime = Runtime::new().unwrap();
+        let root_dir = runtime.block_on(download_url_files(
+            &self.dataset_root,
+            LOCAL_ROOT_NAME,
+            &[UrlDownloadFile {
+                relative_path: PathBuf::from(ARCHIVE_NAME),
+                url: ARCHIVE_URL.to_string(),
+            }],
+            1,
+        ));
+
+        let zip_path = root_dir.join(ARCHIVE_NAME);
+        let status = Command::new("unzip")
+            .arg("-o")
+            .arg(&zip_path)
+            .arg("-d")
+            .arg(&root_dir)
+            .status()
+            .unwrap_or_else(|e| {
+                panic!("解压 CMMLU 文件失败: {}. error: {}", zip_path.display(), e)
+            });
+        if !status.success() {
+            panic!(
+                "解压 CMMLU 文件失败: zip={}, status={}",
+                zip_path.display(),
+                status
+            );
+        }
+
+        println!("cmmlu dataset: {}", root_dir.display());
+    }
+
+    fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
+        let choices = vec![
+            item.a.clone(),
+            item.b.clone(),
+            item.c.clone(),
+            item.d.clone(),
+        ];
+        get_expected_context(&item.subject_name, &item.question, &choices, cot_mode)
+    }
+
+    fn get_ref_answer(&self, item: &Self::Item) -> String {
+        get_ref_answer_from_letter(&item.answer)
+    }
+
+    async fn answer_and_judge(
+        &self,
+        model_name: String,
+        model_client: &Client<OpenAIConfig>,
+        _judger_client: Option<&Client<OpenAIConfig>>,
+        cot_mode: CoTMode,
+        item: &Self::Item,
+    ) -> bool {
+        let choices = vec![
+            item.a.clone(),
+            item.b.clone(),
+            item.c.clone(),
+            item.d.clone(),
+        ];
+        let expected_context = self.get_expected_context(item, cot_mode);
+
+        judge_multiple_choice_by_letter(
+            model_client,
+            &model_name,
+            &choices,
+            &expected_context,
+            &CMMLU_INFO.sampling_config,
+            cot_mode,
+            &item.answer,
+        )
+        .await
+    }
+}

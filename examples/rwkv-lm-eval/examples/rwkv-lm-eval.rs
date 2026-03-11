@@ -5,7 +5,6 @@ use rwkv_eval::init::init_cfg;
 use rwkv_lm_eval::evaluating::evaluating;
 use rwkv_lm_eval::paths;
 
-
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();

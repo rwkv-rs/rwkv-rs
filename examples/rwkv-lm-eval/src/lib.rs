@@ -1,2 +1,2 @@
-pub mod paths;
 pub mod evaluating;
+pub mod paths;

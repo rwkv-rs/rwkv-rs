@@ -12,10 +12,7 @@ use async_openai::{
         completions::CreateCompletionRequestArgs,
     },
 };
-use rwkv_config::{
-    raw::eval::{ApiConfig, ApiConfig},
-    validated::eval::FinalEvalConfig,
-};
+use rwkv_config::{raw::eval::ApiConfig, validated::eval::FinalEvalConfig};
 
 use crate::error::EvalError;
 

@@ -24,5 +24,4 @@ pub struct FinalEvalConfig {
     pub space_db: Option<SpaceDbConfig>,
 }
 
-
 pub static EVAL_CFG: OnceCell<Arc<FinalEvalConfig>> = OnceCell::new();

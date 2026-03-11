@@ -1,10 +1,9 @@
-use std::path::PathBuf;
 use rwkv_config::validated::eval::{FinalEvalConfig, FinalEvalConfigBuilder};
 use rwkv_eval::datasets::{build_benchmark, ensure_dataset_ready, expand_benchmark_names};
 use rwkv_eval::error::EvalError;
 use rwkv_eval::runner::{EvalReport, ModelRunSummary};
 use rwkv_eval::runtime::EvalRuntime;
-
+use std::path::PathBuf;
 
 pub async fn evaluating(
     eval_cfg_builder: &FinalEvalConfigBuilder,
@@ -12,7 +11,8 @@ pub async fn evaluating(
 ) -> Result<EvalReport, EvalError> {
     eval_cfg_builder.build();
 
-    let benchmark_names = expand_benchmark_names(&eval_cfg.benchmark_field, &eval_cfg.extra_benchmark_name)?;
+    let benchmark_names =
+        expand_benchmark_names(&eval_cfg.benchmark_field, &eval_cfg.extra_benchmark_name)?;
     // let runtime = EvalRuntime::new(cfg, datasets_path).await?;
 
     let mut model_runs = Vec::new();

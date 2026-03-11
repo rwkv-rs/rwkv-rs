@@ -1,19 +1,16 @@
 pub mod coding;
 pub mod function_calling;
-pub mod hf_downloader;
-pub mod hf_viewer;
 pub mod instruction_following;
 pub mod knowledge;
 pub mod maths;
-pub mod parquet_utils;
+pub mod utils;
 
+use crate::inferers::{CompletionRequest, CompletionResponse};
+use async_openai::Client;
+use async_openai::config::OpenAIConfig;
 use linkme::distributed_slice;
 use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
-use crate::inferers::{CompletionRequest, CompletionResponse};
-
 
 pub struct BenchmarkInfo {
     pub name: BenchmarkName,
@@ -55,12 +52,11 @@ pub struct SamplingConfig {
     pub penalty_decay: f32,
 }
 
-
 pub trait Benchmark: Send + Sync {
     type Item;
 
     fn load(&mut self);
-    fn check(&self) -> bool;  // return need_download
+    fn check(&self) -> bool; // return need_download
     fn download(&self);
 
     fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String;
@@ -75,25 +71,24 @@ pub trait Benchmark: Send + Sync {
     ) -> bool;
 }
 
-
 #[distributed_slice]
 pub static ALL_BENCHMARKS: [BenchmarkInfo] = [..];
 
-pub static BENCHMARKS_BY_FIELD: Lazy<BTreeMap<Field, Vec<&'static BenchmarkInfo>>> = Lazy::new(|| {
-    let mut map: BTreeMap<Field, Vec<&'static BenchmarkInfo>> = BTreeMap::new();
+pub static BENCHMARKS_BY_FIELD: Lazy<BTreeMap<Field, Vec<&'static BenchmarkInfo>>> =
+    Lazy::new(|| {
+        let mut map: BTreeMap<Field, Vec<&'static BenchmarkInfo>> = BTreeMap::new();
 
-    for info in ALL_BENCHMARKS {
-        map.entry(info.field).or_default().push(info);
-    }
+        for info in ALL_BENCHMARKS {
+            map.entry(info.field).or_default().push(info);
+        }
 
-    // 两百个 benchmark 后，顺序不要赌链接器/注册顺序，统一显式排序
-    for vec_info in map.values_mut() {
-        vec_info.sort_unstable_by_key(|m| m.name.0);
-    }
+        // 两百个 benchmark 后，顺序不要赌链接器/注册顺序，统一显式排序
+        for vec_info in map.values_mut() {
+            vec_info.sort_unstable_by_key(|m| m.name.0);
+        }
 
-    map
-});
-
+        map
+    });
 
 pub fn get_benchmarks_with_field(field: Field) -> &'static [&'static BenchmarkInfo] {
     static EMPTY: &[&BenchmarkInfo] = &[];
@@ -103,11 +98,9 @@ pub fn get_benchmarks_with_field(field: Field) -> &'static [&'static BenchmarkIn
         .unwrap_or(EMPTY)
 }
 
-
 pub fn apply_user_assistant_template(user_part: String, assistant_part: String) -> String {
     format!("User: {user_part}\n\nAssistant: {assistant_part}")
 }
-
 
 pub fn get_prompt_for_cot(expected_context: &String) -> String {
     expected_context
@@ -116,7 +109,6 @@ pub fn get_prompt_for_cot(expected_context: &String) -> String {
         .0
         .to_string()
 }
-
 
 pub async fn get_completions_of_cot(
     model_client: &Client<OpenAIConfig>,
@@ -134,12 +126,10 @@ pub async fn get_completions_of_cot(
         None,
     );
 
-    let resp: CompletionResponse = model_client.completions()
-        .create_byot(&req).await.unwrap();
+    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
 
     resp.choices[0].text.clone()
 }
-
 
 pub fn get_prompt_for_final_answer(
     expected_context: &String,
