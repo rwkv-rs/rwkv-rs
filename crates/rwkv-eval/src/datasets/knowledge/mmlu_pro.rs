@@ -1,20 +1,21 @@
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
+use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
-    get_ref_answer, get_final_answer_with_cot_mode, get_expect_context,
-};
-use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    KnowledgeExample, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
 };
 use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
-use crate::datasets::utils::hf::viewer::get_parquet_files;
+use crate::datasets::utils::hf::viewer::{get_parquet_files, get_split_row_count};
 use crate::datasets::utils::parquet::{get_i64, get_string, get_string_list, read_parquet_items};
+use crate::datasets::{
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+};
 
 const DATASET_ID: &str = "TIGER-Lab/MMLU-Pro";
 const LOCAL_ROOT_NAME: &str = "mmlu_pro";
@@ -33,9 +34,11 @@ static MMLU_PRO_INFO: BenchmarkInfo = BenchmarkInfo {
         repetition_penalty: 0.1,
         penalty_decay: 0.99,
     },
+    n_shots: &[0, 5],
     avg_ks: &[1],
     pass_ks: &[1],
     with_llm_judger: false,
+    create: |dataset_root| Box::new(MmluPro::new(dataset_root)),
 };
 
 pub struct MmluPro {
@@ -66,9 +69,8 @@ impl MmluPro {
     }
 }
 
+#[async_trait]
 impl Benchmark for MmluPro {
-    type Item = MmluProItem;
-
     fn load(&mut self) {
         self.validation.clear();
         self.test.clear();
@@ -103,13 +105,14 @@ impl Benchmark for MmluPro {
 
     fn check(&self) -> bool {
         let runtime = Runtime::new().unwrap();
-        let dataset_root = self.dataset_root.join(LOCAL_ROOT_NAME);
+        let (remote_validation_len, remote_test_len) = runtime.block_on(async {
+            tokio::join!(
+                get_split_row_count(DATASET_ID, "default", "validation"),
+                get_split_row_count(DATASET_ID, "default", "test"),
+            )
+        });
 
-        runtime
-            .block_on(get_parquet_files(DATASET_ID))
-            .into_iter()
-            .filter(|file| file.config == "default")
-            .any(|file| !dataset_root.join(file.relative_path()).exists())
+        self.validation.len() != remote_validation_len || self.test.len() != remote_test_len
     }
 
     fn download(&self) {
@@ -134,29 +137,53 @@ impl Benchmark for MmluPro {
         println!("mmlu_pro dataset: {}", downloaded_path.display());
     }
 
-    fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
-        get_expect_context(&item.category, &item.question, &item.options, cot_mode)
+    fn len(&self) -> usize {
+        self.test.len()
     }
 
-    fn get_ref_answer(&self, item: &Self::Item) -> String {
-        get_ref_answer(u8::try_from(item.answer_index).unwrap())
+    fn get_expected_context(&self, index: usize, cot_mode: CoTMode, n_shot: u8) -> String {
+        let item = &self.test[index];
+        let few_shot_examples = self
+            .validation
+            .iter()
+            .filter(|example| example.category == item.category)
+            .take(n_shot as usize)
+            .map(|example| KnowledgeExample {
+                question: example.question.clone(),
+                choices: example.options.clone(),
+                answer_index: u8::try_from(example.answer_index).unwrap(),
+            })
+            .collect::<Vec<_>>();
+
+        get_expect_context(
+            &item.category,
+            &item.question,
+            &item.options,
+            cot_mode,
+            &few_shot_examples,
+        )
+    }
+
+    fn get_ref_answer(&self, index: usize) -> String {
+        get_ref_answer(u8::try_from(self.test[index].answer_index).unwrap())
     }
 
     async fn answer_and_judge(
         &self,
-        model_name: String,
+        model_name: &str,
         model_client: &Client<OpenAIConfig>,
         _judger_client: Option<&Client<OpenAIConfig>>,
         cot_mode: CoTMode,
-        item: &Self::Item,
+        n_shot: u8,
+        index: usize,
     ) -> bool {
-        let expected_context =
-            get_expect_context(&item.category, &item.question, &item.options, cot_mode);
+        let item = &self.test[index];
+        let expected_context = self.get_expected_context(index, cot_mode, n_shot);
         let answer_index = u8::try_from(item.answer_index).unwrap();
 
         get_final_answer_with_cot_mode(
             model_client,
-            &model_name,
+            model_name,
             &item.options,
             &expected_context,
             &MMLU_PRO_INFO.sampling_config,

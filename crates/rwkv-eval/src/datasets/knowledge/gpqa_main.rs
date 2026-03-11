@@ -1,5 +1,6 @@
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
+use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -8,13 +9,12 @@ use crate::datasets::knowledge::gpqa_common::{
     download_gpqa_csv, gpqa_csv_path, join_subject_parts, ordered_gpqa_choices,
 };
 use crate::datasets::knowledge::{
-    get_ref_answer, get_final_answer_with_cot_mode, get_expect_context,
+    get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
 };
+use crate::datasets::utils::csv::read_csv_items;
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
 };
-use crate::datasets::utils::csv::read_csv_items;
-
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static GPQA_MAIN_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -30,9 +30,11 @@ static GPQA_MAIN_INFO: BenchmarkInfo = BenchmarkInfo {
         repetition_penalty: 0.1,
         penalty_decay: 0.99,
     },
+    n_shots: &[0],
     avg_ks: &[1],
     pass_ks: &[1],
     with_llm_judger: false,
+    create: |dataset_root| Box::new(GpqaMain::new(dataset_root)),
 };
 
 pub struct GpqaMain {
@@ -74,15 +76,14 @@ impl GpqaMain {
     }
 }
 
+#[async_trait]
 impl Benchmark for GpqaMain {
-    type Item = GpqaMainItem;
-
     fn load(&mut self) {
         self.test = read_csv_items(gpqa_csv_path(&self.dataset_root, "gpqa_main.csv"));
     }
 
     fn check(&self) -> bool {
-        !gpqa_csv_path(&self.dataset_root, "gpqa_main.csv").exists()
+        self.test.is_empty()
     }
 
     fn download(&self) {
@@ -90,7 +91,12 @@ impl Benchmark for GpqaMain {
         println!("gpqa_main dataset: {}", downloaded_path.display());
     }
 
-    fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
+    fn len(&self) -> usize {
+        self.test.len()
+    }
+
+    fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
+        let item = &self.test[index];
         let subject = join_subject_parts(&[&item.high_level_domain, &item.subdomain]);
         let (choices, _) = ordered_gpqa_choices(
             &item.record_id,
@@ -103,10 +109,11 @@ impl Benchmark for GpqaMain {
             ],
         );
 
-        get_expect_context(&subject, &item.question, &choices, cot_mode)
+        get_expect_context(&subject, &item.question, &choices, cot_mode, &[])
     }
 
-    fn get_ref_answer(&self, item: &Self::Item) -> String {
+    fn get_ref_answer(&self, index: usize) -> String {
+        let item = &self.test[index];
         let (_, answer_index) = ordered_gpqa_choices(
             &item.record_id,
             &item.question,
@@ -122,12 +129,14 @@ impl Benchmark for GpqaMain {
 
     async fn answer_and_judge(
         &self,
-        model_name: String,
+        model_name: &str,
         model_client: &Client<OpenAIConfig>,
         _judger_client: Option<&Client<OpenAIConfig>>,
         cot_mode: CoTMode,
-        item: &Self::Item,
+        n_shot: u8,
+        index: usize,
     ) -> bool {
+        let item = &self.test[index];
         let (choices, answer_index) = ordered_gpqa_choices(
             &item.record_id,
             &item.question,
@@ -138,13 +147,11 @@ impl Benchmark for GpqaMain {
                 &item.incorrect_answer_3,
             ],
         );
-        let subject = join_subject_parts(&[&item.high_level_domain, &item.subdomain]);
-        let expected_context =
-            get_expect_context(&subject, &item.question, &choices, cot_mode);
+        let expected_context = self.get_expected_context(index, cot_mode, n_shot);
 
         get_final_answer_with_cot_mode(
             model_client,
-            &model_name,
+            model_name,
             &choices,
             &expected_context,
             &GPQA_MAIN_INFO.sampling_config,

@@ -1,19 +1,20 @@
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
+use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
-    get_ref_answer, get_final_answer_with_cot_mode, get_expect_context,
-};
-use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    KnowledgeExample, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
 };
 use crate::datasets::utils::hf::downloader::download_hf_files;
 use crate::datasets::utils::hf::viewer::get_split_row_count;
 use crate::datasets::utils::parquet::{get_string, get_string_list, get_u8, read_parquet_items};
+use crate::datasets::{
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+};
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static MMLU_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -29,14 +30,15 @@ static MMLU_INFO: BenchmarkInfo = BenchmarkInfo {
         repetition_penalty: 0.1,
         penalty_decay: 0.99,
     },
+    n_shots: &[0, 5],
     avg_ks: &[1],
     pass_ks: &[1],
     with_llm_judger: false,
+    create: |dataset_root| Box::new(Mmlu::new(dataset_root)),
 };
 
 pub struct Mmlu {
     dataset_root: PathBuf,
-    is_checked: bool,
     dev: Vec<MmluItem>,
     test: Vec<MmluItem>,
 }
@@ -52,16 +54,14 @@ impl Mmlu {
     pub fn new<P: AsRef<Path>>(dataset_root: P) -> Self {
         Self {
             dataset_root: dataset_root.as_ref().to_path_buf(),
-            is_checked: false,
             dev: Vec::new(),
             test: Vec::new(),
         }
     }
 }
 
+#[async_trait]
 impl Benchmark for Mmlu {
-    type Item = MmluItem;
-
     fn load(&mut self) {
         let parse_item = |row: &Row| MmluItem {
             question: get_string(row, "question"),
@@ -108,28 +108,48 @@ impl Benchmark for Mmlu {
         println!("mmlu dataset: {}", downloaded_path.display());
     }
 
-    fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
-        get_expect_context(&item.subject, &item.question, &item.choices, cot_mode)
+    fn len(&self) -> usize {
+        self.test.len()
     }
 
-    fn get_ref_answer(&self, item: &Self::Item) -> String {
-        get_ref_answer(item.answer)
+    fn get_expected_context(&self, index: usize, cot_mode: CoTMode, n_shot: u8) -> String {
+        let item = &self.test[index];
+        let few_shot_examples = self.dev.iter()
+            .filter(|example| example.subject == item.subject)
+            .take(n_shot as usize).map(|example| KnowledgeExample {
+                question: example.question.clone(),
+                choices: example.choices.clone(),
+                answer_index: example.answer,
+            }).collect::<Vec<_>>();
+
+        get_expect_context(
+            &item.subject,
+            &item.question,
+            &item.choices,
+            cot_mode,
+            &few_shot_examples,
+        )
+    }
+
+    fn get_ref_answer(&self, index: usize) -> String {
+        get_ref_answer(self.test[index].answer)
     }
 
     async fn answer_and_judge(
         &self,
-        model_name: String,
+        model_name: &str,
         model_client: &Client<OpenAIConfig>,
         _judger_client: Option<&Client<OpenAIConfig>>,
         cot_mode: CoTMode,
-        item: &Self::Item,
+        n_shot: u8,
+        index: usize,
     ) -> bool {
-        let expected_context =
-            get_expect_context(&item.subject, &item.question, &item.choices, cot_mode);
+        let item = &self.test[index];
+        let expected_context = self.get_expected_context(index, cot_mode, n_shot);
 
         get_final_answer_with_cot_mode(
             model_client,
-            &model_name,
+            model_name,
             &item.choices,
             &expected_context,
             &MMLU_INFO.sampling_config,

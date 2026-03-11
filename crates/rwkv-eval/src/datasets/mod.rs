@@ -8,9 +8,11 @@ pub mod utils;
 use crate::inferers::{CompletionRequest, CompletionResponse};
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
+use async_trait::async_trait;
 use linkme::distributed_slice;
 use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 pub struct BenchmarkInfo {
     pub name: BenchmarkName,
@@ -18,9 +20,11 @@ pub struct BenchmarkInfo {
     pub display_name: &'static str,
     pub cot_mode: &'static [CoTMode],
     pub sampling_config: SamplingConfig,
+    pub n_shots: &'static [u8],
     pub avg_ks: &'static [u8],
     pub pass_ks: &'static [u8],
     pub with_llm_judger: bool,
+    pub create: BenchmarkFactory,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -52,22 +56,25 @@ pub struct SamplingConfig {
     pub penalty_decay: f32,
 }
 
+pub type BenchmarkFactory = fn(PathBuf) -> Box<dyn Benchmark>;
+
+#[async_trait]
 pub trait Benchmark: Send + Sync {
-    type Item;
-
     fn load(&mut self);
-    fn check(&self) -> bool; // return need_download
+    fn check(&self) -> bool; // return is_invalid
     fn download(&self);
+    fn len(&self) -> usize;
 
-    fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String;
-    fn get_ref_answer(&self, item: &Self::Item) -> String;
+    fn get_expected_context(&self, index: usize, cot_mode: CoTMode, n_shot: u8) -> String;
+    fn get_ref_answer(&self, index: usize) -> String;
     async fn answer_and_judge(
         &self,
-        model_name: String,
+        model_name: &str,
         model_client: &Client<OpenAIConfig>,
         judger_client: Option<&Client<OpenAIConfig>>,
         cot_mode: CoTMode,
-        item: &Self::Item,
+        n_shot: u8,
+        index: usize,
     ) -> bool;
 }
 

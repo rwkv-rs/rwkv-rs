@@ -1,5 +1,6 @@
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
+use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -7,15 +8,15 @@ use std::process::Command;
 use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
-    answer_index_from_letter, get_ref_answer, get_final_answer_with_cot_mode,
-    get_expect_context,
-};
-use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    KnowledgeExample, answer_index_from_letter, get_expect_context, get_final_answer_with_cot_mode,
+    get_ref_answer,
 };
 use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::csv::read_csv_items;
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
+use crate::datasets::{
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+};
 
 const LOCAL_ROOT_NAME: &str = "cmmlu";
 const ARCHIVE_NAME: &str = "cmmlu_v1_0_1.zip";
@@ -36,9 +37,11 @@ static CMMLU_INFO: BenchmarkInfo = BenchmarkInfo {
         repetition_penalty: 0.1,
         penalty_decay: 0.99,
     },
+    n_shots: &[0, 5],
     avg_ks: &[1],
     pass_ks: &[1],
     with_llm_judger: false,
+    create: |dataset_root| Box::new(Cmmlu::new(dataset_root)),
 };
 
 pub struct Cmmlu {
@@ -87,9 +90,8 @@ impl Cmmlu {
     }
 }
 
+#[async_trait]
 impl Benchmark for Cmmlu {
-    type Item = CmmluItem;
-
     fn load(&mut self) {
         self.dev.clear();
         self.test.clear();
@@ -98,11 +100,14 @@ impl Benchmark for Cmmlu {
         for split in ["dev", "test"] {
             let split_dir = root_dir.join(split);
             for path in collect_files_with_extension(&split_dir, "csv") {
-                let subject_name = path.file_stem()
+                let subject_name = path
+                    .file_stem()
                     .and_then(|name| name.to_str())
-                    .unwrap().to_string();
+                    .unwrap()
+                    .to_string();
 
-                let rows = read_csv_items::<CmmluCsvRow, _>(&path).into_iter()
+                let rows = read_csv_items::<CmmluCsvRow, _>(&path)
+                    .into_iter()
                     .map(|row| CmmluItem {
                         row_id: row.row_id,
                         question: row.question,
@@ -112,7 +117,8 @@ impl Benchmark for Cmmlu {
                         d: row.d,
                         answer: row.answer,
                         subject_name: subject_name.clone(),
-                    }).collect::<Vec<_>>();
+                    })
+                    .collect::<Vec<_>>();
 
                 match split {
                     "dev" => self.dev.extend(rows),
@@ -124,14 +130,7 @@ impl Benchmark for Cmmlu {
     }
 
     fn check(&self) -> bool {
-        let root_dir = self.dataset_root.join(LOCAL_ROOT_NAME);
-        let dev_dir = root_dir.join("dev");
-        let test_dir = root_dir.join("test");
-
-        !dev_dir.exists()
-            || !test_dir.exists()
-            || collect_files_with_extension(&dev_dir, "csv").is_empty()
-            || collect_files_with_extension(&test_dir, "csv").is_empty()
+        self.dev.is_empty() || self.test.is_empty()
     }
 
     fn download(&self) {
@@ -147,8 +146,13 @@ impl Benchmark for Cmmlu {
         ));
 
         let zip_path = root_dir.join(ARCHIVE_NAME);
-        let status = Command::new("unzip").arg("-o").arg(&zip_path).arg("-d").arg(&root_dir)
-            .status().unwrap_or_else(|e| {
+        let status = Command::new("unzip")
+            .arg("-o")
+            .arg(&zip_path)
+            .arg("-d")
+            .arg(&root_dir)
+            .status()
+            .unwrap_or_else(|e| {
                 panic!("解压 CMMLU 文件失败: {}. error: {}", zip_path.display(), e)
             });
         if !status.success() {
@@ -162,41 +166,70 @@ impl Benchmark for Cmmlu {
         println!("cmmlu dataset: {}", root_dir.display());
     }
 
-    fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
+    fn len(&self) -> usize {
+        self.test.len()
+    }
+
+    fn get_expected_context(&self, index: usize, cot_mode: CoTMode, n_shot: u8) -> String {
+        let item = &self.test[index];
         let choices = vec![
             item.a.clone(),
             item.b.clone(),
             item.c.clone(),
             item.d.clone(),
         ];
-        get_expect_context(&item.subject_name, &item.question, &choices, cot_mode)
+        let few_shot_examples = self
+            .dev
+            .iter()
+            .filter(|example| example.subject_name == item.subject_name)
+            .take(n_shot as usize)
+            .map(|example| KnowledgeExample {
+                question: example.question.clone(),
+                choices: vec![
+                    example.a.clone(),
+                    example.b.clone(),
+                    example.c.clone(),
+                    example.d.clone(),
+                ],
+                answer_index: answer_index_from_letter(&example.answer),
+            })
+            .collect::<Vec<_>>();
+
+        get_expect_context(
+            &item.subject_name,
+            &item.question,
+            &choices,
+            cot_mode,
+            &few_shot_examples,
+        )
     }
 
-    fn get_ref_answer(&self, item: &Self::Item) -> String {
-        get_ref_answer(answer_index_from_letter(&item.answer))
+    fn get_ref_answer(&self, index: usize) -> String {
+        get_ref_answer(answer_index_from_letter(&self.test[index].answer))
     }
 
     async fn answer_and_judge(
         &self,
-        model_name: String,
+        model_name: &str,
         model_client: &Client<OpenAIConfig>,
         _judger_client: Option<&Client<OpenAIConfig>>,
         cot_mode: CoTMode,
-        item: &Self::Item,
+        n_shot: u8,
+        index: usize,
     ) -> bool {
+        let item = &self.test[index];
         let choices = vec![
             item.a.clone(),
             item.b.clone(),
             item.c.clone(),
             item.d.clone(),
         ];
-        let expected_context =
-            get_expect_context(&item.subject_name, &item.question, &choices, cot_mode);
+        let expected_context = self.get_expected_context(index, cot_mode, n_shot);
         let answer_index = answer_index_from_letter(&item.answer);
 
         get_final_answer_with_cot_mode(
             model_client,
-            &model_name,
+            model_name,
             &choices,
             &expected_context,
             &CMMLU_INFO.sampling_config,

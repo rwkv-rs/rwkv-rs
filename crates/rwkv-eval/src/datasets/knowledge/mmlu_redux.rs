@@ -1,21 +1,22 @@
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
+use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
-    get_ref_answer, get_final_answer_with_cot_mode, get_expect_context,
-};
-use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
 };
 use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::hf::viewer::get_parquet_files;
 use crate::datasets::utils::parquet::{
     get_i64, get_optional_string, get_string, get_string_list, read_parquet_items,
+};
+use crate::datasets::{
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
 };
 
 const DATASET_ID: &str = "edinburgh-dawg/mmlu-redux-2.0";
@@ -35,9 +36,11 @@ static MMLU_REDUX_INFO: BenchmarkInfo = BenchmarkInfo {
         repetition_penalty: 0.1,
         penalty_decay: 0.99,
     },
+    n_shots: &[0],
     avg_ks: &[1],
     pass_ks: &[1],
     with_llm_judger: false,
+    create: |dataset_root| Box::new(MmluRedux::new(dataset_root)),
 };
 
 pub struct MmluRedux {
@@ -64,24 +67,10 @@ impl MmluRedux {
             test: Vec::new(),
         }
     }
-
-    fn resolved_answer_index(item: &MmluReduxItem) -> Option<u8> {
-        match item.correct_answer.as_deref().map(str::trim) {
-            Some("") => None,
-            Some(correct_answer) => correct_answer
-                .parse::<u8>()
-                .ok()
-                .filter(|idx| usize::from(*idx) < item.choices.len()),
-            None => u8::try_from(item.answer)
-                .ok()
-                .filter(|idx| usize::from(*idx) < item.choices.len()),
-        }
-    }
 }
 
+#[async_trait]
 impl Benchmark for MmluRedux {
-    type Item = MmluReduxItem;
-
     fn load(&mut self) {
         self.test.clear();
 
@@ -106,23 +95,20 @@ impl Benchmark for MmluRedux {
                 config_name: config_name.clone(),
             });
 
-            self.test.extend(
-                items
-                    .into_iter()
-                    .filter(|item| Self::resolved_answer_index(item).is_some()),
-            );
+            self.test.extend(items.into_iter().filter(|item| {
+                match item.correct_answer.as_deref().map(str::trim) {
+                    Some("") => false,
+                    Some(correct_answer) => correct_answer.parse::<u8>().ok()
+                        .is_some_and(|idx| usize::from(idx) < item.choices.len()),
+                    None => u8::try_from(item.answer).ok()
+                        .is_some_and(|idx| usize::from(idx) < item.choices.len()),
+                }
+            }));
         }
     }
 
     fn check(&self) -> bool {
-        let runtime = Runtime::new().unwrap();
-        let dataset_root = self.dataset_root.join(LOCAL_ROOT_NAME);
-
-        runtime
-            .block_on(get_parquet_files(DATASET_ID))
-            .into_iter()
-            .filter(|file| file.split == "test")
-            .any(|file| !dataset_root.join(file.relative_path()).exists())
+        self.test.is_empty()
     }
 
     fn download(&self) {
@@ -147,29 +133,52 @@ impl Benchmark for MmluRedux {
         println!("mmlu_redux dataset: {}", downloaded_path.display());
     }
 
-    fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
-        get_expect_context(&item.config_name, &item.question, &item.choices, cot_mode)
+    fn len(&self) -> usize {
+        self.test.len()
     }
 
-    fn get_ref_answer(&self, item: &Self::Item) -> String {
-        get_ref_answer(Self::resolved_answer_index(item).unwrap())
+    fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
+        let item = &self.test[index];
+        get_expect_context(
+            &item.config_name,
+            &item.question,
+            &item.choices,
+            cot_mode,
+            &[],
+        )
+    }
+
+    fn get_ref_answer(&self, index: usize) -> String {
+        let item = &self.test[index];
+        get_ref_answer(match item.correct_answer.as_deref().map(str::trim) {
+            Some(correct_answer) if !correct_answer.is_empty() => {
+                correct_answer.parse::<u8>().unwrap()
+            }
+            _ => u8::try_from(item.answer).unwrap(),
+        })
     }
 
     async fn answer_and_judge(
         &self,
-        model_name: String,
+        model_name: &str,
         model_client: &Client<OpenAIConfig>,
         _judger_client: Option<&Client<OpenAIConfig>>,
         cot_mode: CoTMode,
-        item: &Self::Item,
+        n_shot: u8,
+        index: usize,
     ) -> bool {
-        let expected_context =
-            get_expect_context(&item.config_name, &item.question, &item.choices, cot_mode);
-        let answer_index = Self::resolved_answer_index(item).unwrap();
+        let item = &self.test[index];
+        let expected_context = self.get_expected_context(index, cot_mode, n_shot);
+        let answer_index = match item.correct_answer.as_deref().map(str::trim) {
+            Some(correct_answer) if !correct_answer.is_empty() => {
+                correct_answer.parse::<u8>().unwrap()
+            }
+            _ => u8::try_from(item.answer).unwrap(),
+        };
 
         get_final_answer_with_cot_mode(
             model_client,
-            &model_name,
+            model_name,
             &item.choices,
             &expected_context,
             &MMLU_REDUX_INFO.sampling_config,

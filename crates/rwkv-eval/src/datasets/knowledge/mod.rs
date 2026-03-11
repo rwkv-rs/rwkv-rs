@@ -18,20 +18,20 @@ pub mod mmlu_redux;
 pub mod mmmlu;
 pub mod supergpqa;
 
-pub fn get_expect_context(
-    subject: &str,
-    question: &str,
-    choices: &[String],
-    cot_mode: CoTMode,
-) -> String {
-    let choices = choices
-        .iter()
-        .enumerate()
-        .map(|(i, choice)| format!("{}. {}", char::from(b'A' + i as u8), choice))
-        .collect::<Vec<_>>()
-        .join("\n");
+pub struct KnowledgeExample {
+    pub question: String,
+    pub choices: Vec<String>,
+    pub answer_index: u8,
+}
 
-    let user_part = format!(
+fn format_choices(choices: &[String]) -> String {
+    choices.iter().enumerate()
+        .map(|(i, choice)| format!("{}. {}", char::from(b'A' + i as u8), choice))
+        .collect::<Vec<_>>().join("\n")
+}
+
+fn get_user_part(subject: &str, question: &str, choices: &[String]) -> String {
+    format!(
         concat!(
             "You are a very talented expert in {subject}.\n",
             "Answer this question and finish with a single option letter.\n",
@@ -40,20 +40,50 @@ pub fn get_expect_context(
         ),
         subject = subject,
         question = question,
-        choices = choices,
-    );
+        choices = format_choices(choices),
+    )
+}
 
-    let assistant_part = match cot_mode {
-        CoTMode::NoCoT => "Therefore, the answer is<|logprobs_of_choices|>",
-        CoTMode::FakeCoT => concat!("<think>\n</think>\n", "Therefore, the answer is<|logprobs_of_choices|>",),
-        CoTMode::CoT => concat!(
-            "<think><|completions_of_cot|></think>\n",
-            "Therefore, the answer is<|logprobs_of_choices|>"
-        ),
+fn get_assistant_part(cot_mode: CoTMode, answer: Option<&str>) -> String {
+    match (cot_mode, answer) {
+        (CoTMode::NoCoT, Some(answer)) => format!("Therefore, the answer is {answer}"),
+        (CoTMode::NoCoT, None) => "Therefore, the answer is<|logprobs_of_choices|>".to_string(),
+        (CoTMode::FakeCoT | CoTMode::CoT, Some(answer)) => {
+            format!("<think>\n</think>\nTherefore, the answer is {answer}")
+        }
+        (CoTMode::FakeCoT, None) => {
+            "<think>\n</think>\nTherefore, the answer is<|logprobs_of_choices|>".to_string()
+        }
+        (CoTMode::CoT, None) => {
+            "<think><|completions_of_cot|></think>\nTherefore, the answer is<|logprobs_of_choices|>"
+                .to_string()
+        }
     }
-    .to_string();
+}
 
-    apply_user_assistant_template(user_part, assistant_part)
+pub fn get_expect_context(
+    subject: &str,
+    question: &str,
+    choices: &[String],
+    cot_mode: CoTMode,
+    few_shot_examples: &[KnowledgeExample],
+) -> String {
+    let mut turns = few_shot_examples
+        .iter()
+        .map(|example| {
+            apply_user_assistant_template(
+                get_user_part(subject, &example.question, &example.choices),
+                get_assistant_part(cot_mode, Some(&get_ref_answer(example.answer_index))),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    turns.push(apply_user_assistant_template(
+        get_user_part(subject, question, choices),
+        get_assistant_part(cot_mode, None),
+    ));
+
+    turns.join("\n\n")
 }
 
 pub fn get_ref_answer(answer_index: u8) -> String {
