@@ -10,6 +10,7 @@ pub mod parquet_utils;
 use linkme::distributed_slice;
 use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
+use crate::inferers::{CompletionRequest, CompletionResponse};
 use crate::runtime::OpenAiClient;
 
 
@@ -69,7 +70,6 @@ pub trait Benchmark: Send + Sync {
         model_client: &OpenAiClient,
         judger_client: Option<&OpenAiClient>,
         cot_mode: CoTMode,
-        fim_mode: bool,
         item: &Self::Item,
     ) -> bool;
 }
@@ -100,4 +100,55 @@ pub fn get_benchmarks_with_field(field: Field) -> &'static [&'static BenchmarkIn
         .get(&field)
         .map(Vec::as_slice)
         .unwrap_or(EMPTY)
+}
+
+
+pub fn apply_user_assistant_template(user_part: String, assistant_part: String) -> String {
+    format!("User: {user_part}\n\nAssistant: {assistant_part}")
+}
+
+
+pub fn get_prompt_for_cot(expected_context: &String) -> String {
+    expected_context
+        .split_once("<|completions_of_cot|>")
+        .unwrap()
+        .0
+        .to_string()
+}
+
+
+pub async fn get_completions_of_cot(
+    model_client: &OpenAiClient,
+    model_name: &String,
+    prompt_for_cot: &String,
+    sampling_config: &SamplingConfig,
+) -> String {
+    let req = CompletionRequest::new(
+        model_name.clone(),
+        prompt_for_cot.into(),
+        vec!["</think>".to_string()],
+        4096,
+        &sampling_config,
+        None,
+        None,
+    );
+
+    let resp: CompletionResponse = model_client.completions()
+        .create_byot(&req).await.unwrap();
+
+    resp.choices[0].text.clone()
+}
+
+
+pub fn get_prompt_for_final_answer(
+    expected_context: &String,
+    completions_of_cot: Option<&String>,
+) -> String {
+    completions_of_cot
+        .map(|cot| expected_context.replace("<|completions_of_cot|>", cot))
+        .unwrap_or_else(|| expected_context.clone())
+        .split_once("<|logprobs_of_choices|>")
+        .unwrap()
+        .0
+        .to_string()
 }

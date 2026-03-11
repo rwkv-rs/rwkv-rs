@@ -6,9 +6,8 @@ use tokio::runtime::Runtime;
 use crate::datasets::hf_downloader::download_hf_files;
 use crate::datasets::hf_viewer::get_split_row_count;
 use crate::datasets::parquet_utils::{get_string, get_string_list, get_u8, read_parquet_items};
-use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
-};
+use crate::datasets::{ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig, get_prompt_for_cot, get_completions_of_cot, get_prompt_for_final_answer};
+use crate::datasets::knowledge::{get_expected_context, get_final_answer, get_ref_answer};
 use crate::inferers::{CompletionRequest, CompletionResponse};
 use crate::runtime::OpenAiClient;
 
@@ -106,230 +105,65 @@ impl Benchmark for Mmlu {
     }
 
     fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
-        let choices = item
-            .choices
-            .iter()
-            .enumerate()
-            .map(|(i, choice)| format!("{}. {}", char::from(b'A' + i as u8), choice))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let user_part = format!(
-            concat!(
-                "User: You are a very talented expert in {subject}.\n",
-                "Answer this question and finish with a single option letter.\n",
-                "Question: {question}\n",
-                "Choices:\n{choices}\n\n",
-            ),
-            subject = item.subject,
-            question = item.question,
-            choices = choices,
-        );
-
-        let assistant_part = match cot_mode {
-            CoTMode::NoCoT => "Assistant: Therefore, the answer is<|logprobs_of_choices|>",
-            CoTMode::FakeCoT => concat!(
-                "Assistant: <think>\n</think>\n",
-                "Therefore, the answer is<|logprobs_of_choices|>",
-            ),
-            CoTMode::CoT => concat!(
-                "Assistant: <think><|completions_of_cot|></think>\n",
-                "Therefore, the answer is<|logprobs_of_choices|>"
-            ),
-        };
-
-        format!("User: {user_part}\n\nAssistant: {assistant_part}")
+        get_expected_context(
+            &item.subject,
+            &item.question,
+            &item.choices,
+            cot_mode
+        )
     }
 
     fn get_ref_answer(&self, item: &Self::Item) -> String {
-        let answer = item.answer;
-        char::from(b'A' + answer).to_string()
+        get_ref_answer(&item.answer)
     }
 
     async fn answer_and_judge(
         &self,
         model_name: String,
         model_client: &OpenAiClient,
-        judger_client: Option<&OpenAiClient>,
+        _judger_client: Option<&OpenAiClient>,
         cot_mode: CoTMode,
-        fim_mode: bool,
         item: &Self::Item,
     ) -> bool {
         let expected_context = self.get_expected_context(item, cot_mode);
         let is_passed = match cot_mode {
             CoTMode::CoT => {
-                let prompt_for_cot = expected_context
-                    .split_once("<|completions_of_cot|>")
-                    .unwrap()
-                    .0
-                    .to_string();
+                let prompt_for_cot = get_prompt_for_cot(&expected_context);
 
-                let req = CompletionRequest::new(
-                    model_name.clone(),
-                    prompt_for_cot.into(),
-                    vec!["</think>".to_string()],
-                    4096,
+                let completions_of_cot = get_completions_of_cot(
+                    model_client,
+                    &model_name,
+                    &prompt_for_cot,
                     &MMLU_INFO.sampling_config,
-                    None,
-                    None,
+                ).await;
+
+                let prompt_for_final_answer = get_prompt_for_final_answer(
+                    &expected_context,
+                    Some(&completions_of_cot),
                 );
 
-                let resp: CompletionResponse = model_client.completions()
-                    .create_byot(&req).await.unwrap();
-
-                let completions_of_cot = &resp.choices[0].text;
-
-                let prompt_for_final_answer = expected_context
-                    .replace("<|completions_of_cot|>", completions_of_cot)
-                    .split_once("<|logprobs_of_choices|>")
-                    .unwrap()
-                    .0
-                    .to_string();
-
-                let choice_token_texts = (0..item.choices.len())
-                    .map(|i| format!(" {}", char::from(b'A' + i as u8)))
-                    .collect::<Vec<_>>();
-
-                let req = CompletionRequest::new(
-                    model_name,
-                    prompt_for_final_answer.into(),
-                    vec![],
-                    1,
+                get_final_answer(
+                    model_client,
+                    &model_name,
+                    &item.choices,
+                    &prompt_for_final_answer,
                     &MMLU_INFO.sampling_config,
-                    Some(1),
-                    Some(choice_token_texts.clone()),
-                );
-
-                let resp: CompletionResponse = model_client.completions()
-                    .create_byot(&req).await.unwrap();
-
-                let choice_logprobs = resp.choices[0]
-                    .logprobs
-                    .as_ref()
-                    .and_then(|logprobs| logprobs.top_logprobs.first())
-                    .unwrap();
-
-                let final_answer_id = choice_token_texts
-                    .iter()
-                    .enumerate()
-                    .max_by(|(_, left), (_, right)| {
-                        choice_logprobs
-                            .get(left.as_str())
-                            .copied()
-                            .unwrap_or(f32::NEG_INFINITY)
-                            .total_cmp(
-                                &choice_logprobs
-                                    .get(right.as_str())
-                                    .copied()
-                                    .unwrap_or(f32::NEG_INFINITY),
-                            )
-                    })
-                    .map(|(idx, _)| idx)
-                    .unwrap() as u8;
-
-                final_answer_id == item.answer
+                ).await == item.answer
             }
 
-            CoTMode::FakeCoT => {
-                let prompt_for_final_answer = expected_context
-                    .split_once("<|logprobs_of_choices|>")
-                    .unwrap()
-                    .0
-                    .to_string();
-
-                let choice_token_texts = (0..item.choices.len())
-                    .map(|i| format!(" {}", char::from(b'A' + i as u8)))
-                    .collect::<Vec<_>>();
-
-                let req = CompletionRequest::new(
-                    model_name,
-                    prompt_for_final_answer.into(),
-                    vec![],
-                    1,
-                    &MMLU_INFO.sampling_config,
-                    Some(1),
-                    Some(choice_token_texts.clone()),
+            CoTMode::FakeCoT | CoTMode::NoCoT => {
+                let prompt_for_final_answer = get_prompt_for_final_answer(
+                    &expected_context,
+                    None,
                 );
 
-                let resp: CompletionResponse = model_client.completions()
-                    .create_byot(&req).await.unwrap();
-
-                let choice_logprobs = resp.choices[0]
-                    .logprobs
-                    .as_ref()
-                    .and_then(|logprobs| logprobs.top_logprobs.first())
-                    .unwrap();
-
-                let final_answer_id = choice_token_texts
-                    .iter()
-                    .enumerate()
-                    .max_by(|(_, left), (_, right)| {
-                        choice_logprobs
-                            .get(left.as_str())
-                            .copied()
-                            .unwrap_or(f32::NEG_INFINITY)
-                            .total_cmp(
-                                &choice_logprobs
-                                    .get(right.as_str())
-                                    .copied()
-                                    .unwrap_or(f32::NEG_INFINITY),
-                            )
-                    })
-                    .map(|(idx, _)| idx)
-                    .unwrap() as u8;
-
-                final_answer_id == item.answer
-            }
-
-            CoTMode::NoCoT => {
-                let prompt_for_final_answer = expected_context
-                    .split_once("<|logprobs_of_choices|>")
-                    .unwrap()
-                    .0
-                    .to_string();
-
-                let choice_token_texts = (0..item.choices.len())
-                    .map(|i| format!(" {}", char::from(b'A' + i as u8)))
-                    .collect::<Vec<_>>();
-
-                let req = CompletionRequest::new(
-                    model_name,
-                    prompt_for_final_answer.into(),
-                    vec![],
-                    1,
+                get_final_answer(
+                    model_client,
+                    &model_name,
+                    &item.choices,
+                    &prompt_for_final_answer,
                     &MMLU_INFO.sampling_config,
-                    Some(1),
-                    Some(choice_token_texts.clone()),
-                );
-
-                let resp: CompletionResponse = model_client.completions()
-                    .create_byot(&req).await.unwrap();
-
-                let choice_logprobs = resp.choices[0]
-                    .logprobs
-                    .as_ref()
-                    .and_then(|logprobs| logprobs.top_logprobs.first())
-                    .unwrap();
-
-                let final_answer_id = choice_token_texts
-                    .iter()
-                    .enumerate()
-                    .max_by(|(_, left), (_, right)| {
-                        choice_logprobs
-                            .get(left.as_str())
-                            .copied()
-                            .unwrap_or(f32::NEG_INFINITY)
-                            .total_cmp(
-                                &choice_logprobs
-                                    .get(right.as_str())
-                                    .copied()
-                                    .unwrap_or(f32::NEG_INFINITY),
-                            )
-                    })
-                    .map(|(idx, _)| idx)
-                    .unwrap() as u8;
-
-                final_answer_id == item.answer
+                ).await == item.answer
             }
         };
         is_passed
