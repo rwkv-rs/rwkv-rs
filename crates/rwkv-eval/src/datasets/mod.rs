@@ -102,7 +102,7 @@ pub fn apply_user_assistant_template(user_part: String, assistant_part: String) 
     format!("User: {user_part}\n\nAssistant: {assistant_part}")
 }
 
-pub fn get_prompt_for_cot(expected_context: &String) -> String {
+pub fn get_prompt_for_cot(expected_context: &str) -> String {
     expected_context
         .split_once("<|completions_of_cot|>")
         .unwrap()
@@ -112,12 +112,12 @@ pub fn get_prompt_for_cot(expected_context: &String) -> String {
 
 pub async fn get_completions_of_cot(
     model_client: &Client<OpenAIConfig>,
-    model_name: &String,
-    prompt_for_cot: &String,
+    model_name: &str,
+    prompt_for_cot: &str,
     sampling_config: &SamplingConfig,
 ) -> String {
     let req = CompletionRequest::new(
-        model_name.clone(),
+        model_name.to_string(),
         prompt_for_cot.into(),
         vec!["</think>".to_string()],
         4096,
@@ -132,12 +132,12 @@ pub async fn get_completions_of_cot(
 }
 
 pub fn get_prompt_for_final_answer(
-    expected_context: &String,
-    completions_of_cot: Option<&String>,
+    expected_context: &str,
+    completions_of_cot: Option<&str>,
 ) -> String {
     completions_of_cot
         .map(|cot| expected_context.replace("<|completions_of_cot|>", cot))
-        .unwrap_or_else(|| expected_context.clone())
+        .unwrap_or_else(|| expected_context.to_string())
         .split_once("<|logprobs_of_choices|>")
         .unwrap()
         .0

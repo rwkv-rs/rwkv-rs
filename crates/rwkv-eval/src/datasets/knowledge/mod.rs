@@ -18,10 +18,10 @@ pub mod mmlu_redux;
 pub mod mmmlu;
 pub mod supergpqa;
 
-pub fn get_expected_context(
-    subject: &String,
-    question: &String,
-    choices: &Vec<String>,
+pub fn get_expect_context(
+    subject: &str,
+    question: &str,
+    choices: &[String],
     cot_mode: CoTMode,
 ) -> String {
     let choices = choices
@@ -56,12 +56,8 @@ pub fn get_expected_context(
     apply_user_assistant_template(user_part, assistant_part)
 }
 
-pub fn get_ref_answer(answer: &u8) -> String {
-    char::from(b'A' + answer).to_string()
-}
-
-pub fn get_ref_answer_from_letter(answer: &str) -> String {
-    get_ref_answer(&answer_index_from_letter(answer))
+pub fn get_ref_answer(answer_index: u8) -> String {
+    char::from(b'A' + answer_index).to_string()
 }
 
 pub fn answer_index_from_letter(answer: &str) -> u8 {
@@ -78,26 +74,11 @@ pub fn answer_index_from_letter(answer: &str) -> u8 {
     }
 }
 
-pub fn join_subject_parts(parts: &[&str]) -> String {
-    let joined = parts
-        .iter()
-        .map(|part| part.trim())
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join(" / ");
-
-    if joined.is_empty() {
-        "general knowledge".to_string()
-    } else {
-        joined
-    }
-}
-
-pub async fn answer_multiple_choice(
+pub async fn get_final_answer_with_cot_mode(
     model_client: &Client<OpenAIConfig>,
-    model_name: &String,
-    choices: &Vec<String>,
-    expected_context: &String,
+    model_name: &str,
+    choices: &[String],
+    expected_context: &str,
     sampling_config: &SamplingConfig,
     cot_mode: CoTMode,
 ) -> u8 {
@@ -135,53 +116,11 @@ pub async fn answer_multiple_choice(
     }
 }
 
-pub async fn judge_multiple_choice(
+async fn get_final_answer(
     model_client: &Client<OpenAIConfig>,
-    model_name: &String,
-    choices: &Vec<String>,
-    expected_context: &String,
-    sampling_config: &SamplingConfig,
-    cot_mode: CoTMode,
-    answer: u8,
-) -> bool {
-    answer_multiple_choice(
-        model_client,
-        model_name,
-        choices,
-        expected_context,
-        sampling_config,
-        cot_mode,
-    )
-    .await
-        == answer
-}
-
-pub async fn judge_multiple_choice_by_letter(
-    model_client: &Client<OpenAIConfig>,
-    model_name: &String,
-    choices: &Vec<String>,
-    expected_context: &String,
-    sampling_config: &SamplingConfig,
-    cot_mode: CoTMode,
-    answer: &str,
-) -> bool {
-    judge_multiple_choice(
-        model_client,
-        model_name,
-        choices,
-        expected_context,
-        sampling_config,
-        cot_mode,
-        answer_index_from_letter(answer),
-    )
-    .await
-}
-
-pub async fn get_final_answer(
-    model_client: &Client<OpenAIConfig>,
-    model_name: &String,
-    choices: &Vec<String>,
-    prompt_for_final_answer: &String,
+    model_name: &str,
+    choices: &[String],
+    prompt_for_final_answer: &str,
     sampling_config: &SamplingConfig,
 ) -> u8 {
     let choice_token_texts = (0..choices.len())
@@ -189,7 +128,7 @@ pub async fn get_final_answer(
         .collect::<Vec<_>>();
 
     let req = CompletionRequest::new(
-        model_name.clone(),
+        model_name.to_string(),
         prompt_for_final_answer.into(),
         vec![],
         1,

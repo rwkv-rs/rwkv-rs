@@ -7,7 +7,8 @@ use std::process::Command;
 use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
-    get_expected_context, get_ref_answer_from_letter, judge_multiple_choice_by_letter,
+    answer_index_from_letter, get_ref_answer, get_final_answer_with_cot_mode,
+    get_expect_context,
 };
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
@@ -97,14 +98,11 @@ impl Benchmark for Cmmlu {
         for split in ["dev", "test"] {
             let split_dir = root_dir.join(split);
             for path in collect_files_with_extension(&split_dir, "csv") {
-                let subject_name = path
-                    .file_stem()
+                let subject_name = path.file_stem()
                     .and_then(|name| name.to_str())
-                    .unwrap()
-                    .to_string();
+                    .unwrap().to_string();
 
-                let rows = read_csv_items::<CmmluCsvRow, _>(&path)
-                    .into_iter()
+                let rows = read_csv_items::<CmmluCsvRow, _>(&path).into_iter()
                     .map(|row| CmmluItem {
                         row_id: row.row_id,
                         question: row.question,
@@ -114,8 +112,7 @@ impl Benchmark for Cmmlu {
                         d: row.d,
                         answer: row.answer,
                         subject_name: subject_name.clone(),
-                    })
-                    .collect::<Vec<_>>();
+                    }).collect::<Vec<_>>();
 
                 match split {
                     "dev" => self.dev.extend(rows),
@@ -150,13 +147,8 @@ impl Benchmark for Cmmlu {
         ));
 
         let zip_path = root_dir.join(ARCHIVE_NAME);
-        let status = Command::new("unzip")
-            .arg("-o")
-            .arg(&zip_path)
-            .arg("-d")
-            .arg(&root_dir)
-            .status()
-            .unwrap_or_else(|e| {
+        let status = Command::new("unzip").arg("-o").arg(&zip_path).arg("-d").arg(&root_dir)
+            .status().unwrap_or_else(|e| {
                 panic!("解压 CMMLU 文件失败: {}. error: {}", zip_path.display(), e)
             });
         if !status.success() {
@@ -177,11 +169,11 @@ impl Benchmark for Cmmlu {
             item.c.clone(),
             item.d.clone(),
         ];
-        get_expected_context(&item.subject_name, &item.question, &choices, cot_mode)
+        get_expect_context(&item.subject_name, &item.question, &choices, cot_mode)
     }
 
     fn get_ref_answer(&self, item: &Self::Item) -> String {
-        get_ref_answer_from_letter(&item.answer)
+        get_ref_answer(answer_index_from_letter(&item.answer))
     }
 
     async fn answer_and_judge(
@@ -198,17 +190,17 @@ impl Benchmark for Cmmlu {
             item.c.clone(),
             item.d.clone(),
         ];
-        let expected_context = self.get_expected_context(item, cot_mode);
+        let expected_context =
+            get_expect_context(&item.subject_name, &item.question, &choices, cot_mode);
+        let answer_index = answer_index_from_letter(&item.answer);
 
-        judge_multiple_choice_by_letter(
+        get_final_answer_with_cot_mode(
             model_client,
             &model_name,
             &choices,
             &expected_context,
             &CMMLU_INFO.sampling_config,
             cot_mode,
-            &item.answer,
-        )
-        .await
+        ).await == answer_index
     }
 }

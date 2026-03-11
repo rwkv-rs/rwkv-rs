@@ -5,10 +5,11 @@ use parquet::record::Row;
 use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
-use crate::datasets::knowledge::{get_expected_context, get_final_answer, get_ref_answer};
+use crate::datasets::knowledge::{
+    get_ref_answer, get_final_answer_with_cot_mode, get_expect_context,
+};
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
-    get_completions_of_cot, get_prompt_for_cot, get_prompt_for_final_answer,
 };
 use crate::datasets::utils::hf::downloader::download_hf_files;
 use crate::datasets::utils::hf::viewer::get_split_row_count;
@@ -108,11 +109,11 @@ impl Benchmark for Mmlu {
     }
 
     fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
-        get_expected_context(&item.subject, &item.question, &item.choices, cot_mode)
+        get_expect_context(&item.subject, &item.question, &item.choices, cot_mode)
     }
 
     fn get_ref_answer(&self, item: &Self::Item) -> String {
-        get_ref_answer(&item.answer)
+        get_ref_answer(item.answer)
     }
 
     async fn answer_and_judge(
@@ -123,44 +124,16 @@ impl Benchmark for Mmlu {
         cot_mode: CoTMode,
         item: &Self::Item,
     ) -> bool {
-        let expected_context = self.get_expected_context(item, cot_mode);
-        let is_passed = match cot_mode {
-            CoTMode::CoT => {
-                let prompt_for_cot = get_prompt_for_cot(&expected_context);
+        let expected_context =
+            get_expect_context(&item.subject, &item.question, &item.choices, cot_mode);
 
-                let completions_of_cot = get_completions_of_cot(
-                    model_client,
-                    &model_name,
-                    &prompt_for_cot,
-                    &MMLU_INFO.sampling_config,
-                ).await;
-
-                let prompt_for_final_answer = get_prompt_for_final_answer(
-                    &expected_context,
-                    Some(&completions_of_cot),
-                );
-
-                get_final_answer(
-                    model_client,
-                    &model_name,
-                    &item.choices,
-                    &prompt_for_final_answer,
-                    &MMLU_INFO.sampling_config,
-                ).await == item.answer
-            }
-
-            CoTMode::FakeCoT | CoTMode::NoCoT => {
-                let prompt_for_final_answer = get_prompt_for_final_answer(&expected_context, None);
-
-                get_final_answer(
-                    model_client,
-                    &model_name,
-                    &item.choices,
-                    &prompt_for_final_answer,
-                    &MMLU_INFO.sampling_config,
-                ).await == item.answer
-            }
-        };
-        is_passed
+        get_final_answer_with_cot_mode(
+            model_client,
+            &model_name,
+            &item.choices,
+            &expected_context,
+            &MMLU_INFO.sampling_config,
+            cot_mode,
+        ).await == item.answer
     }
 }

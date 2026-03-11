@@ -5,9 +5,10 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
+use crate::datasets::knowledge::gpqa_common::join_subject_parts;
 use crate::datasets::knowledge::{
-    get_expected_context, get_ref_answer_from_letter, join_subject_parts,
-    judge_multiple_choice_by_letter,
+    answer_index_from_letter, get_ref_answer, get_final_answer_with_cot_mode,
+    get_expect_context,
 };
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
@@ -95,11 +96,11 @@ impl Benchmark for SuperGpqa {
 
     fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
         let subject = join_subject_parts(&[&item.discipline, &item.field, &item.subfield]);
-        get_expected_context(&subject, &item.question, &item.options, cot_mode)
+        get_expect_context(&subject, &item.question, &item.options, cot_mode)
     }
 
     fn get_ref_answer(&self, item: &Self::Item) -> String {
-        get_ref_answer_from_letter(&item.answer_letter)
+        get_ref_answer(answer_index_from_letter(&item.answer_letter))
     }
 
     async fn answer_and_judge(
@@ -110,17 +111,18 @@ impl Benchmark for SuperGpqa {
         cot_mode: CoTMode,
         item: &Self::Item,
     ) -> bool {
-        let expected_context = self.get_expected_context(item, cot_mode);
+        let subject = join_subject_parts(&[&item.discipline, &item.field, &item.subfield]);
+        let expected_context =
+            get_expect_context(&subject, &item.question, &item.options, cot_mode);
+        let answer_index = answer_index_from_letter(&item.answer_letter);
 
-        judge_multiple_choice_by_letter(
+        get_final_answer_with_cot_mode(
             model_client,
             &model_name,
             &item.options,
             &expected_context,
             &SUPERGPQA_INFO.sampling_config,
             cot_mode,
-            &item.answer_letter,
-        )
-        .await
+        ).await == answer_index
     }
 }

@@ -6,15 +6,15 @@ use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
-    get_expected_context, get_ref_answer_from_letter, judge_multiple_choice_by_letter,
-};
-use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    answer_index_from_letter, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
 };
 use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::hf::viewer::get_parquet_files;
 use crate::datasets::utils::parquet::{get_i64, get_string, read_parquet_items};
+use crate::datasets::{
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+};
 
 const DATASET_ID: &str = "ceval/ceval-exam";
 const LOCAL_ROOT_NAME: &str = "ceval";
@@ -77,21 +77,16 @@ impl Benchmark for Ceval {
         self.validation.clear();
         self.test.clear();
 
-        for path in collect_files_with_extension(self.dataset_root.join(LOCAL_ROOT_NAME), "parquet")
-        {
-            let split = path
-                .parent()
-                .and_then(|parent| parent.file_name())
-                .and_then(|name| name.to_str())
-                .unwrap()
-                .to_string();
-            let config_name = path
-                .parent()
+        for path in collect_files_with_extension(
+            self.dataset_root.join(LOCAL_ROOT_NAME),
+            "parquet",
+        ) {
+            let split = path.parent().and_then(|parent| parent.file_name())
+                .and_then(|name| name.to_str()).unwrap().to_string();
+            let config_name = path.parent()
                 .and_then(|parent| parent.parent())
                 .and_then(|parent| parent.file_name())
-                .and_then(|name| name.to_str())
-                .unwrap()
-                .to_string();
+                .and_then(|name| name.to_str()).unwrap().to_string();
 
             let items = read_parquet_items(&path, |row: &Row| CevalItem {
                 id: get_i64(row, "id"),
@@ -149,11 +144,11 @@ impl Benchmark for Ceval {
             item.c.clone(),
             item.d.clone(),
         ];
-        get_expected_context(&item.config_name, &item.question, &choices, cot_mode)
+        get_expect_context(&item.config_name, &item.question, &choices, cot_mode)
     }
 
     fn get_ref_answer(&self, item: &Self::Item) -> String {
-        get_ref_answer_from_letter(&item.answer)
+        get_ref_answer(answer_index_from_letter(&item.answer))
     }
 
     async fn answer_and_judge(
@@ -170,17 +165,17 @@ impl Benchmark for Ceval {
             item.c.clone(),
             item.d.clone(),
         ];
-        let expected_context = self.get_expected_context(item, cot_mode);
+        let expected_context =
+            get_expect_context(&item.config_name, &item.question, &choices, cot_mode);
+        let answer_index = answer_index_from_letter(&item.answer);
 
-        judge_multiple_choice_by_letter(
+        get_final_answer_with_cot_mode(
             model_client,
             &model_name,
             &choices,
             &expected_context,
             &CEVAL_INFO.sampling_config,
             cot_mode,
-            &item.answer,
-        )
-        .await
+        ).await == answer_index
     }
 }

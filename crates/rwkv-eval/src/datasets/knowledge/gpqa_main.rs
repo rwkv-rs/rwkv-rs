@@ -5,17 +5,16 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 use crate::datasets::knowledge::gpqa_common::{
-    download_gpqa_csv, gpqa_csv_path, ordered_gpqa_choices,
+    download_gpqa_csv, gpqa_csv_path, join_subject_parts, ordered_gpqa_choices,
 };
 use crate::datasets::knowledge::{
-    get_expected_context, get_ref_answer, join_subject_parts, judge_multiple_choice,
+    get_ref_answer, get_final_answer_with_cot_mode, get_expect_context,
 };
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
 };
 use crate::datasets::utils::csv::read_csv_items;
 
-const FILE_NAME: &str = "gpqa_main.csv";
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static GPQA_MAIN_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -79,15 +78,15 @@ impl Benchmark for GpqaMain {
     type Item = GpqaMainItem;
 
     fn load(&mut self) {
-        self.test = read_csv_items(gpqa_csv_path(&self.dataset_root, FILE_NAME));
+        self.test = read_csv_items(gpqa_csv_path(&self.dataset_root, "gpqa_main.csv"));
     }
 
     fn check(&self) -> bool {
-        !gpqa_csv_path(&self.dataset_root, FILE_NAME).exists()
+        !gpqa_csv_path(&self.dataset_root, "gpqa_main.csv").exists()
     }
 
     fn download(&self) {
-        let downloaded_path = download_gpqa_csv(&self.dataset_root, FILE_NAME);
+        let downloaded_path = download_gpqa_csv(&self.dataset_root, "gpqa_main.csv");
         println!("gpqa_main dataset: {}", downloaded_path.display());
     }
 
@@ -104,7 +103,7 @@ impl Benchmark for GpqaMain {
             ],
         );
 
-        get_expected_context(&subject, &item.question, &choices, cot_mode)
+        get_expect_context(&subject, &item.question, &choices, cot_mode)
     }
 
     fn get_ref_answer(&self, item: &Self::Item) -> String {
@@ -118,7 +117,7 @@ impl Benchmark for GpqaMain {
                 &item.incorrect_answer_3,
             ],
         );
-        get_ref_answer(&answer_index)
+        get_ref_answer(answer_index)
     }
 
     async fn answer_and_judge(
@@ -139,17 +138,17 @@ impl Benchmark for GpqaMain {
                 &item.incorrect_answer_3,
             ],
         );
-        let expected_context = self.get_expected_context(item, cot_mode);
+        let subject = join_subject_parts(&[&item.high_level_domain, &item.subdomain]);
+        let expected_context =
+            get_expect_context(&subject, &item.question, &choices, cot_mode);
 
-        judge_multiple_choice(
+        get_final_answer_with_cot_mode(
             model_client,
             &model_name,
             &choices,
             &expected_context,
             &GPQA_MAIN_INFO.sampling_config,
             cot_mode,
-            answer_index,
-        )
-        .await
+        ).await == answer_index
     }
 }

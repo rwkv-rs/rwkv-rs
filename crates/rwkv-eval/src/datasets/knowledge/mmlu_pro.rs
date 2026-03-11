@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
-    get_expected_context, get_ref_answer, judge_multiple_choice,
+    get_ref_answer, get_final_answer_with_cot_mode, get_expect_context,
 };
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
@@ -135,11 +135,11 @@ impl Benchmark for MmluPro {
     }
 
     fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
-        get_expected_context(&item.category, &item.question, &item.options, cot_mode)
+        get_expect_context(&item.category, &item.question, &item.options, cot_mode)
     }
 
     fn get_ref_answer(&self, item: &Self::Item) -> String {
-        get_ref_answer(&u8::try_from(item.answer_index).unwrap())
+        get_ref_answer(u8::try_from(item.answer_index).unwrap())
     }
 
     async fn answer_and_judge(
@@ -150,18 +150,17 @@ impl Benchmark for MmluPro {
         cot_mode: CoTMode,
         item: &Self::Item,
     ) -> bool {
-        let expected_context = self.get_expected_context(item, cot_mode);
-        let answer = u8::try_from(item.answer_index).unwrap();
+        let expected_context =
+            get_expect_context(&item.category, &item.question, &item.options, cot_mode);
+        let answer_index = u8::try_from(item.answer_index).unwrap();
 
-        judge_multiple_choice(
+        get_final_answer_with_cot_mode(
             model_client,
             &model_name,
             &item.options,
             &expected_context,
             &MMLU_PRO_INFO.sampling_config,
             cot_mode,
-            answer,
-        )
-        .await
+        ).await == answer_index
     }
 }

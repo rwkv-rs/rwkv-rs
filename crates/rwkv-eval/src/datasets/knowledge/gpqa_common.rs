@@ -5,13 +5,9 @@ use tokio::runtime::Runtime;
 
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 
-pub const GPQA_ROOT_NAME: &str = "gpqa";
-const GPQA_ARCHIVE_NAME: &str = "dataset.zip";
-const GPQA_ARCHIVE_URL: &str = "https://raw.githubusercontent.com/idavidrein/gpqa/main/dataset.zip";
-const GPQA_ARCHIVE_PASSWORD: &str = "deserted-untie-orchid";
 
 pub fn gpqa_csv_path<P: AsRef<Path>>(dataset_root: P, file_name: &str) -> PathBuf {
-    dataset_root.as_ref().join(GPQA_ROOT_NAME).join(file_name)
+    dataset_root.as_ref().join("gpqa").join(file_name)
 }
 
 pub fn download_gpqa_csv<P: AsRef<Path>>(dataset_root: P, file_name: &str) -> PathBuf {
@@ -19,26 +15,18 @@ pub fn download_gpqa_csv<P: AsRef<Path>>(dataset_root: P, file_name: &str) -> Pa
     let runtime = Runtime::new().unwrap();
     let root_dir = runtime.block_on(download_url_files(
         dataset_root,
-        GPQA_ROOT_NAME,
+        "gpqa",
         &[UrlDownloadFile {
-            relative_path: PathBuf::from(GPQA_ARCHIVE_NAME),
-            url: GPQA_ARCHIVE_URL.to_string(),
+            relative_path: PathBuf::from("dataset.zip"),
+            url: "https://raw.githubusercontent.com/idavidrein/gpqa/main/dataset.zip".to_string(),
         }],
         1,
     ));
 
-    let zip_path = root_dir.join(GPQA_ARCHIVE_NAME);
+    let zip_path = root_dir.join("dataset.zip");
     let archived_path = format!("dataset/{file_name}");
-    let status = Command::new("unzip")
-        .arg("-P")
-        .arg(GPQA_ARCHIVE_PASSWORD)
-        .arg("-j")
-        .arg("-o")
-        .arg(&zip_path)
-        .arg(&archived_path)
-        .arg("-d")
-        .arg(&root_dir)
-        .status()
+    let status = Command::new("unzip").arg("-P").arg("deserted-untie-orchid").arg("-j").arg("-o")
+        .arg(&zip_path).arg(&archived_path).arg("-d").arg(&root_dir).status()
         .unwrap_or_else(|e| panic!("解压 GPQA 文件失败: {}. error: {}", zip_path.display(), e));
 
     if !status.success() {
@@ -81,4 +69,19 @@ pub fn ordered_gpqa_choices(
     let answer_index = ((base_choices.len() - rotation) % base_choices.len()) as u8;
 
     (choices, answer_index)
+}
+
+pub fn join_subject_parts(parts: &[&str]) -> String {
+    let joined = parts
+        .iter()
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" / ");
+
+    if joined.is_empty() {
+        "general knowledge".to_string()
+    } else {
+        joined
+    }
 }

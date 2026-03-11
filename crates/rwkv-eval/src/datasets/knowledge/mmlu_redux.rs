@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
-    get_expected_context, get_ref_answer, judge_multiple_choice,
+    get_ref_answer, get_final_answer_with_cot_mode, get_expect_context,
 };
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
@@ -148,11 +148,11 @@ impl Benchmark for MmluRedux {
     }
 
     fn get_expected_context(&self, item: &Self::Item, cot_mode: CoTMode) -> String {
-        get_expected_context(&item.config_name, &item.question, &item.choices, cot_mode)
+        get_expect_context(&item.config_name, &item.question, &item.choices, cot_mode)
     }
 
     fn get_ref_answer(&self, item: &Self::Item) -> String {
-        get_ref_answer(&Self::resolved_answer_index(item).unwrap())
+        get_ref_answer(Self::resolved_answer_index(item).unwrap())
     }
 
     async fn answer_and_judge(
@@ -163,17 +163,17 @@ impl Benchmark for MmluRedux {
         cot_mode: CoTMode,
         item: &Self::Item,
     ) -> bool {
-        let expected_context = self.get_expected_context(item, cot_mode);
+        let expected_context =
+            get_expect_context(&item.config_name, &item.question, &item.choices, cot_mode);
+        let answer_index = Self::resolved_answer_index(item).unwrap();
 
-        judge_multiple_choice(
+        get_final_answer_with_cot_mode(
             model_client,
             &model_name,
             &item.choices,
             &expected_context,
             &MMLU_REDUX_INFO.sampling_config,
             cot_mode,
-            Self::resolved_answer_index(item).unwrap(),
-        )
-        .await
+        ).await == answer_index
     }
 }
