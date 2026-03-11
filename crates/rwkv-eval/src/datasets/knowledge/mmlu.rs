@@ -1,3 +1,5 @@
+use async_openai::config::OpenAIConfig;
+use async_openai::Client;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
@@ -5,11 +7,9 @@ use tokio::runtime::Runtime;
 
 use crate::datasets::hf_downloader::download_hf_files;
 use crate::datasets::hf_viewer::get_split_row_count;
-use crate::datasets::parquet_utils::{get_string, get_string_list, get_u8, read_parquet_items};
-use crate::datasets::{ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig, get_prompt_for_cot, get_completions_of_cot, get_prompt_for_final_answer};
 use crate::datasets::knowledge::{get_expected_context, get_final_answer, get_ref_answer};
-use crate::inferers::{CompletionRequest, CompletionResponse};
-use crate::runtime::OpenAiClient;
+use crate::datasets::parquet_utils::{get_string, get_string_list, get_u8, read_parquet_items};
+use crate::datasets::{get_completions_of_cot, get_prompt_for_cot, get_prompt_for_final_answer, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig, ALL_BENCHMARKS};
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static MMLU_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -120,8 +120,8 @@ impl Benchmark for Mmlu {
     async fn answer_and_judge(
         &self,
         model_name: String,
-        model_client: &OpenAiClient,
-        _judger_client: Option<&OpenAiClient>,
+        model_client: &Client<OpenAIConfig>,
+        _judger_client: Option<&Client<OpenAIConfig>>,
         cot_mode: CoTMode,
         item: &Self::Item,
     ) -> bool {

@@ -1,6 +1,7 @@
+use async_openai::Client;
+use async_openai::config::OpenAIConfig;
 use crate::datasets::{apply_user_assistant_template, CoTMode, SamplingConfig};
 use crate::inferers::{CompletionRequest, CompletionResponse};
-use crate::runtime::OpenAiClient;
 
 pub mod ceval;
 pub mod cmmlu;
@@ -57,7 +58,7 @@ pub fn get_ref_answer(answer: &u8) -> String {
 
 
 pub async fn get_final_answer(
-    model_client: &OpenAiClient,
+    model_client: &Client<OpenAIConfig>,
     model_name: &String,
     choices: &Vec<String>,
     prompt_for_final_answer: &String,

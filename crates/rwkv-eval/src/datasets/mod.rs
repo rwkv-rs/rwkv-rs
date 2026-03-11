@@ -10,8 +10,9 @@ pub mod parquet_utils;
 use linkme::distributed_slice;
 use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
+use async_openai::Client;
+use async_openai::config::OpenAIConfig;
 use crate::inferers::{CompletionRequest, CompletionResponse};
-use crate::runtime::OpenAiClient;
 
 
 pub struct BenchmarkInfo {
@@ -67,8 +68,8 @@ pub trait Benchmark: Send + Sync {
     async fn answer_and_judge(
         &self,
         model_name: String,
-        model_client: &OpenAiClient,
-        judger_client: Option<&OpenAiClient>,
+        model_client: &Client<OpenAIConfig>,
+        judger_client: Option<&Client<OpenAIConfig>>,
         cot_mode: CoTMode,
         item: &Self::Item,
     ) -> bool;
@@ -118,7 +119,7 @@ pub fn get_prompt_for_cot(expected_context: &String) -> String {
 
 
 pub async fn get_completions_of_cot(
-    model_client: &OpenAiClient,
+    model_client: &Client<OpenAIConfig>,
     model_name: &String,
     prompt_for_cot: &String,
     sampling_config: &SamplingConfig,
