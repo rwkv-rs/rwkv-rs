@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
-    KnowledgeExample, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
+    Example, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
 };
 use crate::datasets::utils::hf::downloader::download_hf_files;
 use crate::datasets::utils::hf::viewer::get_split_row_count;
@@ -116,7 +116,7 @@ impl Benchmark for Mmlu {
         let item = &self.test[index];
         let few_shot_examples = self.dev.iter()
             .filter(|example| example.subject == item.subject)
-            .take(n_shot as usize).map(|example| KnowledgeExample {
+            .take(n_shot as usize).map(|example| Example {
                 question: example.question.clone(),
                 choices: example.choices.clone(),
                 answer_index: example.answer,

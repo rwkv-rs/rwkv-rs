@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
-    KnowledgeExample, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
+    Example, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
 };
 use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
@@ -148,7 +148,7 @@ impl Benchmark for MmluPro {
             .iter()
             .filter(|example| example.category == item.category)
             .take(n_shot as usize)
-            .map(|example| KnowledgeExample {
+            .map(|example| Example {
                 question: example.question.clone(),
                 choices: example.options.clone(),
                 answer_index: u8::try_from(example.answer_index).unwrap(),

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
-    KnowledgeExample, answer_index_from_letter, get_expect_context, get_final_answer_with_cot_mode,
+    Example, answer_index_from_letter, get_expect_context, get_final_answer_with_cot_mode,
     get_ref_answer,
 };
 use crate::datasets::utils::collect_files_with_extension;
@@ -178,7 +178,7 @@ impl Benchmark for Ceval {
             .iter()
             .filter(|example| example.config_name == item.config_name)
             .take(n_shot as usize)
-            .map(|example| KnowledgeExample {
+            .map(|example| Example {
                 question: example.question.clone(),
                 choices: vec![
                     example.a.clone(),
