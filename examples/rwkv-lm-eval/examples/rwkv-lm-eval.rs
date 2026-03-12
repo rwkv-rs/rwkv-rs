@@ -21,24 +21,5 @@ async fn main() {
     );
     println!("datasets dir: {}", paths::datasets_path().display());
 
-    let report = evaluating(&eval_cfg_builder, paths::datasets_path())
-        .await
-        .unwrap_or_else(|error| panic!("failed to run eval: {error}"));
-
-    println!("experiment: {}", report.experiment_name);
-    for model_run in report.model_runs {
-        println!("model: {}", model_run.model_name);
-        for summary in model_run.benchmark_summaries {
-            println!(
-                "  {} -> passed {}/{} (failed {}, accuracy {:.4}, avg_k {}, pass_k {})",
-                summary.benchmark_name,
-                summary.passed,
-                summary.total,
-                summary.failed,
-                summary.accuracy,
-                summary.avg_k,
-                summary.pass_k,
-            );
-        }
-    }
+    evaluating(eval_cfg_builder, paths::datasets_path()).await;
 }

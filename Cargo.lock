@@ -6225,6 +6225,7 @@ dependencies = [
 name = "rwkv-lm-eval"
 version = "0.1.0"
 dependencies = [
+ "async-openai",
  "rwkv-config",
  "rwkv-eval",
  "tokio",

@@ -92,14 +92,23 @@ impl Cmmlu {
 
 #[async_trait]
 impl Benchmark for Cmmlu {
-    fn load(&mut self) {
+    fn load(&mut self) -> bool {
         self.dev.clear();
         self.test.clear();
 
         let root_dir = self.dataset_root.join(LOCAL_ROOT_NAME);
+        if !root_dir.is_dir() {
+            return true;
+        }
+
         for split in ["dev", "test"] {
             let split_dir = root_dir.join(split);
-            for path in collect_files_with_extension(&split_dir, "csv") {
+            let csv_paths = collect_files_with_extension(&split_dir, "csv");
+            if csv_paths.is_empty() {
+                return true;
+            }
+
+            for path in csv_paths {
                 let subject_name = path
                     .file_stem()
                     .and_then(|name| name.to_str())
@@ -127,6 +136,8 @@ impl Benchmark for Cmmlu {
                 }
             }
         }
+
+        self.dev.is_empty() || self.test.is_empty()
     }
 
     fn check(&self) -> bool {
@@ -234,6 +245,8 @@ impl Benchmark for Cmmlu {
             &expected_context,
             &CMMLU_INFO.sampling_config,
             cot_mode,
-        ).await == answer_index
+        )
+        .await
+            == answer_index
     }
 }

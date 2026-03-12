@@ -78,8 +78,15 @@ impl GpqaExtended {
 
 #[async_trait]
 impl Benchmark for GpqaExtended {
-    fn load(&mut self) {
-        self.test = read_csv_items(gpqa_csv_path(&self.dataset_root, "gpqa_extended.csv"));
+    fn load(&mut self) -> bool {
+        let csv_path = gpqa_csv_path(&self.dataset_root, "gpqa_extended.csv");
+        if !csv_path.is_file() {
+            return true;
+        }
+
+        self.test = read_csv_items(csv_path);
+
+        self.test.is_empty()
     }
 
     fn check(&self) -> bool {
@@ -156,6 +163,8 @@ impl Benchmark for GpqaExtended {
             &expected_context,
             &GPQA_EXTENDED_INFO.sampling_config,
             cot_mode,
-        ).await == answer_index
+        )
+        .await
+            == answer_index
     }
 }

@@ -13,4 +13,5 @@ workspace = true
 [dependencies]
 rwkv-eval = { path = "../../crates/rwkv-eval" }
 rwkv-config = { path = "../../crates/rwkv-config" }
+async-openai = { version = "0.33.0", default-features = false, features = ["rustls", "completions", "byot"] }
 tokio = { workspace = true }

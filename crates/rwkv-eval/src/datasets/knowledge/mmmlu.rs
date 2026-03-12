@@ -69,11 +69,16 @@ impl Mmmlu {
 
 #[async_trait]
 impl Benchmark for Mmmlu {
-    fn load(&mut self) {
+    fn load(&mut self) -> bool {
         self.test.clear();
 
-        for path in collect_files_with_extension(self.dataset_root.join(LOCAL_ROOT_NAME), "parquet")
-        {
+        let parquet_paths =
+            collect_files_with_extension(self.dataset_root.join(LOCAL_ROOT_NAME), "parquet");
+        if parquet_paths.is_empty() {
+            return true;
+        }
+
+        for path in parquet_paths {
             let items = read_parquet_items(&path, |row: &Row| MmmluItem {
                 unnamed_0: get_i64(row, "Unnamed: 0"),
                 question: get_string(row, "Question"),
@@ -87,6 +92,8 @@ impl Benchmark for Mmmlu {
 
             self.test.extend(items);
         }
+
+        self.test.is_empty()
     }
 
     fn check(&self) -> bool {
@@ -163,6 +170,8 @@ impl Benchmark for Mmmlu {
             &expected_context,
             &MMMLU_INFO.sampling_config,
             cot_mode,
-        ).await == answer_index
+        )
+        .await
+            == answer_index
     }
 }

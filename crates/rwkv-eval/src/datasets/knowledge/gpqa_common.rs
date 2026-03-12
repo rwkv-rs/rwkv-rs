@@ -24,8 +24,16 @@ pub fn download_gpqa_csv<P: AsRef<Path>>(dataset_root: P, file_name: &str) -> Pa
 
     let zip_path = root_dir.join("dataset.zip");
     let archived_path = format!("dataset/{file_name}");
-    let status = Command::new("unzip").arg("-P").arg("deserted-untie-orchid").arg("-j").arg("-o")
-        .arg(&zip_path).arg(&archived_path).arg("-d").arg(&root_dir).status()
+    let status = Command::new("unzip")
+        .arg("-P")
+        .arg("deserted-untie-orchid")
+        .arg("-j")
+        .arg("-o")
+        .arg(&zip_path)
+        .arg(&archived_path)
+        .arg("-d")
+        .arg(&root_dir)
+        .status()
         .unwrap_or_else(|e| panic!("解压 GPQA 文件失败: {}. error: {}", zip_path.display(), e));
 
     if !status.success() {

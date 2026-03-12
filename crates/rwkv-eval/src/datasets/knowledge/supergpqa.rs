@@ -73,8 +73,15 @@ impl SuperGpqa {
 
 #[async_trait]
 impl Benchmark for SuperGpqa {
-    fn load(&mut self) {
-        self.test = read_jsonl_items(self.dataset_root.join(LOCAL_ROOT_NAME).join(FILE_NAME));
+    fn load(&mut self) -> bool {
+        let jsonl_path = self.dataset_root.join(LOCAL_ROOT_NAME).join(FILE_NAME);
+        if !jsonl_path.is_file() {
+            return true;
+        }
+
+        self.test = read_jsonl_items(jsonl_path);
+
+        self.test.is_empty()
     }
 
     fn check(&self) -> bool {

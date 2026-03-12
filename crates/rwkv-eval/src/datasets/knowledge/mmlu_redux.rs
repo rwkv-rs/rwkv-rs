@@ -71,11 +71,16 @@ impl MmluRedux {
 
 #[async_trait]
 impl Benchmark for MmluRedux {
-    fn load(&mut self) {
+    fn load(&mut self) -> bool {
         self.test.clear();
 
-        for path in collect_files_with_extension(self.dataset_root.join(LOCAL_ROOT_NAME), "parquet")
-        {
+        let parquet_paths =
+            collect_files_with_extension(self.dataset_root.join(LOCAL_ROOT_NAME), "parquet");
+        if parquet_paths.is_empty() {
+            return true;
+        }
+
+        for path in parquet_paths {
             let config_name = path
                 .parent()
                 .and_then(|parent| parent.parent())
@@ -98,13 +103,18 @@ impl Benchmark for MmluRedux {
             self.test.extend(items.into_iter().filter(|item| {
                 match item.correct_answer.as_deref().map(str::trim) {
                     Some("") => false,
-                    Some(correct_answer) => correct_answer.parse::<u8>().ok()
+                    Some(correct_answer) => correct_answer
+                        .parse::<u8>()
+                        .ok()
                         .is_some_and(|idx| usize::from(idx) < item.choices.len()),
-                    None => u8::try_from(item.answer).ok()
+                    None => u8::try_from(item.answer)
+                        .ok()
                         .is_some_and(|idx| usize::from(idx) < item.choices.len()),
                 }
             }));
         }
+
+        self.test.is_empty()
     }
 
     fn check(&self) -> bool {
@@ -183,6 +193,8 @@ impl Benchmark for MmluRedux {
             &expected_context,
             &MMLU_REDUX_INFO.sampling_config,
             cot_mode,
-        ).await == answer_index
+        )
+        .await
+            == answer_index
     }
 }

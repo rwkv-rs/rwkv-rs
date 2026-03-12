@@ -62,23 +62,30 @@ impl Mmlu {
 
 #[async_trait]
 impl Benchmark for Mmlu {
-    fn load(&mut self) {
+    fn load(&mut self) -> bool {
+        self.dev.clear();
+        self.test.clear();
+
+        let dev_path = self
+            .dataset_root
+            .join("mmlu/all/dev-00000-of-00001.parquet");
+        let test_path = self
+            .dataset_root
+            .join("mmlu/all/test-00000-of-00001.parquet");
+        if !dev_path.is_file() || !test_path.is_file() {
+            return true;
+        }
+
         let parse_item = |row: &Row| MmluItem {
             question: get_string(row, "question"),
             subject: get_string(row, "subject"),
             choices: get_string_list(row, "choices"),
             answer: get_u8(row, "answer"),
         };
-        self.dev = read_parquet_items(
-            self.dataset_root
-                .join("mmlu/all/dev-00000-of-00001.parquet"),
-            parse_item,
-        );
-        self.test = read_parquet_items(
-            self.dataset_root
-                .join("mmlu/all/test-00000-of-00001.parquet"),
-            parse_item,
-        );
+        self.dev = read_parquet_items(dev_path, parse_item);
+        self.test = read_parquet_items(test_path, parse_item);
+
+        self.dev.is_empty() || self.test.is_empty()
     }
 
     fn check(&self) -> bool {
@@ -114,13 +121,17 @@ impl Benchmark for Mmlu {
 
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, n_shot: u8) -> String {
         let item = &self.test[index];
-        let few_shot_examples = self.dev.iter()
+        let few_shot_examples = self
+            .dev
+            .iter()
             .filter(|example| example.subject == item.subject)
-            .take(n_shot as usize).map(|example| Example {
+            .take(n_shot as usize)
+            .map(|example| Example {
                 question: example.question.clone(),
                 choices: example.choices.clone(),
                 answer_index: example.answer,
-            }).collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
 
         get_expect_context(
             &item.subject,
@@ -154,6 +165,8 @@ impl Benchmark for Mmlu {
             &expected_context,
             &MMLU_INFO.sampling_config,
             cot_mode,
-        ).await == item.answer
+        )
+        .await
+            == item.answer
     }
 }

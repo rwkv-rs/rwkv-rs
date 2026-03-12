@@ -71,12 +71,17 @@ impl MmluPro {
 
 #[async_trait]
 impl Benchmark for MmluPro {
-    fn load(&mut self) {
+    fn load(&mut self) -> bool {
         self.validation.clear();
         self.test.clear();
 
-        for path in collect_files_with_extension(self.dataset_root.join(LOCAL_ROOT_NAME), "parquet")
-        {
+        let parquet_paths =
+            collect_files_with_extension(self.dataset_root.join(LOCAL_ROOT_NAME), "parquet");
+        if parquet_paths.is_empty() {
+            return true;
+        }
+
+        for path in parquet_paths {
             let split = path
                 .parent()
                 .and_then(|parent| parent.file_name())
@@ -101,6 +106,8 @@ impl Benchmark for MmluPro {
                 _ => {}
             }
         }
+
+        self.validation.is_empty() || self.test.is_empty()
     }
 
     fn check(&self) -> bool {
@@ -188,6 +195,8 @@ impl Benchmark for MmluPro {
             &expected_context,
             &MMLU_PRO_INFO.sampling_config,
             cot_mode,
-        ).await == answer_index
+        )
+        .await
+            == answer_index
     }
 }

@@ -76,21 +76,31 @@ impl Ceval {
 
 #[async_trait]
 impl Benchmark for Ceval {
-    fn load(&mut self) {
+    fn load(&mut self) -> bool {
         self.dev.clear();
         self.validation.clear();
         self.test.clear();
 
-        for path in collect_files_with_extension(
-            self.dataset_root.join(LOCAL_ROOT_NAME),
-            "parquet",
-        ) {
-            let split = path.parent().and_then(|parent| parent.file_name())
-                .and_then(|name| name.to_str()).unwrap().to_string();
-            let config_name = path.parent()
+        let parquet_paths =
+            collect_files_with_extension(self.dataset_root.join(LOCAL_ROOT_NAME), "parquet");
+        if parquet_paths.is_empty() {
+            return true;
+        }
+
+        for path in parquet_paths {
+            let split = path
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .and_then(|name| name.to_str())
+                .unwrap()
+                .to_string();
+            let config_name = path
+                .parent()
                 .and_then(|parent| parent.parent())
                 .and_then(|parent| parent.file_name())
-                .and_then(|name| name.to_str()).unwrap().to_string();
+                .and_then(|name| name.to_str())
+                .unwrap()
+                .to_string();
 
             let items = read_parquet_items(&path, |row: &Row| CevalItem {
                 id: get_i64(row, "id"),
@@ -111,6 +121,8 @@ impl Benchmark for Ceval {
                 _ => {}
             }
         }
+
+        self.dev.is_empty() || self.validation.is_empty() || self.test.is_empty()
     }
 
     fn check(&self) -> bool {
