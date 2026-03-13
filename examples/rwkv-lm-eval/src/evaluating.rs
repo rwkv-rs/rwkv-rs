@@ -60,6 +60,9 @@ pub async fn evaluating(eval_cfg_builder: FinalEvalConfigBuilder, datasets_path:
             .max()
             .unwrap_or_else(|| panic!("benchmark `{}` has empty pass_ks", benchmark_info.name.0));
         let judger_client = benchmark_info.with_llm_judger.then_some(&llm_judger_client);
+        let judger_model_name = benchmark_info
+            .with_llm_judger
+            .then_some(llm_judger_cfg.model.as_str());
 
         for target_model in &clients_with_cfg {
             println!(
@@ -82,6 +85,7 @@ pub async fn evaluating(eval_cfg_builder: FinalEvalConfigBuilder, datasets_path:
                                         .answer_and_judge(
                                             &target_model.api_cfg.model,
                                             &target_model.client,
+                                            judger_model_name,
                                             judger_client,
                                             cot_mode,
                                             n_shot,
@@ -124,7 +128,9 @@ fn collect_models() -> Vec<ApiConfig> {
         for model_data_version in &EVAL_CFG.get().unwrap().model_data_versions {
             for model_num_param in &EVAL_CFG.get().unwrap().model_num_params {
                 target_models.extend(
-                    EVAL_CFG.get().unwrap()
+                    EVAL_CFG
+                        .get()
+                        .unwrap()
                         .models
                         .iter()
                         .filter(|model| {

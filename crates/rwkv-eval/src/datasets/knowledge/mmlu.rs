@@ -104,6 +104,7 @@ impl Benchmark for Mmlu {
         let runtime = Runtime::new().unwrap();
         let downloaded_path = runtime.block_on(download_hf_files(
             &self.dataset_root,
+            "mmlu",
             "datasets/cais/mmlu",
             &[
                 "all/dev-00000-of-00001.parquet",
@@ -150,6 +151,7 @@ impl Benchmark for Mmlu {
         &self,
         model_name: &str,
         model_client: &Client<OpenAIConfig>,
+        _judger_model_name: Option<&str>,
         _judger_client: Option<&Client<OpenAIConfig>>,
         cot_mode: CoTMode,
         n_shot: u8,

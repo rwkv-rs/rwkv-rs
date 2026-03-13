@@ -1,3 +1,4 @@
+use std::env;
 use std::fs::{File, create_dir_all, remove_dir_all};
 use std::future::Future;
 use std::io::{Read, Write};
@@ -7,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use indicatif::{ProgressBar, ProgressStyle};
-use reqwest::Client;
+use reqwest::{Client, RequestBuilder, Url};
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use walkdir::WalkDir;
@@ -33,10 +34,11 @@ pub async fn download_hf_repo<P: AsRef<Path>>(
 
     // 规范化 repo（得到：url、repo_id(可能含 datasets/ 或 spaces/)、repo_name）
     let (url, repo_id, repo_name) = normalize_repo(repo);
+    let token = get_hf_token();
     let repo_dir = path.join(&repo_name);
 
     // 1) git clone（不拉 LFS）
-    clone_repo_with_retry(&url, &repo_dir).await;
+    clone_repo_with_retry(&url, &repo_dir, token.as_deref()).await;
 
     // 2) 扫描 LFS pointer
     let lfs = scan_lfs_pointers(&repo_dir);
@@ -58,7 +60,9 @@ pub async fn download_hf_repo<P: AsRef<Path>>(
     pb.set_message(format!("Downloading LFS files ({} files)", lfs.len()));
 
     // 4) 并发下载并覆盖 pointer 文件
-    let base = "https://hf-mirror.com".trim_end_matches('/').to_string();
+    let base = hf_base_url(token.as_deref())
+        .trim_end_matches('/')
+        .to_string();
     let client = Client::new();
     let sem = Arc::new(Semaphore::new(tasks));
 
@@ -75,16 +79,12 @@ pub async fn download_hf_repo<P: AsRef<Path>>(
         let base = base.clone();
         let repo_id = repo_id.clone();
         let revision = revision.to_string();
+        let token = token.clone();
 
         handles.push(tokio::spawn(async move {
             let _permit = permit;
-            let url = format!(
-                "{}/{}/resolve/{}/{}",
-                base,
-                repo_id,
-                revision,
-                item.rel_path.to_string_lossy()
-            );
+            let url =
+                build_hf_resolve_url(&base, &repo_id, &revision, &item.rel_path.to_string_lossy());
             let out_path = repo_dir.join(&item.rel_path);
 
             let body = retry(
@@ -92,9 +92,9 @@ pub async fn download_hf_repo<P: AsRef<Path>>(
                 || {
                     let client = client.clone();
                     let url = url.clone();
+                    let token = token.clone();
                     async move {
-                        let resp = client
-                            .get(&url)
+                        let resp = with_optional_auth(client.get(&url), token.as_deref())
                             .send()
                             .await
                             .map_err(|e| format!("请求发送失败: {}", e))?;
@@ -237,6 +237,7 @@ pub async fn download_url_files<P: AsRef<Path>>(
 
 pub async fn download_hf_files<P: AsRef<Path>>(
     path: P,
+    root_name: &str,
     repo: &str,
     files: &[&str],
     tasks: usize,
@@ -250,15 +251,15 @@ pub async fn download_hf_files<P: AsRef<Path>>(
         panic!("创建目标目录失败: {}. error: {}", path.display(), e);
     });
 
-    let (_, repo_id, repo_name) = normalize_repo(repo);
-    let repo_dir = path.join(&repo_name);
-    if repo_dir.exists() {
-        remove_dir_all(&repo_dir).unwrap_or_else(|e| {
-            panic!("删除已有仓库目录失败: {}. error: {}", repo_dir.display(), e);
+    let (_, repo_id, _) = normalize_repo(repo);
+    let root_dir = path.join(root_name);
+    if root_dir.exists() {
+        remove_dir_all(&root_dir).unwrap_or_else(|e| {
+            panic!("删除已有仓库目录失败: {}. error: {}", root_dir.display(), e);
         });
     }
-    create_dir_all(&repo_dir).unwrap_or_else(|e| {
-        panic!("创建仓库目录失败: {}. error: {}", repo_dir.display(), e);
+    create_dir_all(&root_dir).unwrap_or_else(|e| {
+        panic!("创建仓库目录失败: {}. error: {}", root_dir.display(), e);
     });
 
     let pb = ProgressBar::new(files.len() as u64);
@@ -272,7 +273,10 @@ pub async fn download_hf_files<P: AsRef<Path>>(
         files.len()
     ));
 
-    let base = "https://hf-mirror.com".trim_end_matches('/').to_string();
+    let token = get_hf_token();
+    let base = hf_base_url(token.as_deref())
+        .trim_end_matches('/')
+        .to_string();
     let client = Client::new();
     let sem = Arc::new(Semaphore::new(tasks));
 
@@ -285,23 +289,24 @@ pub async fn download_hf_files<P: AsRef<Path>>(
             .unwrap_or_else(|e| panic!("获取下载并发许可失败: {}", e));
         let client = client.clone();
         let pb = pb.clone();
-        let repo_dir = repo_dir.clone();
+        let root_dir = root_dir.clone();
         let base = base.clone();
         let repo_id = repo_id.clone();
         let revision = revision.to_string();
         let rel_path = (*rel_path).to_string();
+        let token = token.clone();
 
         handles.push(tokio::spawn(async move {
             let _permit = permit;
-            let url = format!("{}/{}/resolve/{}/{}", base, repo_id, revision, rel_path);
-            let out_path = repo_dir.join(&rel_path);
+            let url = build_hf_resolve_url(&base, &repo_id, &revision, &rel_path);
+            let out_path = root_dir.join(&rel_path);
 
             let body = retry(&format!("下载文件 {}", rel_path), || {
                 let client = client.clone();
                 let url = url.clone();
+                let token = token.clone();
                 async move {
-                    let resp = client
-                        .get(&url)
+                    let resp = with_optional_auth(client.get(&url), token.as_deref())
                         .send()
                         .await
                         .map_err(|e| format!("请求发送失败: {}", e))?;
@@ -341,13 +346,14 @@ pub async fn download_hf_files<P: AsRef<Path>>(
     }
 
     pb.finish_with_message("Done");
-    repo_dir
+    root_dir
 }
 
-async fn clone_repo_with_retry(url: &str, repo_dir: &Path) {
+async fn clone_repo_with_retry(url: &str, repo_dir: &Path, token: Option<&str>) {
     retry("git clone", || {
         let url = url.to_string();
         let repo_dir = repo_dir.to_path_buf();
+        let token = token.map(ToString::to_string);
         async move {
             if repo_dir.exists() {
                 remove_dir_all(&repo_dir).unwrap_or_else(|e| {
@@ -355,7 +361,13 @@ async fn clone_repo_with_retry(url: &str, repo_dir: &Path) {
                 });
             }
 
-            let status = Command::new("git")
+            let mut command = Command::new("git");
+            if let Some(token) = token.as_deref() {
+                command
+                    .arg("-c")
+                    .arg(format!("http.extraHeader=Authorization: Bearer {token}"));
+            }
+            let status = command
                 .arg("clone")
                 .arg("--depth")
                 .arg("1")
@@ -406,6 +418,53 @@ where
         "网络操作失败（已重试 5 次）: {}. 最后一次错误: {}",
         operation_name, last_error
     );
+}
+
+fn get_hf_token() -> Option<String> {
+    ["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"]
+        .into_iter()
+        .find_map(|key| {
+            env::var(key).ok().and_then(|value| {
+                let value = value.trim().to_string();
+                (!value.is_empty()).then_some(value)
+            })
+        })
+}
+
+fn hf_base_url(token: Option<&str>) -> &'static str {
+    if token.is_some() {
+        "https://huggingface.co"
+    } else {
+        "https://hf-mirror.com"
+    }
+}
+
+fn with_optional_auth(request: RequestBuilder, token: Option<&str>) -> RequestBuilder {
+    if let Some(token) = token {
+        request.bearer_auth(token)
+    } else {
+        request
+    }
+}
+
+fn build_hf_resolve_url(base: &str, repo_id: &str, revision: &str, rel_path: &str) -> String {
+    let mut url =
+        Url::parse(base).unwrap_or_else(|e| panic!("解析 HF base URL 失败: {base}. error: {e}"));
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .unwrap_or_else(|_| panic!("HF base URL 不能追加路径: {base}"));
+
+        for segment in repo_id.split('/').filter(|segment| !segment.is_empty()) {
+            segments.push(segment);
+        }
+        segments.push("resolve");
+        segments.push(revision);
+        for segment in rel_path.split('/').filter(|segment| !segment.is_empty()) {
+            segments.push(segment);
+        }
+    }
+    url.to_string()
 }
 
 #[derive(Debug, Clone)]

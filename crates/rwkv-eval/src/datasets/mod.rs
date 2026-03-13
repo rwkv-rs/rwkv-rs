@@ -71,6 +71,7 @@ pub trait Benchmark: Send + Sync {
         &self,
         model_name: &str,
         model_client: &Client<OpenAIConfig>,
+        judger_model_name: Option<&str>,
         judger_client: Option<&Client<OpenAIConfig>>,
         cot_mode: CoTMode,
         n_shot: u8,

@@ -39,15 +39,16 @@ pub fn get_optional_string(row: &Row, name: &str) -> Option<String> {
 
 pub fn get_string_list(row: &Row, name: &str) -> Vec<String> {
     match get_field(row, name) {
-        Field::ListInternal(list) => list
-            .elements()
-            .iter()
-            .map(|field| match field {
-                Field::Str(value) => value.clone(),
-                _ => panic!("`{name}` should be list<string>"),
-            })
-            .collect(),
+        Field::ListInternal(list) => get_string_list_from_fields(list.elements(), name),
         _ => panic!("`{name}` should be list<string>"),
+    }
+}
+
+pub fn get_optional_string_list(row: &Row, name: &str) -> Option<Vec<String>> {
+    match get_field(row, name) {
+        Field::Null => None,
+        Field::ListInternal(list) => Some(get_string_list_from_fields(list.elements(), name)),
+        _ => panic!("`{name}` should be list<string> or null"),
     }
 }
 
@@ -84,4 +85,14 @@ fn get_field<'a>(row: &'a Row, name: &str) -> &'a Field {
         .find(|(column_name, _)| column_name.as_str() == name)
         .map(|(_, field)| field)
         .unwrap()
+}
+
+fn get_string_list_from_fields(fields: &[Field], name: &str) -> Vec<String> {
+    fields
+        .iter()
+        .map(|field| match field {
+            Field::Str(value) => value.clone(),
+            _ => panic!("`{name}` should be list<string>"),
+        })
+        .collect()
 }

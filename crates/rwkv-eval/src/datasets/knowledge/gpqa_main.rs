@@ -138,6 +138,7 @@ impl Benchmark for GpqaMain {
         &self,
         model_name: &str,
         model_client: &Client<OpenAIConfig>,
+        _judger_model_name: Option<&str>,
         _judger_client: Option<&Client<OpenAIConfig>>,
         cot_mode: CoTMode,
         n_shot: u8,
