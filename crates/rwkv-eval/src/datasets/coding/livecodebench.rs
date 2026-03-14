@@ -1,8 +1,9 @@
-use crate::datasets::coding::extract_code;
+use crate::datasets::coding::{extract_code, get_prompt_for_code_completion};
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    apply_user_assistant_template, get_prompt_for_cot,
 };
 use crate::evaluators::coding::{get_completion, run_python_verdict_script};
 use async_openai::Client;
@@ -68,33 +69,219 @@ impl LiveCodeBench {
     }
 }
 
-fn get_prompt(question: &str, starter_code: Option<&str>) -> String {
-    let system_message = concat!(
-        "You are an expert Python programmer. You will be given a question ",
-        "(problem specification) and will generate a correct Python program ",
-        "that matches the specification and passes all tests."
-    );
-    let with_starter = "You will use the following starter code to write the solution to the problem and enclose your code within delimiters.";
-    let without_starter = concat!(
-        "Read the inputs from stdin solve the problem and write the answer to stdout ",
-        "(do not directly test on the sample inputs). Enclose your code within delimiters as follows. ",
-        "Ensure that when the python program runs, it reads the inputs, runs the algorithm and writes output to STDOUT."
-    );
+#[async_trait]
+impl Benchmark for LiveCodeBench {
+    fn load(&mut self) -> bool {
+        self.test.clear();
 
-    let mut body = format!("### Question:\n{}\n\n", question.trim());
-    if let Some(starter_code) = starter_code.filter(|code| !code.trim().is_empty()) {
-        body.push_str(&format!("### Format: {with_starter}\n"));
-        body.push_str(&format!("```python\n{starter_code}\n```\n\n"));
-    } else {
-        body.push_str(&format!("### Format: {without_starter}\n"));
-        body.push_str("```python\n# YOUR CODE HERE\n```\n\n");
+        let root = self.dataset_root.join("livecodebench");
+        let file_names = [
+            "test.jsonl",
+            "test2.jsonl",
+            "test3.jsonl",
+            "test4.jsonl",
+            "test5.jsonl",
+            "test6.jsonl",
+        ];
+        if file_names
+            .iter()
+            .any(|file_name| !root.join(file_name).is_file())
+        {
+            return true;
+        }
+
+        for file_name in file_names {
+            self.test.extend(
+                read_jsonl_items::<RawLiveCodeBenchItem, _>(root.join(file_name))
+                    .into_iter()
+                    .map(|item| {
+                        let prompt = if item.question_content.trim().is_empty() {
+                            item.question_title
+                        } else {
+                            item.question_content
+                        };
+
+                        LiveCodeBenchItem {
+                            task_id: item.question_id,
+                            prompt,
+                            starter_code: item.starter_code,
+                            public_test_cases: item.public_test_cases,
+                            private_test_cases: item.private_test_cases,
+                            metadata: item.metadata,
+                        }
+                    }),
+            );
+        }
+
+        self.test.is_empty()
     }
-    body.push_str("### Answer: (use the provided format with backticks)\n\n");
 
-    format!("User: {system_message}\n{body}Assistant: <think")
+    fn check(&self) -> bool {
+        self.test.is_empty()
+    }
+
+    fn download(&self) {
+        let runtime = Runtime::new().unwrap();
+        let file_names = [
+            "test.jsonl",
+            "test2.jsonl",
+            "test3.jsonl",
+            "test4.jsonl",
+            "test5.jsonl",
+            "test6.jsonl",
+        ];
+        let files = file_names
+            .iter()
+            .map(|file_name| UrlDownloadFile {
+                relative_path: PathBuf::from(file_name),
+                url: format!(
+                    "https://huggingface.co/datasets/livecodebench/code_generation_lite/resolve/main/{file_name}"
+                ),
+            })
+            .collect::<Vec<_>>();
+        let downloaded_path = runtime.block_on(download_url_files(
+            &self.dataset_root,
+            "livecodebench",
+            &files,
+            1,
+        ));
+        println!("livecodebench dataset: {}", downloaded_path.display());
+    }
+
+    fn len(&self) -> usize {
+        self.test.len()
+    }
+
+    fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
+        if cot_mode != CoTMode::CoT {
+            panic!("livecodebench only supports CoT, got {cot_mode:?}");
+        }
+
+        let item = &self.test[index];
+        
+        let prompt = &item.prompt.trim();
+        let starter_code = &item.starter_code.trim_end();
+        let has_starter_code = !starter_code.trim().is_empty();
+        let user_part = if has_starter_code {
+            format!(
+                concat!(
+                    "You are an expert Python programmer.\n",
+                    "Solve the following programming problem and output only the final code.\n",
+                    "Problem:\n",
+                    "{prompt}\n",
+                    "Use the following starter code and complete it into a full solution:\n",
+                    "```python\n",
+                    "{starter_code}\n",
+                    "```"
+                ),
+                prompt = prompt,
+                starter_code = starter_code,
+            )
+        } else {
+            format!(
+                concat!(
+                    "You are an expert Python programmer.\n",
+                    "Solve the following programming problem and output only the final code.\n",
+                    "Problem:\n",
+                    "{prompt}\n",
+                    "Read the inputs from stdin, solve the problem, and write the answer to stdout.\n",
+                    "Do not hardcode sample inputs or outputs."
+                ),
+                prompt = prompt,
+            )
+        };
+        let code_prefix = has_starter_code
+            .then(|| format!("{starter_code}\n"))
+            .unwrap_or_default();
+        let assistant_part = match cot_mode {
+            CoTMode::CoT => format!(
+                concat!(
+                    "<think><|completions_of_cot|></think>\n",
+                    "```python\n",
+                    "{code_prefix}<|completions|>",
+                ),
+                code_prefix = code_prefix,
+            ),
+            CoTMode::NoCoT | CoTMode::FakeCoT => {
+                panic!("livecodebench only supports CoT, got {cot_mode:?}")
+            }
+        };
+    
+        apply_user_assistant_template(user_part, assistant_part)
+    }
+
+    fn get_ref_answer(&self, index: usize) -> String {
+        let item = &self.test[index];
+        serde_json::json!({
+            "public_test_cases": item.public_test_cases,
+            "private_test_cases": item.private_test_cases,
+            "metadata": item.metadata,
+        })
+        .to_string()
+    }
+
+    async fn answer_and_judge(
+        &self,
+        model_name: &str,
+        model_client: &Client<OpenAIConfig>,
+        _judger_model_name: Option<&str>,
+        _judger_client: Option<&Client<OpenAIConfig>>,
+        cot_mode: CoTMode,
+        n_shot: u8,
+        index: usize,
+    ) -> bool {
+        let item = &self.test[index];
+        let expected_context = self.get_expected_context(index, cot_mode, n_shot);
+        let prompt_for_cot = get_prompt_for_cot(&expected_context);
+        let cot_completion = get_completion(
+            model_client,
+            model_name,
+            &prompt_for_cot,
+            &LIVECODEBENCH_INFO.sampling_config,
+            vec!["</think>".to_string()],
+            8192,
+        )
+        .await;
+        let prompt_for_code =
+            get_prompt_for_code_completion(&expected_context, Some(&cot_completion));
+        let completion = get_completion(
+            model_client,
+            model_name,
+            &prompt_for_code,
+            &LIVECODEBENCH_INFO.sampling_config,
+            vec!["```".to_string()],
+            8192,
+        )
+        .await;
+        let completion = extract_code(&completion);
+        let completion = if item.starter_code.trim().is_empty() {
+            completion
+        } else if completion.is_empty() {
+            item.starter_code.trim_end().to_string()
+        } else {
+            format!("{}\n{}", item.starter_code.trim_end(), completion)
+        };
+        let verdict = run_python_verdict_script(&get_judge_script(
+            &completion,
+            &item.public_test_cases,
+            &item.private_test_cases,
+            &item.metadata,
+            6,
+        ))
+        .await
+        .unwrap_or_else(|err| {
+            panic!(
+                "livecodebench sandbox execution failed: {err}; task={}",
+                item.task_id
+            )
+        });
+
+        verdict.passed
+    }
 }
 
-fn get_script(
+
+fn get_judge_script(
     completion: &str,
     public_test_cases: &str,
     private_test_cases: &str,
@@ -549,161 +736,4 @@ else:
         timeout_secs = timeout_secs,
         helpers = helpers,
     )
-}
-
-#[async_trait]
-impl Benchmark for LiveCodeBench {
-    fn load(&mut self) -> bool {
-        self.test.clear();
-
-        let root = self.dataset_root.join("livecodebench");
-        let file_names = [
-            "test.jsonl",
-            "test2.jsonl",
-            "test3.jsonl",
-            "test4.jsonl",
-            "test5.jsonl",
-            "test6.jsonl",
-        ];
-        if file_names
-            .iter()
-            .any(|file_name| !root.join(file_name).is_file())
-        {
-            return true;
-        }
-
-        for file_name in file_names {
-            self.test.extend(
-                read_jsonl_items::<RawLiveCodeBenchItem, _>(root.join(file_name))
-                    .into_iter()
-                    .map(|item| {
-                        let prompt = if item.question_content.trim().is_empty() {
-                            item.question_title
-                        } else {
-                            item.question_content
-                        };
-
-                        LiveCodeBenchItem {
-                            task_id: item.question_id,
-                            prompt,
-                            starter_code: item.starter_code,
-                            public_test_cases: item.public_test_cases,
-                            private_test_cases: item.private_test_cases,
-                            metadata: item.metadata,
-                        }
-                    }),
-            );
-        }
-
-        self.test.is_empty()
-    }
-
-    fn check(&self) -> bool {
-        self.test.is_empty()
-    }
-
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let file_names = [
-            "test.jsonl",
-            "test2.jsonl",
-            "test3.jsonl",
-            "test4.jsonl",
-            "test5.jsonl",
-            "test6.jsonl",
-        ];
-        let files = file_names
-            .iter()
-            .map(|file_name| UrlDownloadFile {
-                relative_path: PathBuf::from(file_name),
-                url: format!(
-                    "https://huggingface.co/datasets/livecodebench/code_generation_lite/resolve/main/{file_name}"
-                ),
-            })
-            .collect::<Vec<_>>();
-        let downloaded_path = runtime.block_on(download_url_files(
-            &self.dataset_root,
-            "livecodebench",
-            &files,
-            1,
-        ));
-        println!("livecodebench dataset: {}", downloaded_path.display());
-    }
-
-    fn len(&self) -> usize {
-        self.test.len()
-    }
-
-    fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
-        if cot_mode != CoTMode::CoT {
-            panic!("livecodebench only supports CoT, got {cot_mode:?}");
-        }
-
-        let item = &self.test[index];
-        get_prompt(
-            &item.prompt,
-            (!item.starter_code.trim().is_empty()).then_some(item.starter_code.as_str()),
-        )
-    }
-
-    fn get_ref_answer(&self, index: usize) -> String {
-        let item = &self.test[index];
-        serde_json::json!({
-            "public_test_cases": item.public_test_cases,
-            "private_test_cases": item.private_test_cases,
-            "metadata": item.metadata,
-        })
-        .to_string()
-    }
-
-    async fn answer_and_judge(
-        &self,
-        model_name: &str,
-        model_client: &Client<OpenAIConfig>,
-        _judger_model_name: Option<&str>,
-        _judger_client: Option<&Client<OpenAIConfig>>,
-        cot_mode: CoTMode,
-        n_shot: u8,
-        index: usize,
-    ) -> bool {
-        let item = &self.test[index];
-        let cot_prompt = self.get_expected_context(index, cot_mode, n_shot);
-        let cot_completion = get_completion(
-            model_client,
-            model_name,
-            &cot_prompt,
-            &LIVECODEBENCH_INFO.sampling_config,
-            vec!["</think>".to_string()],
-            8192,
-        )
-        .await;
-        let final_prompt =
-            format!("{cot_prompt}{cot_completion}\nTherefore, the correct code is ```python\n");
-        let completion = get_completion(
-            model_client,
-            model_name,
-            &final_prompt,
-            &LIVECODEBENCH_INFO.sampling_config,
-            vec!["```".to_string()],
-            8192,
-        )
-        .await;
-        let completion = extract_code(&completion);
-        let verdict = run_python_verdict_script(&get_script(
-            &completion,
-            &item.public_test_cases,
-            &item.private_test_cases,
-            &item.metadata,
-            6,
-        ))
-        .await
-        .unwrap_or_else(|err| {
-            panic!(
-                "livecodebench sandbox execution failed: {err}; task={}",
-                item.task_id
-            )
-        });
-
-        verdict.passed
-    }
 }

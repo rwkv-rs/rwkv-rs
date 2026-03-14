@@ -9,7 +9,8 @@ use tokio::runtime::Runtime;
 use crate::datasets::knowledge::{
     Example, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
 };
-use crate::datasets::utils::hf::downloader::download_hf_files;
+use crate::datasets::utils::collect_files_with_extension;
+use crate::datasets::utils::hf::download_hf_parquet_splits;
 use crate::datasets::utils::hf::viewer::get_split_row_count;
 use crate::datasets::utils::parquet::{get_string, get_string_list, get_u8, read_parquet_items};
 use crate::datasets::{
@@ -66,13 +67,11 @@ impl Benchmark for Mmlu {
         self.dev.clear();
         self.test.clear();
 
-        let dev_path = self
-            .dataset_root
-            .join("mmlu/all/dev-00000-of-00001.parquet");
-        let test_path = self
-            .dataset_root
-            .join("mmlu/all/test-00000-of-00001.parquet");
-        if !dev_path.is_file() || !test_path.is_file() {
+        let dev_paths =
+            collect_files_with_extension(self.dataset_root.join("mmlu/all/dev"), "parquet");
+        let test_paths =
+            collect_files_with_extension(self.dataset_root.join("mmlu/all/test"), "parquet");
+        if dev_paths.is_empty() || test_paths.is_empty() {
             return true;
         }
 
@@ -82,8 +81,12 @@ impl Benchmark for Mmlu {
             choices: get_string_list(row, "choices"),
             answer: get_u8(row, "answer"),
         };
-        self.dev = read_parquet_items(dev_path, parse_item);
-        self.test = read_parquet_items(test_path, parse_item);
+        for path in dev_paths {
+            self.dev.extend(read_parquet_items(path, parse_item));
+        }
+        for path in test_paths {
+            self.test.extend(read_parquet_items(path, parse_item));
+        }
 
         self.dev.is_empty() || self.test.is_empty()
     }
@@ -102,16 +105,13 @@ impl Benchmark for Mmlu {
 
     fn download(&self) {
         let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_hf_files(
+        let downloaded_path = runtime.block_on(download_hf_parquet_splits(
             &self.dataset_root,
             "mmlu",
-            "datasets/cais/mmlu",
-            &[
-                "all/dev-00000-of-00001.parquet",
-                "all/test-00000-of-00001.parquet",
-            ],
+            "cais/mmlu",
+            "all",
+            &["dev", "test"],
             8,
-            "main",
         ));
         println!("mmlu dataset: {}", downloaded_path.display());
     }

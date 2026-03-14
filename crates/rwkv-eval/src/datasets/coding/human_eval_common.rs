@@ -1,31 +1,39 @@
-use crate::datasets::CoTMode;
+use crate::datasets::{CoTMode, apply_user_assistant_template};
 
-pub(crate) fn get_prompt(prompt: &str, cot_mode: CoTMode, need_code_prefix: bool) -> String {
-    let prompt = trim_empty_lines(prompt);
-    let assistant_part = match cot_mode {
-        CoTMode::NoCoT if need_code_prefix => "<think>\n</think>\n```python".to_string(),
-        CoTMode::NoCoT => prompt.clone(),
-        CoTMode::FakeCoT if need_code_prefix => "<think>\n</think>\n```python".to_string(),
-        CoTMode::FakeCoT => format!("<think>\n</think>\n{prompt}"),
-        CoTMode::CoT if need_code_prefix => {
-            "<think><|completions_of_cot|></think>\n```python".to_string()
-        }
-        CoTMode::CoT => format!("<think><|completions_of_cot|></think>\n{prompt}"),
-    };
-
-    format!(
+pub fn get_expected_context(
+    prompt: &str,
+    code: Option<&str>,
+    cot_mode: CoTMode,
+) -> String {
+    let user_part = format!(
         concat!(
-            "User: You are a top-level code master. Complete the following code ",
-            "without any additional text or explanation:\n",
-            "{prompt}\n\n",
-            "Assistant: {assistant_part}"
+            "You are a top-level code master.\n",
+            "{prompt}\n",
+            "Complete the code without any additional text or explanation:\n",
         ),
         prompt = prompt,
-        assistant_part = assistant_part,
-    )
+    );
+    let assistant_code_prefix = code.unwrap_or_default();
+
+    let assistant_part = match cot_mode {
+        CoTMode::NoCoT => format!("```python\n{assistant_code_prefix}<|completions|>"),
+        CoTMode::FakeCoT => {
+            format!("<think>\n</think>\n```python\n{assistant_code_prefix}<|completions|>")
+        }
+        CoTMode::CoT => format!(
+            concat!(
+                "<think><|completions_of_cot|></think>\n",
+                "```python\n{assistant_code_prefix}<|completions|>",
+            ),
+            assistant_code_prefix = assistant_code_prefix,
+        ),
+    }
+    .to_string();
+
+    apply_user_assistant_template(user_part, assistant_part)
 }
 
-pub(crate) fn get_check_script(
+pub fn get_judge_script(
     program: &str,
     test: &str,
     entry_point: &str,
@@ -103,14 +111,4 @@ else:
         timeout_secs = timeout_secs,
         helpers = helpers,
     )
-}
-
-fn trim_empty_lines(prompt: &str) -> String {
-    prompt
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string()
 }

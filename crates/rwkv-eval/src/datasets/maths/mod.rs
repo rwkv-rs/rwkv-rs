@@ -41,7 +41,6 @@ pub fn get_expect_context(
     subject: &str,
     question: &str,
     cot_mode: CoTMode,
-    _examples: &[(String, String)],
 ) -> String {
     if cot_mode != CoTMode::CoT {
         panic!("maths only supports CoT mode, got {cot_mode:?}");

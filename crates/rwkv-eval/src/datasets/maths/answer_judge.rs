@@ -1,7 +1,8 @@
 use crate::datasets::maths::{
     get_expect_context, get_final_answer_with_cot_mode, judge_with_retry,
 };
-use crate::datasets::utils::hf::downloader::download_hf_files;
+use crate::datasets::utils::collect_files_with_extension;
+use crate::datasets::utils::hf::download_hf_parquet_splits;
 use crate::datasets::utils::parquet::{get_string, read_parquet_items};
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
@@ -103,10 +104,11 @@ impl Benchmark for AnswerJudge {
     fn load(&mut self) -> bool {
         self.test.clear();
 
-        let path = self
-            .dataset_root
-            .join("answer_judge/default/train/0000.parquet");
-        if !path.is_file() {
+        let parquet_paths = collect_files_with_extension(
+            self.dataset_root.join("answer_judge/default/train"),
+            "parquet",
+        );
+        if parquet_paths.is_empty() {
             return true;
         }
 
@@ -140,7 +142,9 @@ impl Benchmark for AnswerJudge {
                 subject: "judgement".to_string(),
             }
         };
-        self.test = read_parquet_items(path, parse_item);
+        for path in parquet_paths {
+            self.test.extend(read_parquet_items(path, parse_item));
+        }
 
         self.test.is_empty()
     }
@@ -151,13 +155,13 @@ impl Benchmark for AnswerJudge {
 
     fn download(&self) {
         let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_hf_files(
+        let downloaded_path = runtime.block_on(download_hf_parquet_splits(
             &self.dataset_root,
             "answer_judge",
-            "datasets/nvidia/judges-verdict",
-            &["default/train/0000.parquet"],
-            1,
-            "refs/convert/parquet",
+            "nvidia/judges-verdict",
+            "default",
+            &["train"],
+            2,
         ));
         println!("answer_judge dataset: {}", downloaded_path.display());
     }
@@ -169,7 +173,7 @@ impl Benchmark for AnswerJudge {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode, &[])
+        get_expect_context(&item.subject, &item.question, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {

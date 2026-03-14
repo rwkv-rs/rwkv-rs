@@ -1,11 +1,11 @@
-use super::mbpp_common::get_prompt;
-use crate::datasets::coding::extract_code;
+use super::mbpp_common::get_expected_context;
+use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_gzip_jsonl_items;
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
 };
-use crate::evaluators::coding::{get_completion, run_python_verdict_script};
+use crate::evaluators::coding::run_python_verdict_script;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
@@ -20,7 +20,7 @@ static MBPP_PLUS_INFO: BenchmarkInfo = BenchmarkInfo {
     name: BenchmarkName("mbpp_plus"),
     field: Field::Coding,
     display_name: "MBPP+",
-    cot_mode: &[CoTMode::NoCoT],
+    cot_mode: &[CoTMode::NoCoT, CoTMode::FakeCoT, CoTMode::CoT],
     sampling_config: SamplingConfig {
         temperature: 0.3,
         top_k: 500,
@@ -71,7 +71,113 @@ impl MbppPlus {
     }
 }
 
-fn get_script(
+#[async_trait]
+impl Benchmark for MbppPlus {
+    fn load(&mut self) -> bool {
+        self.test.clear();
+
+        let path = self
+            .dataset_root
+            .join("mbpp_plus")
+            .join("MbppPlus-v0.2.0.jsonl.gz");
+        if !path.is_file() {
+            return true;
+        }
+
+        self.test = read_gzip_jsonl_items::<RawMbppPlusItem, _>(path)
+            .into_iter()
+            .map(|item| MbppPlusItem {
+                task_id: item.task_id,
+                prompt: item.prompt,
+                entry_point: item.entry_point,
+                canonical_solution: item.canonical_solution,
+                base_input: serde_json::to_string(&item.base_input).unwrap(),
+                plus_input: serde_json::to_string(&item.plus_input).unwrap(),
+                atol: item.atol.unwrap_or(0.0),
+            })
+            .collect();
+
+        self.test.is_empty()
+    }
+
+    fn check(&self) -> bool {
+        self.test.is_empty()
+    }
+
+    fn download(&self) {
+        let runtime = Runtime::new().unwrap();
+        let downloaded_path = runtime.block_on(download_url_files(
+            &self.dataset_root,
+            "mbpp_plus",
+            &[UrlDownloadFile {
+                relative_path: PathBuf::from("MbppPlus-v0.2.0.jsonl.gz"),
+                url: "https://github.com/evalplus/mbppplus_release/releases/download/v0.2.0/MbppPlus.jsonl.gz"
+                    .to_string(),
+            }],
+            1,
+        ));
+        println!("mbpp_plus dataset: {}", downloaded_path.display());
+    }
+
+    fn len(&self) -> usize {
+        self.test.len()
+    }
+
+    fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
+        let item = &self.test[index];
+        get_expected_context(&item.prompt, &item.canonical_solution, cot_mode)
+    }
+
+    fn get_ref_answer(&self, index: usize) -> String {
+        self.test[index].canonical_solution.clone()
+    }
+
+    async fn answer_and_judge(
+        &self,
+        model_name: &str,
+        model_client: &Client<OpenAIConfig>,
+        _judger_model_name: Option<&str>,
+        _judger_client: Option<&Client<OpenAIConfig>>,
+        cot_mode: CoTMode,
+        n_shot: u8,
+        index: usize,
+    ) -> bool {
+        let item = &self.test[index];
+        let expected_context = self.get_expected_context(index, cot_mode, n_shot);
+        let completion = get_code_completion_with_cot_mode(
+            model_client,
+            model_name,
+            &expected_context,
+            &MBPP_PLUS_INFO.sampling_config,
+            cot_mode,
+            1024,
+        )
+        .await;
+        let verdict = run_python_verdict_script(&get_judge_script(
+            &item.task_id,
+            &extract_code(&completion),
+            &item.entry_point,
+            &item.canonical_solution,
+            &item.base_input,
+            &item.plus_input,
+            item.atol,
+            3,
+        ))
+        .await
+        .unwrap_or_else(|err| {
+            panic!(
+                "mbpp_plus sandbox execution failed: {err}; task={}",
+                item.task_id
+            )
+        });
+
+        verdict.passed
+    }
+}
+
+
+
+fn get_judge_script(
     task_id: &str,
     completion: &str,
     entry_point: &str,
@@ -247,112 +353,4 @@ except BaseException as exc:
         timeout_secs = timeout_secs,
         helpers = helpers,
     )
-}
-
-#[async_trait]
-impl Benchmark for MbppPlus {
-    fn load(&mut self) -> bool {
-        self.test.clear();
-
-        let path = self
-            .dataset_root
-            .join("mbpp_plus")
-            .join("MbppPlus-v0.2.0.jsonl.gz");
-        if !path.is_file() {
-            return true;
-        }
-
-        self.test = read_gzip_jsonl_items::<RawMbppPlusItem, _>(path)
-            .into_iter()
-            .map(|item| MbppPlusItem {
-                task_id: item.task_id,
-                prompt: item.prompt,
-                entry_point: item.entry_point,
-                canonical_solution: item.canonical_solution,
-                base_input: serde_json::to_string(&item.base_input).unwrap(),
-                plus_input: serde_json::to_string(&item.plus_input).unwrap(),
-                atol: item.atol.unwrap_or(0.0),
-            })
-            .collect();
-
-        self.test.is_empty()
-    }
-
-    fn check(&self) -> bool {
-        self.test.is_empty()
-    }
-
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_url_files(
-            &self.dataset_root,
-            "mbpp_plus",
-            &[UrlDownloadFile {
-                relative_path: PathBuf::from("MbppPlus-v0.2.0.jsonl.gz"),
-                url: "https://github.com/evalplus/mbppplus_release/releases/download/v0.2.0/MbppPlus.jsonl.gz"
-                    .to_string(),
-            }],
-            1,
-        ));
-        println!("mbpp_plus dataset: {}", downloaded_path.display());
-    }
-
-    fn len(&self) -> usize {
-        self.test.len()
-    }
-
-    fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
-        if cot_mode != CoTMode::NoCoT {
-            panic!("mbpp_plus only supports NoCoT, got {cot_mode:?}");
-        }
-
-        let item = &self.test[index];
-        get_prompt(&item.prompt, &item.canonical_solution, cot_mode, true)
-    }
-
-    fn get_ref_answer(&self, index: usize) -> String {
-        self.test[index].canonical_solution.clone()
-    }
-
-    async fn answer_and_judge(
-        &self,
-        model_name: &str,
-        model_client: &Client<OpenAIConfig>,
-        _judger_model_name: Option<&str>,
-        _judger_client: Option<&Client<OpenAIConfig>>,
-        cot_mode: CoTMode,
-        n_shot: u8,
-        index: usize,
-    ) -> bool {
-        let item = &self.test[index];
-        let expected_context = self.get_expected_context(index, cot_mode, n_shot);
-        let completion = get_completion(
-            model_client,
-            model_name,
-            &expected_context,
-            &MBPP_PLUS_INFO.sampling_config,
-            vec!["```".to_string()],
-            1024,
-        )
-        .await;
-        let verdict = run_python_verdict_script(&get_script(
-            &item.task_id,
-            &extract_code(&completion),
-            &item.entry_point,
-            &item.canonical_solution,
-            &item.base_input,
-            &item.plus_input,
-            item.atol,
-            3,
-        ))
-        .await
-        .unwrap_or_else(|err| {
-            panic!(
-                "mbpp_plus sandbox execution failed: {err}; task={}",
-                item.task_id
-            )
-        });
-
-        verdict.passed
-    }
 }

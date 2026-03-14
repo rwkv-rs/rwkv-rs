@@ -1,12 +1,13 @@
-use super::human_eval_common::{get_check_script, get_prompt};
-use crate::datasets::coding::extract_code;
-use crate::datasets::utils::hf::downloader::download_hf_files;
+use super::human_eval_common::{get_judge_script, get_expected_context};
+use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
+use crate::datasets::utils::collect_files_with_extension;
+use crate::datasets::utils::hf::download_hf_parquet_splits;
 use crate::datasets::utils::hf::viewer::get_split_row_count;
 use crate::datasets::utils::parquet::{get_string, read_parquet_items};
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
 };
-use crate::evaluators::coding::{get_completion, run_python_verdict_script};
+use crate::evaluators::coding::run_python_verdict_script;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
@@ -63,11 +64,11 @@ impl Benchmark for HumanEvalFix {
     fn load(&mut self) -> bool {
         self.test.clear();
 
-        let path = self
-            .dataset_root
-            .join("human_eval_fix")
-            .join("python/test/0000.parquet");
-        if !path.is_file() {
+        let parquet_paths = collect_files_with_extension(
+            self.dataset_root.join("human_eval_fix/python/test"),
+            "parquet",
+        );
+        if parquet_paths.is_empty() {
             return true;
         }
 
@@ -99,7 +100,9 @@ impl Benchmark for HumanEvalFix {
                 test: get_string(row, "test"),
             }
         };
-        self.test = read_parquet_items(path, parse_item);
+        for path in parquet_paths {
+            self.test.extend(read_parquet_items(path, parse_item));
+        }
 
         self.test.is_empty()
     }
@@ -116,13 +119,13 @@ impl Benchmark for HumanEvalFix {
 
     fn download(&self) {
         let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_hf_files(
+        let downloaded_path = runtime.block_on(download_hf_parquet_splits(
             &self.dataset_root,
             "human_eval_fix",
-            "datasets/bigcode/humanevalpack",
-            &["python/test/0000.parquet"],
-            1,
-            "refs/convert/parquet",
+            "bigcode/humanevalpack",
+            "python",
+            &["test"],
+            2,
         ));
         println!("human_eval_fix dataset: {}", downloaded_path.display());
     }
@@ -136,7 +139,7 @@ impl Benchmark for HumanEvalFix {
             panic!("human_eval_fix only supports NoCoT, got {cot_mode:?}");
         }
 
-        get_prompt(&self.test[index].prompt, cot_mode, true)
+        get_expected_context(&self.test[index].prompt, None, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
@@ -155,17 +158,17 @@ impl Benchmark for HumanEvalFix {
     ) -> bool {
         let item = &self.test[index];
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
-        let completion = get_completion(
+        let completion = get_code_completion_with_cot_mode(
             model_client,
             model_name,
             &expected_context,
             &HUMAN_EVAL_FIX_INFO.sampling_config,
-            vec!["```".to_string()],
+            cot_mode,
             1024,
         )
         .await;
         let completion = extract_code(&completion);
-        let verdict = run_python_verdict_script(&get_check_script(
+        let verdict = run_python_verdict_script(&get_judge_script(
             &completion,
             &item.test,
             &item.entry_point,

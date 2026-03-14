@@ -1,6 +1,7 @@
 use crate::datasets::maths::{
     get_expect_context, get_final_answer_with_cot_mode, judge_with_retry,
 };
+use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::hf::downloader::download_hf_files;
 use crate::datasets::utils::parquet::{get_optional_string, get_string, read_parquet_items};
 use crate::datasets::{
@@ -60,10 +61,9 @@ impl Benchmark for Hle {
     fn load(&mut self) -> bool {
         self.test.clear();
 
-        let path = self
-            .dataset_root
-            .join("hle/data/test-00000-of-00001.parquet");
-        if !path.is_file() {
+        let parquet_paths =
+            collect_files_with_extension(self.dataset_root.join("hle/data"), "parquet");
+        if parquet_paths.is_empty() {
             return true;
         }
 
@@ -78,10 +78,10 @@ impl Benchmark for Hle {
                         .unwrap_or_else(|| "math".to_string()),
                 })
         };
-        self.test = read_parquet_items(path, parse_item)
-            .into_iter()
-            .flatten()
-            .collect();
+        for path in parquet_paths {
+            self.test
+                .extend(read_parquet_items(path, parse_item).into_iter().flatten());
+        }
 
         self.test.is_empty()
     }
@@ -110,7 +110,7 @@ impl Benchmark for Hle {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode, &[])
+        get_expect_context(&item.subject, &item.question, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {

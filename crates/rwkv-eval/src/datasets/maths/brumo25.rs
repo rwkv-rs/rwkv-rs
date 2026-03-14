@@ -1,7 +1,8 @@
 use crate::datasets::maths::{
     get_expect_context, get_final_answer_with_cot_mode, judge_with_retry,
 };
-use crate::datasets::utils::hf::downloader::download_hf_files;
+use crate::datasets::utils::collect_files_with_extension;
+use crate::datasets::utils::hf::download_hf_parquet_splits;
 use crate::datasets::utils::parquet::{get_optional_string_list, get_string, read_parquet_items};
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
@@ -60,8 +61,11 @@ impl Benchmark for Brumo25 {
     fn load(&mut self) -> bool {
         self.test.clear();
 
-        let path = self.dataset_root.join("brumo25/default/train/0000.parquet");
-        if !path.is_file() {
+        let parquet_paths = collect_files_with_extension(
+            self.dataset_root.join("brumo25/default/train"),
+            "parquet",
+        );
+        if parquet_paths.is_empty() {
             return true;
         }
 
@@ -72,7 +76,9 @@ impl Benchmark for Brumo25 {
                 .and_then(|values| values.into_iter().next())
                 .unwrap_or_else(|| "math".to_string()),
         };
-        self.test = read_parquet_items(path, parse_item);
+        for path in parquet_paths {
+            self.test.extend(read_parquet_items(path, parse_item));
+        }
 
         self.test.is_empty()
     }
@@ -83,13 +89,13 @@ impl Benchmark for Brumo25 {
 
     fn download(&self) {
         let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_hf_files(
+        let downloaded_path = runtime.block_on(download_hf_parquet_splits(
             &self.dataset_root,
             "brumo25",
-            "datasets/MathArena/brumo_2025",
-            &["default/train/0000.parquet"],
-            1,
-            "refs/convert/parquet",
+            "MathArena/brumo_2025",
+            "default",
+            &["train"],
+            2,
         ));
         println!("brumo25 dataset: {}", downloaded_path.display());
     }
@@ -101,7 +107,7 @@ impl Benchmark for Brumo25 {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode, &[])
+        get_expect_context(&item.subject, &item.question, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {

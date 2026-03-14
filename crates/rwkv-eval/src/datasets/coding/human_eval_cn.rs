@@ -1,10 +1,11 @@
-use super::human_eval_common::{get_check_script, get_prompt};
+use super::human_eval_common::{get_judge_script, get_expected_context};
+use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
 };
-use crate::evaluators::coding::{get_completion, run_python_verdict_script};
+use crate::evaluators::coding::run_python_verdict_script;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
@@ -150,7 +151,8 @@ impl Benchmark for HumanEvalCn {
             panic!("human_eval_cn only supports NoCoT, got {cot_mode:?}");
         }
 
-        get_prompt(&self.test[index].prompt, cot_mode, false)
+        let item = &self.test[index];
+        get_expected_context(&item.prompt, Some(item.prompt.as_str()), cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
@@ -169,17 +171,18 @@ impl Benchmark for HumanEvalCn {
     ) -> bool {
         let item = &self.test[index];
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
-        let completion = get_completion(
+        let completion = get_code_completion_with_cot_mode(
             model_client,
             model_name,
             &expected_context,
             &HUMAN_EVAL_CN_INFO.sampling_config,
-            vec![],
+            cot_mode,
             1024,
         )
         .await;
+        let completion = extract_code(&completion);
         let program = format!("{}{}", item.prompt, completion);
-        let verdict = run_python_verdict_script(&get_check_script(
+        let verdict = run_python_verdict_script(&get_judge_script(
             &program,
             &item.test,
             &item.entry_point,

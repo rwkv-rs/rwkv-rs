@@ -1,12 +1,7 @@
-use crate::datasets::CoTMode;
+use crate::datasets::{CoTMode, apply_user_assistant_template};
 
-pub(crate) fn get_prompt(
-    prompt: &str,
-    reference_code: &str,
-    cot_mode: CoTMode,
-    need_code_prefix: bool,
-) -> String {
-    let prompt = get_signature(reference_code)
+pub fn get_expected_context(prompt: &str, code: &str, cot_mode: CoTMode) -> String {
+    let prompt = get_signature(code)
         .map(|signature| {
             format!(
                 "{prompt}\nFunction signature: {signature}\nWrite the full function definition."
@@ -14,29 +9,31 @@ pub(crate) fn get_prompt(
         })
         .unwrap_or_else(|| prompt.to_string());
     let prompt = trim_empty_lines(&prompt);
-    let assistant_part = match cot_mode {
-        CoTMode::NoCoT if need_code_prefix => "<think></think>\n```python".to_string(),
-        CoTMode::NoCoT => prompt.clone(),
-        CoTMode::FakeCoT if need_code_prefix => "<think></think>\n```python".to_string(),
-        CoTMode::FakeCoT => format!("<think></think>\n{prompt}"),
-        CoTMode::CoT if need_code_prefix => {
-            "<think><|completions_of_cot|></think>\n```python".to_string()
-        }
-        CoTMode::CoT => format!("<think><|completions_of_cot|></think>\n{prompt}"),
-    };
-    format!(
+    let user_part = format!(
         concat!(
-            "User: You are a top-level code master. Complete the following code ",
-            "without any additional text or explanation:\n",
-            "{prompt}\n\n",
-            "Assistant: {assistant_part}"
+            "You are a top-level code master.\n",
+            "{prompt}\n",
+            "Output only the full Python function definition without any additional text or explanation."
         ),
         prompt = prompt,
-        assistant_part = assistant_part,
-    )
+    );
+
+    let assistant_part = match cot_mode {
+        CoTMode::NoCoT => "```python\n<|completions|>".to_string(),
+        CoTMode::FakeCoT => "<think>\n</think>\n```python\n<|completions|>".to_string(),
+        CoTMode::CoT => concat!(
+            "<think><|completions_of_cot|></think>\n",
+            "```python\n<|completions|>",
+        )
+        .to_string(),
+    }
+    .to_string();
+
+    apply_user_assistant_template(user_part, assistant_part)
 }
 
-pub(crate) fn get_assertion_script(
+
+pub fn get_judge_script(
     completion: &str,
     test_imports: &[String],
     test_list: &[String],

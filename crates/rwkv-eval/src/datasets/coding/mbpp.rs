@@ -1,16 +1,18 @@
-use super::mbpp_common::{get_assertion_script, get_prompt};
-use crate::datasets::coding::extract_code;
-use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
+use super::mbpp_common::{get_judge_script, get_expected_context};
+use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
+use crate::datasets::utils::collect_files_with_extension;
+use crate::datasets::utils::hf::download_hf_parquet_splits;
+use crate::datasets::utils::hf::viewer::get_split_row_count;
+use crate::datasets::utils::parquet::{get_i64, get_string, get_string_list, read_parquet_items};
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
 };
-use crate::evaluators::coding::{get_completion, run_python_verdict_script};
+use crate::evaluators::coding::run_python_verdict_script;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use serde::Deserialize;
-use std::fs::File;
+use parquet::record::Row;
 use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
@@ -19,7 +21,7 @@ static MBPP_INFO: BenchmarkInfo = BenchmarkInfo {
     name: BenchmarkName("mbpp"),
     field: Field::Coding,
     display_name: "MBPP",
-    cot_mode: &[CoTMode::NoCoT],
+    cot_mode: &[CoTMode::NoCoT, CoTMode::FakeCoT, CoTMode::CoT],
     sampling_config: SamplingConfig {
         temperature: 0.3,
         top_k: 500,
@@ -48,17 +50,6 @@ pub struct MbppItem {
     test_list: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct RawMbppItem {
-    task_id: serde_json::Value,
-    prompt: String,
-    code: String,
-    #[serde(default)]
-    test_imports: Vec<String>,
-    #[serde(default)]
-    test_list: Vec<String>,
-}
-
 impl Mbpp {
     pub fn new<P: AsRef<Path>>(dataset_root: P) -> Self {
         Self {
@@ -73,42 +64,45 @@ impl Benchmark for Mbpp {
     fn load(&mut self) -> bool {
         self.test.clear();
 
-        let path = self.dataset_root.join("mbpp").join("sanitized-mbpp.json");
-        if !path.is_file() {
+        let parquet_paths =
+            collect_files_with_extension(self.dataset_root.join("mbpp/sanitized/test"), "parquet");
+        if parquet_paths.is_empty() {
             return true;
         }
 
-        let file = File::open(path).unwrap();
-        self.test = serde_json::from_reader::<_, Vec<RawMbppItem>>(file)
-            .unwrap()
-            .into_iter()
-            .map(|item| MbppItem {
-                task_id: item.task_id.to_string().trim_matches('"').to_string(),
-                prompt: item.prompt,
-                code: item.code,
-                test_imports: item.test_imports,
-                test_list: item.test_list,
-            })
-            .collect();
+        let parse_item = |row: &Row| MbppItem {
+            task_id: get_i64(row, "task_id").to_string(),
+            prompt: get_string(row, "prompt"),
+            code: get_string(row, "code"),
+            test_imports: get_string_list(row, "test_imports"),
+            test_list: get_string_list(row, "test_list"),
+        };
+        for path in parquet_paths {
+            self.test.extend(read_parquet_items(path, parse_item));
+        }
 
         self.test.is_empty()
     }
 
     fn check(&self) -> bool {
-        self.test.is_empty()
+        let runtime = Runtime::new().unwrap();
+        self.test.len()
+            != runtime.block_on(get_split_row_count(
+                "google-research-datasets/mbpp",
+                "sanitized",
+                "test",
+            ))
     }
 
     fn download(&self) {
         let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_url_files(
+        let downloaded_path = runtime.block_on(download_hf_parquet_splits(
             &self.dataset_root,
             "mbpp",
-            &[UrlDownloadFile {
-                relative_path: PathBuf::from("sanitized-mbpp.json"),
-                url: "https://github.com/google-research/google-research/raw/master/mbpp/sanitized-mbpp.json"
-                    .to_string(),
-            }],
-            1,
+            "google-research-datasets/mbpp",
+            "sanitized",
+            &["test"],
+            2,
         ));
         println!("mbpp dataset: {}", downloaded_path.display());
     }
@@ -118,12 +112,8 @@ impl Benchmark for Mbpp {
     }
 
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
-        if cot_mode != CoTMode::NoCoT {
-            panic!("mbpp only supports NoCoT, got {cot_mode:?}");
-        }
-
         let item = &self.test[index];
-        get_prompt(&item.prompt, &item.code, cot_mode, true)
+        get_expected_context(&item.prompt, &item.code, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
@@ -142,17 +132,17 @@ impl Benchmark for Mbpp {
     ) -> bool {
         let item = &self.test[index];
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
-        let completion = get_completion(
+        let completion = get_code_completion_with_cot_mode(
             model_client,
             model_name,
             &expected_context,
             &MBPP_INFO.sampling_config,
-            vec!["```".to_string()],
+            cot_mode,
             1024,
         )
         .await;
         let completion = extract_code(&completion);
-        let verdict = run_python_verdict_script(&get_assertion_script(
+        let verdict = run_python_verdict_script(&get_judge_script(
             &completion,
             &item.test_imports,
             &item.test_list,
