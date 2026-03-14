@@ -20,3 +20,7 @@ rwkv-config = { path = "../rwkv-config" }
 async-openai = { version = "0.33.0", default-features = false, features = ["rustls", "completions", "chat-completion", "byot"] }
 linkme = { workspace = true }
 once_cell = { workspace = true }
+regex = { workspace = true }
+langdetect-rs = { workspace = true }
+flate2 = { workspace = true }
+microsandbox = { workspace = true }
