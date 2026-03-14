@@ -29,7 +29,7 @@ static AMC23_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[4],
+    avg_ks: &[4.0],
     pass_ks: &[],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Amc23::new(dataset_root)),

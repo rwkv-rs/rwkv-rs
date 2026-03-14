@@ -36,7 +36,7 @@ static SUPERGPQA_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[1],
+    avg_ks: &[1.0],
     pass_ks: &[1],
     with_llm_judger: false,
     create: |dataset_root| Box::new(SuperGpqa::new(dataset_root)),

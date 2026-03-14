@@ -35,7 +35,7 @@ static MMLU_PRO_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0, 5],
-    avg_ks: &[1],
+    avg_ks: &[1.0],
     pass_ks: &[1],
     with_llm_judger: false,
     create: |dataset_root| Box::new(MmluPro::new(dataset_root)),

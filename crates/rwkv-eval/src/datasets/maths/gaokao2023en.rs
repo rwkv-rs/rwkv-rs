@@ -29,7 +29,7 @@ static GAOKAO2023EN_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[16],
+    avg_ks: &[16.0],
     pass_ks: &[],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Gaokao2023En::new(dataset_root)),

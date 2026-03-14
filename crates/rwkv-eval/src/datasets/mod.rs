@@ -21,7 +21,7 @@ pub struct BenchmarkInfo {
     pub cot_mode: &'static [CoTMode],
     pub sampling_config: SamplingConfig,
     pub n_shots: &'static [u8],
-    pub avg_ks: &'static [u8],
+    pub avg_ks: &'static [f32],
     pub pass_ks: &'static [u8],
     pub with_llm_judger: bool,
     pub create: BenchmarkFactory,
