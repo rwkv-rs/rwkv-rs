@@ -12,8 +12,8 @@ use rwkv::{
     infer::{
         Error, Result,
         inference_core::{
-            InferenceExecutionConfig, InferenceExecutionLoop, ModelForward, SampledToken,
-            SamplingConfig, SamplingConfigsTensor, TokenLogprobsConfig,
+            InferenceExecutionConfig, InferenceExecutionLoop, LogitsOutput, ModelForward,
+            SampledToken, SamplingConfig, SamplingConfigsTensor, TokenLogprobsConfig,
             build_sampled_token_logprob, sampling_configs_to_tensor,
         },
         model_pool::{LoadedModelGroup, ModelEngineFactory, build_model_group_engines},
@@ -375,6 +375,179 @@ where
                             batch_index,
                             token_id,
                             logprob,
+                            finish_after_token: false,
+                        }
+                    })
+                    .collect())
+            }
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn forward_logits(
+        &mut self,
+        batch_ids: &[usize],
+        contexts: &[&[i32]],
+        context_masks: &[&[u8]],
+    ) -> Result<Vec<LogitsOutput>> {
+        rwkv_bench::trace_scope!("rwkv.infer.executor.forward_logits");
+        if batch_ids.len() != contexts.len() || contexts.len() != context_masks.len() {
+            return Err(Error::BadRequest(
+                "forward_logits: inconsistent batch_ids/contexts/context_masks length".to_string(),
+            ));
+        }
+        if batch_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        if let Some(&batch_id) = batch_ids.iter().find(|&&id| id >= self.max_batch_size) {
+            return Err(Error::BadRequest(format!(
+                "forward_logits: batch_index {batch_id} out of range (max_batch_size={})",
+                self.max_batch_size
+            )));
+        }
+
+        let context_len = contexts[0].len();
+        if context_len == 0 {
+            return Err(Error::BadRequest(
+                "forward_logits: empty context is not allowed".to_string(),
+            ));
+        }
+        for (idx, (context, mask)) in contexts.iter().zip(context_masks.iter()).enumerate() {
+            if context.len() != context_len || mask.len() != context_len {
+                return Err(Error::BadRequest(format!(
+                    "forward_logits: inconsistent context length at index {idx} (context={}, mask={}, expected={context_len})",
+                    context.len(),
+                    mask.len(),
+                )));
+            }
+        }
+
+        let batch_size = batch_ids.len();
+        let batch_masks = {
+            let mut batch_masks = vec![1.0f32; self.max_batch_size];
+            for &batch_id in batch_ids {
+                batch_masks[batch_id] = 0.0;
+            }
+            Tensor::from_data(
+                TensorData::new(batch_masks, [self.max_batch_size]),
+                &self.device,
+            )
+        };
+
+        let batch_ids_tensor: Tensor<B, 1, Int> = Tensor::from_data(
+            TensorData::new(
+                batch_ids.iter().map(|&id| id as i32).collect::<Vec<i32>>(),
+                [batch_size],
+            ),
+            &self.device,
+        );
+
+        let contexts: Tensor<B, 2, Int> = Tensor::from_data(
+            TensorData::new(contexts.concat(), [batch_size, context_len]),
+            &self.device,
+        );
+        let context_masks = Tensor::from_data(
+            TensorData::new(
+                context_masks.concat().iter().map(|&m| m as f32).collect(),
+                [batch_size, context_len],
+            ),
+            &self.device,
+        );
+
+        let (
+            mut embedded_token_shift_for_time_mix,
+            mut state,
+            mut embedded_token_shift_for_channel_mix,
+        ) = {
+            rwkv_bench::trace_lite_scope!("rwkv.infer.executor.gather_state");
+            (
+                self.embedded_token_shift_for_time_mix
+                    .iter()
+                    .map(|x| x.clone().select(0, batch_ids_tensor.clone()))
+                    .collect(),
+                self.state
+                    .iter()
+                    .map(|x| x.clone().select(0, batch_ids_tensor.clone()))
+                    .collect(),
+                self.embedded_token_shift_for_channel_mix
+                    .iter()
+                    .map(|x| x.clone().select(0, batch_ids_tensor.clone()))
+                    .collect(),
+            )
+        };
+
+        let logits = self.model.infer(
+            contexts,
+            Some(context_masks),
+            &mut embedded_token_shift_for_time_mix,
+            &mut state,
+            &mut embedded_token_shift_for_channel_mix,
+            UnembedMode::LastToken,
+        );
+
+        let batch_masks_2d = batch_masks.clone().unsqueeze_dim::<2>(1);
+        let batch_masks_4d = batch_masks
+            .clone()
+            .unsqueeze_dim::<2>(1)
+            .unsqueeze_dim::<3>(2)
+            .unsqueeze_dim::<4>(3);
+
+        rwkv_bench::trace_lite_scope!("rwkv.infer.executor.scatter_state");
+        for (
+            cell_idx,
+            (
+                cell_embedded_token_shift_for_time_mix,
+                cell_state,
+                cell_embedded_token_shift_for_channel_mix,
+            ),
+        ) in izip!(
+            embedded_token_shift_for_time_mix,
+            state,
+            embedded_token_shift_for_channel_mix,
+        )
+        .enumerate()
+        {
+            self.embedded_token_shift_for_time_mix[cell_idx] =
+                (self.embedded_token_shift_for_time_mix[cell_idx].clone() * batch_masks_2d.clone())
+                    .select_assign(
+                        0,
+                        batch_ids_tensor.clone(),
+                        cell_embedded_token_shift_for_time_mix,
+                        IndexingUpdateOp::Add,
+                    );
+
+            self.state[cell_idx] = (self.state[cell_idx].clone() * batch_masks_4d.clone())
+                .select_assign(
+                    0,
+                    batch_ids_tensor.clone(),
+                    cell_state,
+                    IndexingUpdateOp::Add,
+                );
+
+            self.embedded_token_shift_for_channel_mix[cell_idx] =
+                (self.embedded_token_shift_for_channel_mix[cell_idx].clone()
+                    * batch_masks_2d.clone())
+                .select_assign(
+                    0,
+                    batch_ids_tensor.clone(),
+                    cell_embedded_token_shift_for_channel_mix,
+                    IndexingUpdateOp::Add,
+                );
+        }
+
+        match logits {
+            Some(logits) => {
+                let logits = logits.squeeze_dim(1).to_data().to_vec::<f32>().unwrap();
+                Ok(batch_ids
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(row_index, batch_index)| {
+                        let row_start = row_index * self.vocab_size;
+                        let row_end = row_start + self.vocab_size;
+                        LogitsOutput {
+                            batch_index,
+                            logits: logits[row_start..row_end].to_vec(),
                         }
                     })
                     .collect())

@@ -1,4 +1,8 @@
-use crate::inference_core::{RequestedTokenLogprobsConfig, SamplingConfig};
+use crate::access::http_api::{
+    ChatCompletionRequest, ChatCompletionTool, ChatCompletionToolChoice, ResponseFormat,
+};
+use crate::inference_core::{ConstraintSpec, RequestedTokenLogprobsConfig, SamplingConfig};
+use sonic_rs::{Value, from_str, json, to_string_pretty};
 
 const DEFAULT_TEMPERATURE: f32 = 1.0;
 const MIN_TEMPERATURE: f32 = 0.001;
@@ -11,6 +15,35 @@ const DEFAULT_REPETITION_PENALTY: f32 = 0.0;
 const DEFAULT_PENALTY_DECAY: f32 = 1.0;
 const MAX_COMPLETION_LOGPROBS: u8 = 5;
 const MAX_CHAT_TOP_LOGPROBS: u8 = 20;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ChatStructuredResponseMode {
+    PlainText,
+    JsonText,
+    ToolCall,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ChatStructuredOutputConfig {
+    pub prompt_preamble: Option<String>,
+    pub constraint: Option<ConstraintSpec>,
+    pub response_mode: ChatStructuredResponseMode,
+}
+
+#[derive(Clone, Debug)]
+struct ValidatedToolDefinition {
+    name: String,
+    description: Option<String>,
+    parameters: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ValidatedToolChoice {
+    None,
+    Auto,
+    Required,
+    Named(String),
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn validate_sampling_config(
@@ -177,4 +210,390 @@ pub(crate) fn validate_chat_logprobs(
         top_logprobs: top_logprobs as usize,
         candidate_token_texts,
     }))
+}
+
+pub(crate) fn validate_chat_structured_output(
+    req: &ChatCompletionRequest,
+    requested_token_logprobs: &Option<RequestedTokenLogprobsConfig>,
+) -> crate::Result<ChatStructuredOutputConfig> {
+    let tools = req.tools.as_ref().filter(|tools| !tools.is_empty());
+    if req.response_format.is_some() && tools.is_some() {
+        return Err(crate::Error::bad_request(
+            "response_format and tools cannot be used together yet",
+        ));
+    }
+
+    if let Some(response_format) = req.response_format.as_ref() {
+        if req.stop.is_some() {
+            return Err(crate::Error::bad_request(
+                "stop is not supported together with response_format",
+            ));
+        }
+        return validate_response_format(response_format);
+    }
+
+    let Some(tools) = tools else {
+        if req.tool_choice.is_some() {
+            return Err(crate::Error::bad_request(
+                "tool_choice requires tools to be provided",
+            ));
+        }
+        return Ok(ChatStructuredOutputConfig {
+            prompt_preamble: None,
+            constraint: None,
+            response_mode: ChatStructuredResponseMode::PlainText,
+        });
+    };
+
+    if req.stop.is_some() {
+        return Err(crate::Error::bad_request(
+            "stop is not supported together with tools",
+        ));
+    }
+    if req.parallel_tool_calls.unwrap_or(false) {
+        return Err(crate::Error::bad_request(
+            "parallel_tool_calls=true is not supported yet",
+        ));
+    }
+    if requested_token_logprobs.is_some() {
+        return Err(crate::Error::bad_request(
+            "logprobs are not supported together with tools yet",
+        ));
+    }
+
+    let tools = validate_tools(tools)?;
+    let tool_choice = validate_tool_choice(req.tool_choice.as_ref(), &tools)?;
+    if tool_choice == ValidatedToolChoice::None {
+        return Ok(ChatStructuredOutputConfig {
+            prompt_preamble: None,
+            constraint: None,
+            response_mode: ChatStructuredResponseMode::PlainText,
+        });
+    }
+
+    let schema = build_tool_wrapper_schema(&tools, &tool_choice);
+    let prompt_preamble = build_tool_prompt_preamble(&tools, &tool_choice);
+    Ok(ChatStructuredOutputConfig {
+        prompt_preamble: Some(prompt_preamble),
+        constraint: Some(ConstraintSpec {
+            schema_json: schema.to_string(),
+            strict_mode: false,
+        }),
+        response_mode: ChatStructuredResponseMode::ToolCall,
+    })
+}
+
+fn validate_response_format(
+    response_format: &ResponseFormat,
+) -> crate::Result<ChatStructuredOutputConfig> {
+    match response_format {
+        ResponseFormat::Text => Ok(ChatStructuredOutputConfig {
+            prompt_preamble: None,
+            constraint: None,
+            response_mode: ChatStructuredResponseMode::PlainText,
+        }),
+        ResponseFormat::JsonObject => Ok(ChatStructuredOutputConfig {
+            prompt_preamble: Some("Return only a valid JSON object.".to_string()),
+            constraint: Some(ConstraintSpec {
+                schema_json: json!({ "type": "object" }).to_string(),
+                strict_mode: false,
+            }),
+            response_mode: ChatStructuredResponseMode::JsonText,
+        }),
+        ResponseFormat::JsonSchema { json_schema } => {
+            let schema = json_schema.schema.as_ref().ok_or_else(|| {
+                crate::Error::bad_request("response_format.json_schema.schema is required")
+            })?;
+            let mut prompt = format!(
+                "Return only JSON that matches the provided schema `{}`.",
+                json_schema.name
+            );
+            if let Some(description) = json_schema.description.as_ref() {
+                prompt.push_str("\nSchema description: ");
+                prompt.push_str(description);
+            }
+            prompt.push_str("\nJSON schema:\n");
+            prompt.push_str(&to_string_pretty(schema).unwrap_or_else(|_| schema.to_string()));
+            Ok(ChatStructuredOutputConfig {
+                prompt_preamble: Some(prompt),
+                constraint: Some(ConstraintSpec {
+                    schema_json: schema.to_string(),
+                    strict_mode: json_schema.strict.unwrap_or(true),
+                }),
+                response_mode: ChatStructuredResponseMode::JsonText,
+            })
+        }
+    }
+}
+
+fn validate_tools(tools: &[ChatCompletionTool]) -> crate::Result<Vec<ValidatedToolDefinition>> {
+    let mut validated = Vec::with_capacity(tools.len());
+    let mut seen_names = Vec::<String>::with_capacity(tools.len());
+    for tool in tools {
+        if !tool.ty.eq_ignore_ascii_case("function") {
+            return Err(crate::Error::bad_request(format!(
+                "unsupported tool type: {}",
+                tool.ty
+            )));
+        }
+        let name = tool.function.name.trim();
+        if name.is_empty() {
+            return Err(crate::Error::bad_request(
+                "tool.function.name cannot be empty",
+            ));
+        }
+        if seen_names.iter().any(|existing| existing == name) {
+            return Err(crate::Error::bad_request(format!(
+                "duplicate tool name: {name}"
+            )));
+        }
+        seen_names.push(name.to_string());
+        validated.push(ValidatedToolDefinition {
+            name: name.to_string(),
+            description: tool.function.description.clone(),
+            parameters: tool.function.parameters.clone().unwrap_or_else(|| {
+                json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                })
+            }),
+        });
+    }
+    Ok(validated)
+}
+
+fn validate_tool_choice(
+    tool_choice: Option<&ChatCompletionToolChoice>,
+    tools: &[ValidatedToolDefinition],
+) -> crate::Result<ValidatedToolChoice> {
+    let Some(tool_choice) = tool_choice else {
+        return Ok(ValidatedToolChoice::Auto);
+    };
+
+    match tool_choice {
+        ChatCompletionToolChoice::Mode(mode) => {
+            let mode = mode.trim();
+            if mode.eq_ignore_ascii_case("none") {
+                Ok(ValidatedToolChoice::None)
+            } else if mode.eq_ignore_ascii_case("auto") {
+                Ok(ValidatedToolChoice::Auto)
+            } else if mode.eq_ignore_ascii_case("required") {
+                Ok(ValidatedToolChoice::Required)
+            } else {
+                Err(crate::Error::bad_request(format!(
+                    "unsupported tool_choice mode: {mode}"
+                )))
+            }
+        }
+        ChatCompletionToolChoice::Named(named) => {
+            if !named.ty.eq_ignore_ascii_case("function") {
+                return Err(crate::Error::bad_request(format!(
+                    "unsupported tool_choice type: {}",
+                    named.ty
+                )));
+            }
+            let tool_name = named.function.name.trim();
+            if tools.iter().any(|tool| tool.name == tool_name) {
+                Ok(ValidatedToolChoice::Named(tool_name.to_string()))
+            } else {
+                Err(crate::Error::bad_request(format!(
+                    "tool_choice references unknown function: {tool_name}"
+                )))
+            }
+        }
+    }
+}
+
+fn build_tool_wrapper_schema(
+    tools: &[ValidatedToolDefinition],
+    tool_choice: &ValidatedToolChoice,
+) -> Value {
+    let mut variants = Vec::<Value>::new();
+    if *tool_choice == ValidatedToolChoice::Auto {
+        variants.push(json!({
+            "type": "object",
+            "properties": {
+                "type": { "const": "message" },
+                "content": { "type": "string" }
+            },
+            "required": ["type", "content"],
+            "additionalProperties": false
+        }));
+    }
+
+    for tool in tools {
+        if let ValidatedToolChoice::Named(name) = tool_choice
+            && tool.name != *name
+        {
+            continue;
+        }
+        variants.push(json!({
+            "type": "object",
+            "properties": {
+                "type": { "const": "tool_call" },
+                "name": { "const": tool.name },
+                "arguments": tool.parameters
+            },
+            "required": ["type", "name", "arguments"],
+            "additionalProperties": false
+        }));
+    }
+
+    json!({ "oneOf": variants })
+}
+
+fn build_tool_prompt_preamble(
+    tools: &[ValidatedToolDefinition],
+    tool_choice: &ValidatedToolChoice,
+) -> String {
+    let mut lines = vec![
+        "You are using the OpenAI tool-calling interface.".to_string(),
+        "Return only JSON matching the provided schema.".to_string(),
+    ];
+
+    match tool_choice {
+        ValidatedToolChoice::Auto => {
+            lines.push(
+                "For a direct answer, emit {\"type\":\"message\",\"content\":\"...\"}.".to_string(),
+            );
+            lines.push(
+                "To call a tool, emit {\"type\":\"tool_call\",\"name\":\"tool_name\",\"arguments\":{...}}.".to_string(),
+            );
+        }
+        ValidatedToolChoice::Required => {
+            lines.push("You must call exactly one tool.".to_string());
+            lines.push(
+                "Emit {\"type\":\"tool_call\",\"name\":\"tool_name\",\"arguments\":{...}}."
+                    .to_string(),
+            );
+        }
+        ValidatedToolChoice::Named(name) => {
+            lines.push(format!("You must call the tool `{name}`."));
+            lines.push(format!(
+                "Emit {{\"type\":\"tool_call\",\"name\":\"{name}\",\"arguments\":{{...}}}}."
+            ));
+        }
+        ValidatedToolChoice::None => {}
+    }
+
+    lines.push("Available tools:".to_string());
+    for tool in tools {
+        let mut line = format!("- {}", tool.name);
+        if let Some(description) = tool.description.as_ref() {
+            line.push_str(": ");
+            line.push_str(description);
+        }
+        lines.push(line);
+        lines.push(format!(
+            "  parameters: {}",
+            to_string_pretty(&tool.parameters).unwrap_or_else(|_| tool.parameters.to_string())
+        ));
+    }
+
+    lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::access::http_api::{
+        ChatCompletionNamedToolChoice, ChatCompletionNamedToolChoiceFunction,
+        ChatCompletionToolFunction, ChatMessage,
+    };
+
+    fn base_chat_request() -> ChatCompletionRequest {
+        ChatCompletionRequest {
+            model: "test-model".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: Some("hello".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            }],
+            stream: None,
+            max_tokens: None,
+            temperature: None,
+            top_k: None,
+            top_p: None,
+            presence_penalty: None,
+            repetition_penalty: None,
+            penalty_decay: None,
+            stop: None,
+            logprobs: None,
+            top_logprobs: None,
+            candidate_token_texts: None,
+            response_format: None,
+            tools: None,
+            tool_choice: None,
+            parallel_tool_calls: None,
+        }
+    }
+
+    fn sample_tool(name: &str) -> ChatCompletionTool {
+        ChatCompletionTool {
+            ty: "function".to_string(),
+            function: ChatCompletionToolFunction {
+                name: name.to_string(),
+                description: Some(format!("{name} description")),
+                parameters: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "city": { "type": "string" }
+                    },
+                    "required": ["city"],
+                    "additionalProperties": false
+                })),
+                strict: None,
+            },
+        }
+    }
+
+    #[test]
+    fn validate_chat_structured_output_rejects_response_format_and_tools() {
+        let mut req = base_chat_request();
+        req.response_format = Some(ResponseFormat::JsonObject);
+        req.tools = Some(vec![sample_tool("weather")]);
+
+        let err = validate_chat_structured_output(&req, &None).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("response_format and tools cannot be used together")
+        );
+    }
+
+    #[test]
+    fn validate_chat_structured_output_rejects_unknown_named_tool() {
+        let mut req = base_chat_request();
+        req.tools = Some(vec![sample_tool("weather")]);
+        req.tool_choice = Some(ChatCompletionToolChoice::Named(
+            ChatCompletionNamedToolChoice {
+                ty: "function".to_string(),
+                function: ChatCompletionNamedToolChoiceFunction {
+                    name: "calendar".to_string(),
+                },
+            },
+        ));
+
+        let err = validate_chat_structured_output(&req, &None).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("tool_choice references unknown function: calendar")
+        );
+    }
+
+    #[test]
+    fn validate_chat_structured_output_builds_tool_constraint_schema() {
+        let mut req = base_chat_request();
+        req.tools = Some(vec![sample_tool("weather")]);
+
+        let config = validate_chat_structured_output(&req, &None).unwrap();
+        assert_eq!(config.response_mode, ChatStructuredResponseMode::ToolCall);
+        let constraint = config.constraint.expect("constraint");
+        let schema: Value = from_str(&constraint.schema_json).unwrap();
+        let schema_text = schema.to_string();
+        assert!(schema_text.contains("\"oneOf\""));
+        assert!(schema_text.contains("\"tool_call\""));
+        assert!(schema_text.contains("\"weather\""));
+    }
 }

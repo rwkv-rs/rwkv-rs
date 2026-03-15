@@ -1,6 +1,9 @@
 use std::time::Instant;
 
-use super::{EntryId, SamplingConfig, StopMatch, StopSuffixMatcher, TokenLogprobsConfig};
+use super::{
+    ConstraintSpec, ConstraintState, EntryId, SamplingConfig, StopMatch, StopSuffixMatcher,
+    TokenLogprobsConfig,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RequestPhase {
@@ -31,6 +34,8 @@ pub struct RequestState {
     pub stop_matcher: StopSuffixMatcher,
     pub max_new_tokens: usize,
     pub sampling: SamplingConfig,
+    pub constraint_spec: Option<ConstraintSpec>,
+    pub constraint: Option<ConstraintState>,
     pub token_logprobs: Option<TokenLogprobsConfig>,
     pub validate_ms: Option<u64>,
     pub tokenize_ms: Option<u64>,
@@ -50,6 +55,7 @@ impl RequestState {
         entry_id: EntryId,
         sampling: SamplingConfig,
         stop_suffixes: Vec<String>,
+        constraint_spec: Option<ConstraintSpec>,
         token_logprobs: Option<TokenLogprobsConfig>,
     ) -> Self {
         Self {
@@ -64,6 +70,8 @@ impl RequestState {
             stop_matcher: StopSuffixMatcher::new(stop_suffixes),
             max_new_tokens: sampling.max_new_tokens,
             sampling,
+            constraint_spec,
+            constraint: None,
             token_logprobs,
             validate_ms: None,
             tokenize_ms: None,

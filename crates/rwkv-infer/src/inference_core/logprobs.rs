@@ -29,6 +29,7 @@ pub struct SampledToken {
     pub batch_index: usize,
     pub token_id: i32,
     pub logprob: Option<SampledTokenLogprob>,
+    pub finish_after_token: bool,
 }
 
 fn prob_to_logprob(prob: f32) -> f32 {

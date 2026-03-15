@@ -3,16 +3,18 @@ use std::time::Instant;
 
 use rwkv_data::tokenizer::Tokenizer;
 use tokio::sync::{mpsc, oneshot};
+use xgrammar::GrammarCompiler;
 
 use super::batch_scheduler::Scheduler;
+use super::constraint::build_tokenizer_info_from_vocab;
 use super::request_state::{RequestPhase, RequestState};
 use super::request_submit::{InferenceSubmitCommand, InferenceSubmitHandle, InferenceSubmitResult};
 use super::special_token::{END_TOKEN_ID, PREFILL_PAD_TOKEN_ID};
 use super::tokenizer_loop::{TokenizerCommand, TokenizerLoop};
 use super::{
-    EntryId, FinishMetadata, FinishReason, OutputToken, OutputTokenCandidate,
+    ConstraintSpec, EntryId, FinishMetadata, FinishReason, OutputToken, OutputTokenCandidate,
     RequestedTokenLogprobsConfig, SampledToken, SamplingConfig, StopMatch, TimingBreakdownMs,
-    TokenLogprobsConfig,
+    TokenLogprobsConfig, build_sampled_token_logprob,
 };
 
 #[derive(Clone, Debug)]
@@ -48,7 +50,20 @@ pub trait ModelForward: Send + 'static {
         need_sample: bool,
     ) -> crate::Result<Vec<SampledToken>>;
 
+    fn forward_logits(
+        &mut self,
+        batch_ids: &[usize],
+        contexts: &[&[i32]],
+        masks: &[&[u8]],
+    ) -> crate::Result<Vec<LogitsOutput>>;
+
     fn reset(&mut self, batch_index: usize) -> crate::Result<()>;
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LogitsOutput {
+    pub batch_index: usize,
+    pub logits: Vec<f32>,
 }
 
 struct PendingSubmit {
@@ -56,6 +71,7 @@ struct PendingSubmit {
     input_text: String,
     sampling: SamplingConfig,
     stop_suffixes: Vec<String>,
+    constraint: Option<ConstraintSpec>,
     requested_token_logprobs: Option<RequestedTokenLogprobsConfig>,
     submitted_at: Instant,
     runtime_received_at: Instant,
@@ -111,6 +127,7 @@ enum SampleSource {
 #[derive(Clone, Copy, Debug)]
 enum RequestStopReason {
     EndToken,
+    Constraint,
     StopSuffix(StopMatch),
     Length,
 }
@@ -212,6 +229,7 @@ impl InferenceExecutionLoop {
                 input_text,
                 sampling,
                 stop_suffixes,
+                constraint,
                 requested_token_logprobs,
                 submitted_at,
                 validate_ms,
@@ -221,6 +239,7 @@ impl InferenceExecutionLoop {
                 input_text,
                 sampling,
                 stop_suffixes,
+                constraint,
                 requested_token_logprobs,
                 submitted_at,
                 runtime_received_at: Instant::now(),
@@ -320,6 +339,18 @@ impl InferenceExecutionLoop {
                 .filter(|suffix| !suffix.is_empty())
                 .collect();
 
+            let resolved_constraint = match self.resolve_constraint_state(submit.constraint.clone())
+            {
+                Ok(constraint) => constraint,
+                Err(err) => {
+                    let _ = submit.reply.send(InferenceSubmitResult::Error {
+                        entry_id: submit.entry_id,
+                        message: err.to_string(),
+                    });
+                    continue;
+                }
+            };
+
             let (output_tx, output_rx) = mpsc::channel(256);
             if self
                 .tokenizer_tx
@@ -341,8 +372,10 @@ impl InferenceExecutionLoop {
                 submit.entry_id,
                 submit.sampling,
                 stop_suffixes,
+                submit.constraint,
                 resolved_token_logprobs,
             );
+            entry.constraint = resolved_constraint;
             entry.input_token_ids = token_ids;
             entry.validate_ms = submit.validate_ms;
             entry.tokenize_ms = Some(tokenize_ms);
@@ -427,24 +460,29 @@ impl InferenceExecutionLoop {
     }
 
     fn run_prefill(&mut self, entry_ids: &[EntryId]) {
-        let batch = self.build_prefill_batch(entry_ids, true);
-        if batch.is_empty() {
-            return;
+        let (constrained_ids, unconstrained_ids) = self.split_constrained_entries(entry_ids);
+
+        let batch = self.build_prefill_batch(&unconstrained_ids, true);
+        if !batch.is_empty() {
+            match self.forward_batch(&batch, true) {
+                Ok(sampled_tokens) => {
+                    self.apply_sampled_tokens(
+                        sampled_tokens,
+                        &batch.batch_to_entry,
+                        SampleSource::Prefill,
+                    );
+                }
+                Err(err) => {
+                    let chain = err.format_chain();
+                    log::error!("prefill sample failed: {chain}");
+                    self.fail_entries(batch.entry_ids(), format!("prefill sample failed: {chain}"));
+                }
+            }
         }
 
-        match self.forward_batch(&batch, true) {
-            Ok(sampled_tokens) => {
-                self.apply_sampled_tokens(
-                    sampled_tokens,
-                    &batch.batch_to_entry,
-                    SampleSource::Prefill,
-                );
-            }
-            Err(err) => {
-                let chain = err.format_chain();
-                log::error!("prefill sample failed: {chain}");
-                self.fail_entries(batch.entry_ids(), format!("prefill sample failed: {chain}"));
-            }
+        let constrained_batch = self.build_prefill_batch(&constrained_ids, true);
+        if !constrained_batch.is_empty() {
+            self.run_constrained_batch(&constrained_batch, SampleSource::Prefill, "prefill");
         }
     }
 
@@ -508,8 +546,10 @@ impl InferenceExecutionLoop {
             return;
         }
 
+        let (constrained_ids, unconstrained_ids) = self.split_constrained_entries(decode_ids);
+
         let mut batch = ForwardBatch::default();
-        for entry_id in decode_ids.iter().copied() {
+        for entry_id in unconstrained_ids.iter().copied() {
             let Some(entry) = self.entries.get(&entry_id) else {
                 continue;
             };
@@ -528,22 +568,43 @@ impl InferenceExecutionLoop {
         }
 
         if batch.is_empty() {
-            return;
+        } else {
+            match self.forward_batch(&batch, true) {
+                Ok(sampled_tokens) => {
+                    self.apply_sampled_tokens(
+                        sampled_tokens,
+                        &batch.batch_to_entry,
+                        SampleSource::Decode,
+                    );
+                }
+                Err(err) => {
+                    let chain = err.format_chain();
+                    log::error!("decode failed: {chain}");
+                    self.fail_entries(batch.entry_ids(), format!("decode failed: {chain}"));
+                }
+            }
         }
 
-        match self.forward_batch(&batch, true) {
-            Ok(sampled_tokens) => {
-                self.apply_sampled_tokens(
-                    sampled_tokens,
-                    &batch.batch_to_entry,
-                    SampleSource::Decode,
-                );
-            }
-            Err(err) => {
-                let chain = err.format_chain();
-                log::error!("decode failed: {chain}");
-                self.fail_entries(batch.entry_ids(), format!("decode failed: {chain}"));
-            }
+        let mut constrained_batch = ForwardBatch::default();
+        for entry_id in constrained_ids.iter().copied() {
+            let Some(entry) = self.entries.get(&entry_id) else {
+                continue;
+            };
+            let Some(batch_index) = entry.batch_index else {
+                continue;
+            };
+            let last_token_id = entry.last_context_token_id().unwrap_or(END_TOKEN_ID);
+            constrained_batch.push(
+                entry_id,
+                batch_index,
+                vec![last_token_id],
+                vec![1u8],
+                entry.sampling,
+                entry.token_logprobs.clone(),
+            );
+        }
+        if !constrained_batch.is_empty() {
+            self.run_constrained_batch(&constrained_batch, SampleSource::Decode, "decode");
         }
     }
 
@@ -562,6 +623,135 @@ impl InferenceExecutionLoop {
             &batch.token_logprob_configs,
             need_sample,
         )
+    }
+
+    fn forward_logits_batch(&mut self, batch: &ForwardBatch) -> crate::Result<Vec<LogitsOutput>> {
+        let contexts_ref: Vec<&[i32]> = batch.contexts.iter().map(Vec::as_slice).collect();
+        let masks_ref: Vec<&[u8]> = batch.context_masks.iter().map(Vec::as_slice).collect();
+        self.executor
+            .forward_logits(&batch.batch_ids, &contexts_ref, &masks_ref)
+    }
+
+    fn run_constrained_batch(&mut self, batch: &ForwardBatch, source: SampleSource, label: &str) {
+        match self.forward_logits_batch(batch) {
+            Ok(logits) => self.apply_constrained_logits(logits, batch, source),
+            Err(err) => {
+                let chain = err.format_chain();
+                log::error!("{label} constrained sample failed: {chain}");
+                self.fail_entries(
+                    batch.entry_ids(),
+                    format!("{label} constrained sample failed: {chain}"),
+                );
+            }
+        }
+    }
+
+    fn split_constrained_entries(&self, entry_ids: &[EntryId]) -> (Vec<EntryId>, Vec<EntryId>) {
+        let mut constrained = Vec::new();
+        let mut unconstrained = Vec::new();
+        for entry_id in entry_ids.iter().copied() {
+            if self
+                .entries
+                .get(&entry_id)
+                .is_some_and(|entry| entry.constraint.is_some())
+            {
+                constrained.push(entry_id);
+            } else {
+                unconstrained.push(entry_id);
+            }
+        }
+        (constrained, unconstrained)
+    }
+
+    fn apply_constrained_logits(
+        &mut self,
+        logits_rows: Vec<LogitsOutput>,
+        batch: &ForwardBatch,
+        source: SampleSource,
+    ) {
+        let mut seen_batch_indices = HashSet::new();
+        for row in logits_rows {
+            let batch_index = row.batch_index;
+            let Some(entry_id) = batch.batch_to_entry.get(&batch_index).copied() else {
+                continue;
+            };
+            seen_batch_indices.insert(batch_index);
+
+            let sampled_token =
+                match self.sample_constrained_token(entry_id, batch_index, &row.logits) {
+                    Ok(sampled_token) => sampled_token,
+                    Err(err) => {
+                        self.fail_entries(&[entry_id], err.to_string());
+                        continue;
+                    }
+                };
+
+            let Some(outcome) = self.prepare_sampled_token_outcome(entry_id, sampled_token, source)
+            else {
+                continue;
+            };
+            self.emit_sampled_token_outcome(outcome);
+        }
+
+        let missing_entry_ids: Vec<EntryId> = batch
+            .batch_to_entry
+            .iter()
+            .filter_map(|(batch_index, entry_id)| {
+                (!seen_batch_indices.contains(batch_index)).then_some(*entry_id)
+            })
+            .collect();
+        if !missing_entry_ids.is_empty() {
+            self.fail_entries(
+                &missing_entry_ids,
+                "executor returned incomplete constrained logits output".to_string(),
+            );
+        }
+    }
+
+    fn sample_constrained_token(
+        &mut self,
+        entry_id: EntryId,
+        batch_index: usize,
+        logits: &[f32],
+    ) -> crate::Result<SampledToken> {
+        let entry = self
+            .entries
+            .get_mut(&entry_id)
+            .ok_or_else(|| crate::Error::internal(format!("missing entry {entry_id}")))?;
+        let constraint = entry
+            .constraint
+            .as_mut()
+            .ok_or_else(|| crate::Error::internal("missing constraint state".to_string()))?;
+        let sampled = constraint.sample(logits, &entry.sampling, batch_index as u32 + 1)?;
+        let logprob = entry
+            .token_logprobs
+            .as_ref()
+            .map(|cfg| build_sampled_token_logprob(&sampled.probs, sampled.token_id, cfg));
+
+        Ok(SampledToken {
+            batch_index,
+            token_id: sampled.token_id,
+            logprob,
+            finish_after_token: sampled.finish_after_token,
+        })
+    }
+
+    fn resolve_constraint_state(
+        &mut self,
+        constraint: Option<ConstraintSpec>,
+    ) -> crate::Result<Option<super::ConstraintState>> {
+        let Some(constraint) = constraint else {
+            return Ok(None);
+        };
+        let tokenizer_info = build_tokenizer_info_from_vocab(
+            self.tokenizer.vocab_tokens(),
+            self.tokenizer.vocab_size(),
+            &[END_TOKEN_ID],
+        );
+        let mut compiler =
+            GrammarCompiler::new(&tokenizer_info, 1, true, -1).map_err(crate::Error::internal)?;
+        super::ConstraintState::new(&constraint, &mut compiler, self.tokenizer.vocab_size())
+            .map(Some)
     }
 
     fn apply_sampled_tokens(
@@ -611,6 +801,7 @@ impl InferenceExecutionLoop {
 
         {
             let entry = self.entries.get_mut(&entry_id)?;
+            let finish_after_token = sampled_token.finish_after_token;
 
             if matches!(source, SampleSource::Decode) {
                 let decode_at = Instant::now();
@@ -635,6 +826,8 @@ impl InferenceExecutionLoop {
 
                 if let Some(matched) = matched_stop {
                     Some(RequestStopReason::StopSuffix(matched))
+                } else if finish_after_token {
+                    Some(RequestStopReason::Constraint)
                 } else if entry.hit_max_new_tokens() {
                     Some(RequestStopReason::Length)
                 } else {
@@ -730,6 +923,14 @@ fn finish_metadata_for_entry(
 
     match stop_reason {
         RequestStopReason::EndToken => FinishMetadata {
+            reason: FinishReason::Stop,
+            matched_stop_suffix: None,
+            matched_stop_suffix_index: None,
+            max_new_tokens: entry.max_new_tokens,
+            generated_tokens: entry.generated_token_count,
+            timings_ms,
+        },
+        RequestStopReason::Constraint => FinishMetadata {
             reason: FinishReason::Stop,
             matched_stop_suffix: None,
             matched_stop_suffix_index: None,

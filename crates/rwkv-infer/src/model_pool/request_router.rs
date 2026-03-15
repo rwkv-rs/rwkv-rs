@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::inference_core::{InferenceSubmitHandle, InferenceSubmitResult};
+use crate::inference_core::{ConstraintSpec, InferenceSubmitHandle, InferenceSubmitResult};
 use crate::inference_core::{RequestedTokenLogprobsConfig, SamplingConfig};
 
 #[derive(Clone)]
@@ -80,6 +80,7 @@ impl ModelRequestRouter {
         input_text: String,
         sampling: SamplingConfig,
         stop_suffixes: Vec<String>,
+        constraint: Option<ConstraintSpec>,
         requested_token_logprobs: Option<RequestedTokenLogprobsConfig>,
     ) -> crate::Result<InferenceSubmitResult> {
         self.submit_text_with_trace(
@@ -87,6 +88,7 @@ impl ModelRequestRouter {
             input_text,
             sampling,
             stop_suffixes,
+            constraint,
             requested_token_logprobs,
             None,
         )
@@ -99,6 +101,7 @@ impl ModelRequestRouter {
         input_text: String,
         sampling: SamplingConfig,
         stop_suffixes: Vec<String>,
+        constraint: Option<ConstraintSpec>,
         requested_token_logprobs: Option<RequestedTokenLogprobsConfig>,
         validate_ms: Option<u64>,
     ) -> crate::Result<InferenceSubmitResult> {
@@ -115,6 +118,7 @@ impl ModelRequestRouter {
                 input_text,
                 sampling,
                 stop_suffixes,
+                constraint,
                 requested_token_logprobs,
                 validate_ms,
             )

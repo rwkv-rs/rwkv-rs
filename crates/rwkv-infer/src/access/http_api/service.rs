@@ -2,17 +2,19 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use sonic_rs::{Value, from_str, prelude::*, to_string};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::access::http_api::validation::ChatStructuredResponseMode;
 use crate::access::http_api::{
     ChatCompletionChunkChoice, ChatCompletionChunkDelta, ChatCompletionChunkResponse,
-    ChatCompletionLogprobs, ChatCompletionRequest, ChatCompletionResponse,
-    ChatCompletionResponseChoice, ChatCompletionTokenLogprob, ChatCompletionTokenTopLogprob,
-    ChatMessage, CompletionLogprobs, CompletionRequest, CompletionResponse,
-    CompletionResponseChoice, DeleteResponse, HealthResponse, ModelListResponse, ModelObject,
-    ReloadModelsRequest, ReloadModelsResponse, ResponseIdRequest, ResponsesCreateRequest,
-    ResponsesResource, StopField,
+    ChatCompletionLogprobs, ChatCompletionMessageToolCall, ChatCompletionMessageToolCallFunction,
+    ChatCompletionRequest, ChatCompletionResponse, ChatCompletionResponseChoice,
+    ChatCompletionTokenLogprob, ChatCompletionTokenTopLogprob, ChatMessage, CompletionLogprobs,
+    CompletionRequest, CompletionResponse, CompletionResponseChoice, DeleteResponse,
+    HealthResponse, ModelListResponse, ModelObject, ReloadModelsRequest, ReloadModelsResponse,
+    ResponseIdRequest, ResponsesCreateRequest, ResponsesResource, StopField,
 };
 use crate::inference_core::InferenceSubmitResult as SubmitOutput;
 use crate::inference_core::{EngineEvent, EntryId, FinishMetadata, InferenceOutput, StreamDelta};
@@ -109,6 +111,7 @@ impl HttpApiService {
                 req.prompt,
                 sampling,
                 stop_suffixes,
+                None,
                 requested_token_logprobs.clone(),
                 Some(validate_ms),
             )
@@ -154,9 +157,21 @@ impl HttpApiService {
         let requested_token_logprobs = crate::access::http_api::validation::validate_chat_logprobs(
             req.logprobs,
             req.top_logprobs,
-            req.candidate_token_texts,
+            req.candidate_token_texts.clone(),
         )?;
+        let structured_output =
+            crate::access::http_api::validation::validate_chat_structured_output(
+                &req,
+                &requested_token_logprobs,
+            )?;
         let stream_requested = req.stream.unwrap_or(false);
+        if stream_requested
+            && structured_output.response_mode == ChatStructuredResponseMode::ToolCall
+        {
+            return Err(crate::Error::bad_request(
+                "stream=true is not supported together with tools yet",
+            ));
+        }
         let validate_start = Instant::now();
         let sampling = crate::access::http_api::validation::validate_sampling_config(
             req.temperature,
@@ -175,7 +190,11 @@ impl HttpApiService {
             "sampling validation completed"
         );
         let stop_suffixes = req.stop.map(StopField::into_vec).unwrap_or_default();
-        let prompt = build_chat_prompt(&req.messages)?;
+        let prompt = build_chat_prompt(
+            &req.messages,
+            structured_output.prompt_preamble.as_deref(),
+            structured_output.response_mode != ChatStructuredResponseMode::PlainText,
+        )?;
 
         let submit = service
             .submit_text_with_trace(
@@ -183,6 +202,7 @@ impl HttpApiService {
                 prompt,
                 sampling,
                 stop_suffixes,
+                structured_output.constraint,
                 requested_token_logprobs.clone(),
                 Some(validate_ms),
             )
@@ -195,6 +215,7 @@ impl HttpApiService {
             model: req.model,
             stream_requested,
             include_logprobs: requested_token_logprobs.is_some(),
+            structured_output_mode: structured_output.response_mode,
             rx,
         })
     }
@@ -253,6 +274,7 @@ impl HttpApiService {
                         sampling,
                         stop_suffixes,
                         None,
+                        None,
                         Some(validate_ms),
                     )
                     .await;
@@ -303,6 +325,7 @@ impl HttpApiService {
                 req.input,
                 sampling,
                 stop_suffixes,
+                None,
                 None,
                 Some(validate_ms),
             )
@@ -471,6 +494,7 @@ pub struct ChatCompletionRun {
     pub model: String,
     pub stream_requested: bool,
     pub include_logprobs: bool,
+    structured_output_mode: ChatStructuredResponseMode,
     pub rx: mpsc::Receiver<EngineEvent>,
 }
 
@@ -489,7 +513,9 @@ impl ChatCompletionRun {
                 index: 0,
                 message: ChatMessage {
                     role: "assistant".to_string(),
-                    content: delta.text.clone(),
+                    content: Some(delta.text.clone()),
+                    tool_calls: None,
+                    tool_call_id: None,
                 },
                 finish_reason: finish_meta.map(|meta| meta.reason.as_openai_str().to_string()),
                 logprobs: self.chat_logprobs(&delta.tokens),
@@ -508,6 +534,7 @@ impl ChatCompletionRun {
                 delta: ChatCompletionChunkDelta {
                     role: Some("assistant".to_string()),
                     content: None,
+                    tool_calls: None,
                 },
                 finish_reason: None,
                 logprobs: None,
@@ -530,6 +557,7 @@ impl ChatCompletionRun {
                 delta: ChatCompletionChunkDelta {
                     role: None,
                     content: (!delta.text.is_empty()).then_some(delta.text.clone()),
+                    tool_calls: None,
                 },
                 finish_reason: finish_meta.map(|meta| meta.reason.as_openai_str().to_string()),
                 logprobs: self.chat_logprobs(&delta.tokens),
@@ -554,13 +582,20 @@ impl ChatCompletionRun {
 
     pub async fn collect(mut self) -> crate::Result<ChatCompletionResponse> {
         let collected = collect_stream_output(&mut self.rx).await?;
-        Ok(self.response(
-            &StreamDelta {
-                text: collected.text,
-                tokens: collected.tokens,
-            },
-            Some(&collected.finish_meta),
-        ))
+        match self.structured_output_mode {
+            ChatStructuredResponseMode::PlainText | ChatStructuredResponseMode::JsonText => {
+                Ok(self.response(
+                    &StreamDelta {
+                        text: collected.text,
+                        tokens: collected.tokens,
+                    },
+                    Some(&collected.finish_meta),
+                ))
+            }
+            ChatStructuredResponseMode::ToolCall => {
+                Ok(self.tool_call_response(&collected.text, &collected.finish_meta))
+            }
+        }
     }
 
     fn chat_logprobs(&self, tokens: &[InferenceOutput]) -> Option<ChatCompletionLogprobs> {
@@ -583,6 +618,84 @@ impl ChatCompletionRun {
                 })
                 .collect(),
         })
+    }
+
+    fn tool_call_response(
+        &self,
+        text: &str,
+        finish_meta: &FinishMetadata,
+    ) -> ChatCompletionResponse {
+        let parsed = from_str::<Value>(text)
+            .ok()
+            .and_then(parse_structured_assistant_output);
+        let (message, finish_reason) = match parsed {
+            Some(StructuredAssistantOutput::Message { content }) => (
+                ChatMessage {
+                    role: "assistant".to_string(),
+                    content: Some(content),
+                    tool_calls: None,
+                    tool_call_id: None,
+                },
+                finish_meta.reason.as_openai_str().to_string(),
+            ),
+            Some(StructuredAssistantOutput::ToolCall { name, arguments }) => (
+                ChatMessage {
+                    role: "assistant".to_string(),
+                    content: None,
+                    tool_calls: Some(vec![ChatCompletionMessageToolCall {
+                        id: format!("call_{}", Uuid::new_v4().as_simple()),
+                        ty: "function".to_string(),
+                        function: ChatCompletionMessageToolCallFunction {
+                            name,
+                            arguments: arguments.to_string(),
+                        },
+                    }]),
+                    tool_call_id: None,
+                },
+                "tool_calls".to_string(),
+            ),
+            None => (
+                ChatMessage {
+                    role: "assistant".to_string(),
+                    content: Some(text.to_string()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                },
+                finish_meta.reason.as_openai_str().to_string(),
+            ),
+        };
+
+        ChatCompletionResponse {
+            id: self.id.clone(),
+            object: "chat.completion".to_string(),
+            created: self.created,
+            model: self.model.clone(),
+            choices: vec![ChatCompletionResponseChoice {
+                index: 0,
+                message,
+                finish_reason: Some(finish_reason),
+                logprobs: None,
+            }],
+        }
+    }
+}
+
+enum StructuredAssistantOutput {
+    Message { content: String },
+    ToolCall { name: String, arguments: Value },
+}
+
+fn parse_structured_assistant_output(value: Value) -> Option<StructuredAssistantOutput> {
+    let ty = value.get("type")?.as_str()?;
+    match ty {
+        "message" => Some(StructuredAssistantOutput::Message {
+            content: value.get("content")?.as_str()?.to_string(),
+        }),
+        "tool_call" => Some(StructuredAssistantOutput::ToolCall {
+            name: value.get("name")?.as_str()?.to_string(),
+            arguments: value.get("arguments")?.clone(),
+        }),
+        _ => None,
     }
 }
 
@@ -686,17 +799,45 @@ fn elapsed_ms(start: Instant) -> u64 {
     start.elapsed().as_millis() as u64
 }
 
-fn build_chat_prompt(messages: &[ChatMessage]) -> crate::Result<String> {
+fn build_chat_prompt(
+    messages: &[ChatMessage],
+    prompt_preamble: Option<&str>,
+    structured_output: bool,
+) -> crate::Result<String> {
     let mut prompt = String::new();
+    if let Some(prompt_preamble) = prompt_preamble {
+        prompt.push_str("System: ");
+        prompt.push_str(prompt_preamble);
+        prompt.push_str("\n\n");
+    }
     for msg in messages {
         let role = normalize_chat_role(&msg.role)
             .ok_or_else(|| crate::Error::bad_request(format!("unknown chat role: {}", msg.role)))?;
         prompt.push_str(role);
         prompt.push_str(": ");
-        prompt.push_str(&msg.content);
+        if let Some(content) = msg.content.as_deref() {
+            prompt.push_str(content);
+        }
+        if let Some(tool_calls) = msg.tool_calls.as_ref() {
+            if !tool_calls.is_empty() {
+                if msg
+                    .content
+                    .as_deref()
+                    .is_some_and(|content| !content.is_empty())
+                {
+                    prompt.push('\n');
+                }
+                prompt.push_str(
+                    &to_string(tool_calls).unwrap_or_else(|_| "<tool_calls>".to_string()),
+                );
+            }
+        }
         prompt.push_str("\n\n");
     }
-    prompt.push_str("Assistant: <think");
+    prompt.push_str("Assistant: ");
+    if !structured_output {
+        prompt.push_str("<think");
+    }
     Ok(prompt)
 }
 
@@ -708,9 +849,75 @@ fn normalize_chat_role(role: &str) -> Option<&'static str> {
         Some("Assistant")
     } else if role.eq_ignore_ascii_case("system") {
         Some("System")
+    } else if role.eq_ignore_ascii_case("tool") {
+        Some("Tool")
     } else {
         None
     }
 }
 
 pub type ApiService = HttpApiService;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference_core::{FinishReason, TimingBreakdownMs};
+    use sonic_rs::{from_str, json};
+
+    fn finish_metadata(reason: FinishReason) -> FinishMetadata {
+        FinishMetadata {
+            reason,
+            matched_stop_suffix: None,
+            matched_stop_suffix_index: None,
+            max_new_tokens: 16,
+            generated_tokens: 1,
+            timings_ms: Some(TimingBreakdownMs::default()),
+        }
+    }
+
+    fn make_chat_run(mode: ChatStructuredResponseMode) -> ChatCompletionRun {
+        let (_tx, rx) = mpsc::channel(1);
+        ChatCompletionRun {
+            id: "chatcmpl_test".to_string(),
+            created: 0,
+            model: "test-model".to_string(),
+            stream_requested: false,
+            include_logprobs: false,
+            structured_output_mode: mode,
+            rx,
+        }
+    }
+
+    #[test]
+    fn tool_call_response_maps_wrapper_json() {
+        let run = make_chat_run(ChatStructuredResponseMode::ToolCall);
+        let response = run.tool_call_response(
+            r#"{"type":"tool_call","name":"weather","arguments":{"city":"Shanghai","unit":"c"}}"#,
+            &finish_metadata(FinishReason::Stop),
+        );
+
+        let choice = &response.choices[0];
+        assert_eq!(choice.finish_reason.as_deref(), Some("tool_calls"));
+        assert!(choice.message.content.is_none());
+        let tool_calls = choice.message.tool_calls.as_ref().expect("tool calls");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].ty, "function");
+        assert_eq!(tool_calls[0].function.name, "weather");
+        assert_eq!(
+            from_str::<Value>(&tool_calls[0].function.arguments).unwrap(),
+            json!({"city": "Shanghai", "unit": "c"})
+        );
+    }
+
+    #[test]
+    fn tool_call_response_falls_back_to_plain_text_for_invalid_json() {
+        let run = make_chat_run(ChatStructuredResponseMode::ToolCall);
+        let response =
+            run.tool_call_response("not valid json", &finish_metadata(FinishReason::Stop));
+
+        let choice = &response.choices[0];
+        assert_eq!(choice.finish_reason.as_deref(), Some("stop"));
+        assert_eq!(choice.message.content.as_deref(), Some("not valid json"));
+        assert!(choice.message.tool_calls.is_none());
+    }
+}

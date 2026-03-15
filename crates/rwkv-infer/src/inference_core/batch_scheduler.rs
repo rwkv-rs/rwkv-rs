@@ -182,7 +182,8 @@ mod tests {
         let entry_id = Uuid::new_v4();
         let mut scheduler = Scheduler::new(1, 16);
         let mut entries = HashMap::new();
-        let mut entry = RequestState::new(entry_id, SamplingConfig::default(), Vec::new(), None);
+        let mut entry =
+            RequestState::new(entry_id, SamplingConfig::default(), Vec::new(), None, None);
         entry.phase = RequestPhase::Cancelled;
         entries.insert(entry_id, entry);
         scheduler.push_waiting(entry_id);
@@ -200,7 +201,8 @@ mod tests {
         let entry_id = Uuid::new_v4();
         let mut scheduler = Scheduler::new(1, 4);
         let mut entries = HashMap::new();
-        let mut entry = RequestState::new(entry_id, SamplingConfig::default(), Vec::new(), None);
+        let mut entry =
+            RequestState::new(entry_id, SamplingConfig::default(), Vec::new(), None, None);
         entry.input_token_ids = vec![1, 2, 3, 4, 5];
         entries.insert(entry_id, entry);
         scheduler.push_waiting(entry_id);

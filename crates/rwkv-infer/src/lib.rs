@@ -23,9 +23,9 @@ pub use access::ipc_api::{IpcClientConfig, IpcOpenAiClient, IpcServer, IpcServer
 pub use access::local_api::{LocalInferenceClient, RwkvInferClient};
 pub use error::{Error, Result};
 pub use inference_core::{
-    InferenceExecutionConfig, InferenceExecutionLoop, InferenceSubmitCommand,
-    InferenceSubmitHandle, InferenceSubmitResult, ModelForward, RequestedTokenLogprobsConfig,
-    SamplingConfig, TokenLogprobsConfig,
+    ConstraintSpec, InferenceExecutionConfig, InferenceExecutionLoop, InferenceSubmitCommand,
+    InferenceSubmitHandle, InferenceSubmitResult, LogitsOutput, ModelForward,
+    RequestedTokenLogprobsConfig, SamplingConfig, TokenLogprobsConfig,
 };
 pub use model_pool::{
     LoadedModelGroup, LoadedModelRegistry, ModelEngineFactory, ModelRequestRouter,

@@ -25,7 +25,7 @@ impl LocalInferenceClient {
     ) -> crate::Result<mpsc::Receiver<EngineEvent>> {
         let submit = self
             .engine
-            .submit_text(input_text, sampling, stop_suffixes, None, None)
+            .submit_text(input_text, sampling, stop_suffixes, None, None, None)
             .await?;
         expect_submit_receiver(submit)
     }
