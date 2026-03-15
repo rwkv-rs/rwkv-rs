@@ -11,7 +11,7 @@ use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
-use serde_json::Value;
+use sonic_rs::Value;
 use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
@@ -91,8 +91,8 @@ impl Benchmark for MbppPlus {
                 prompt: item.prompt,
                 entry_point: item.entry_point,
                 canonical_solution: item.canonical_solution,
-                base_input: serde_json::to_string(&item.base_input).unwrap(),
-                plus_input: serde_json::to_string(&item.plus_input).unwrap(),
+                base_input: sonic_rs::to_string(&item.base_input).unwrap(),
+                plus_input: sonic_rs::to_string(&item.plus_input).unwrap(),
                 atol: item.atol.unwrap_or(0.0),
             })
             .collect();
@@ -174,8 +174,6 @@ impl Benchmark for MbppPlus {
         verdict.passed
     }
 }
-
-
 
 fn get_judge_script(
     task_id: &str,
@@ -343,12 +341,12 @@ except BaseException as exc:
     emit(False, format_exception(exc))
 "#,
         imports = imports,
-        task_id = serde_json::to_string(task_id).unwrap(),
-        completion = serde_json::to_string(completion).unwrap(),
-        entry_point = serde_json::to_string(entry_point).unwrap(),
-        canonical_solution = serde_json::to_string(canonical_solution).unwrap(),
-        base_input = serde_json::to_string(base_input).unwrap(),
-        plus_input = serde_json::to_string(plus_input).unwrap(),
+        task_id = sonic_rs::to_string(task_id).unwrap(),
+        completion = sonic_rs::to_string(completion).unwrap(),
+        entry_point = sonic_rs::to_string(entry_point).unwrap(),
+        canonical_solution = sonic_rs::to_string(canonical_solution).unwrap(),
+        base_input = sonic_rs::to_string(base_input).unwrap(),
+        plus_input = sonic_rs::to_string(plus_input).unwrap(),
         atol = atol,
         timeout_secs = timeout_secs,
         helpers = helpers,

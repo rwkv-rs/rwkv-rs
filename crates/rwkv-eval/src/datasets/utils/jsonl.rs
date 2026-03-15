@@ -17,7 +17,7 @@ where
         .lines()
         .map(|line| line.unwrap())
         .filter(|line| !line.trim().is_empty())
-        .map(|line| serde_json::from_str(&line).unwrap())
+        .map(|line| sonic_rs::from_str(&line).unwrap())
         .collect()
 }
 
@@ -33,6 +33,6 @@ where
         .lines()
         .map(|line| line.unwrap())
         .filter(|line| !line.trim().is_empty())
-        .map(|line| serde_json::from_str(&line).unwrap())
+        .map(|line| sonic_rs::from_str(&line).unwrap())
         .collect()
 }

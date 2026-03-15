@@ -1,10 +1,6 @@
 use crate::datasets::{CoTMode, apply_user_assistant_template};
 
-pub fn get_expected_context(
-    prompt: &str,
-    code: Option<&str>,
-    cot_mode: CoTMode,
-) -> String {
+pub fn get_expected_context(prompt: &str, code: Option<&str>, cot_mode: CoTMode) -> String {
     let user_part = format!(
         concat!(
             "You are a top-level code master.\n",
@@ -33,12 +29,7 @@ pub fn get_expected_context(
     apply_user_assistant_template(user_part, assistant_part)
 }
 
-pub fn get_judge_script(
-    program: &str,
-    test: &str,
-    entry_point: &str,
-    timeout_secs: i32,
-) -> String {
+pub fn get_judge_script(program: &str, test: &str, entry_point: &str, timeout_secs: i32) -> String {
     let imports = "import contextlib\nimport json\nimport signal";
     let helpers = r#"
 class TimeoutException(Exception):
@@ -105,9 +96,9 @@ else:
     emit(True, "")
 "#,
         imports = imports,
-        program = serde_json::to_string(program).unwrap(),
-        test = serde_json::to_string(test).unwrap(),
-        entry_point = serde_json::to_string(entry_point).unwrap(),
+        program = sonic_rs::to_string(program).unwrap(),
+        test = sonic_rs::to_string(test).unwrap(),
+        entry_point = sonic_rs::to_string(entry_point).unwrap(),
         timeout_secs = timeout_secs,
         helpers = helpers,
     )

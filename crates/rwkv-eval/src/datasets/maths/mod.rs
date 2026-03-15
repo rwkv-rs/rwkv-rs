@@ -4,13 +4,8 @@ use crate::datasets::{
 use crate::inferers::{CompletionRequest, CompletionResponse};
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
-use async_openai::types::chat::{
-    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
-    ChatCompletionRequestUserMessage, CreateChatCompletionRequest, ResponseFormat,
-    ResponseFormatJsonSchema,
-};
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use sonic_rs::{Value, json, prelude::*};
 
 pub mod aime24;
 pub mod aime25;
@@ -37,11 +32,69 @@ pub mod omni_math;
 pub mod simpleqa;
 pub mod svamp;
 
-pub fn get_expect_context(
-    subject: &str,
-    question: &str,
-    cot_mode: CoTMode,
-) -> String {
+#[derive(Debug, Serialize)]
+struct MathsJudgeRequest<'a> {
+    model: &'a str,
+    messages: Vec<MathsJudgeMessage<'a>>,
+    temperature: f32,
+    top_p: f32,
+    max_completion_tokens: u32,
+    response_format: MathsJudgeResponseFormat,
+}
+
+#[derive(Debug, Serialize)]
+struct MathsJudgeMessage<'a> {
+    role: &'static str,
+    content: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct MathsJudgeResponseFormat {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    json_schema: MathsJudgeJsonSchema,
+}
+
+#[derive(Debug, Serialize)]
+struct MathsJudgeJsonSchema {
+    description: Option<String>,
+    name: String,
+    schema: Value,
+    strict: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct MathsJudgeResponse {
+    choices: Vec<MathsJudgeChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MathsJudgeChoice {
+    finish_reason: Option<String>,
+    message: MathsJudgeResponseMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct MathsJudgeResponseMessage {
+    content: Option<String>,
+    refusal: Option<Value>,
+}
+
+pub fn json_value_as_text(value: &Value) -> Option<String> {
+    if value.is_null() {
+        None
+    } else if let Some(value) = value.as_str() {
+        Some(value.trim().to_string())
+    } else if let Some(value) = value.as_number() {
+        Some(value.to_string())
+    } else if let Some(value) = value.as_bool() {
+        Some(value.to_string())
+    } else {
+        sonic_rs::to_string(value).ok()
+    }
+}
+
+pub fn get_expect_context(subject: &str, question: &str, cot_mode: CoTMode) -> String {
     if cot_mode != CoTMode::CoT {
         panic!("maths only supports CoT mode, got {cot_mode:?}");
     }
@@ -185,65 +238,62 @@ async fn judge_once(
         model_final_answer = model_final_answer,
     );
 
-    let req = CreateChatCompletionRequest {
-        model: judger_model_name.to_string(),
+    let req = MathsJudgeRequest {
+        model: judger_model_name,
         messages: vec![
-            ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage {
+            MathsJudgeMessage {
+                role: "system",
                 content: concat!(
                     "You are a rigorous math judge.\n",
                     "Decide whether the model final answer is correct with respect to the reference answer.\n",
                     "Use the expected context as the task definition and grading boundary.\n",
                     "Return only JSON matching the provided schema."
-                )
-                .into(),
-                ..Default::default()
-            }),
-            ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
-                content: user_prompt.into(),
-                ..Default::default()
-            }),
+                ),
+            },
+            MathsJudgeMessage {
+                role: "user",
+                content: &user_prompt,
+            },
         ],
-        temperature: Some(0.0),
-        top_p: Some(1.0),
-        max_completion_tokens: Some(32),
-        response_format: Some(ResponseFormat::JsonSchema {
-            json_schema: ResponseFormatJsonSchema {
+        temperature: 0.0,
+        top_p: 1.0,
+        max_completion_tokens: 32,
+        response_format: MathsJudgeResponseFormat {
+            kind: "json_schema",
+            json_schema: MathsJudgeJsonSchema {
                 description: None,
                 name: "maths_judge".to_string(),
-                schema: Some(json!({
+                schema: json!({
                     "type": "object",
                     "properties": {
                         "is_passed": { "type": "boolean" }
                     },
                     "required": ["is_passed"],
                     "additionalProperties": false
-                })),
-                strict: Some(true),
+                }),
+                strict: true,
             },
-        }),
-        ..Default::default()
+        },
     };
 
-    let resp = judger_client
+    let resp: MathsJudgeResponse = judger_client
         .chat()
-        .create(req)
+        .create_byot(&req)
         .await
         .map_err(|err| format!("request failed: {err}"))?;
-    let message = resp
+    let choice = resp
         .choices
         .first()
-        .ok_or_else(|| "judge returned no choices".to_string())?
-        .message
-        .clone();
-    let content = message.content.ok_or_else(|| {
+        .ok_or_else(|| "judge returned no choices".to_string())?;
+    let content = choice.message.content.clone().ok_or_else(|| {
         format!(
             "judge returned no content; refusal={:?}; finish_reason={:?}",
-            message.refusal,
-            resp.choices.first().and_then(|choice| choice.finish_reason)
+            choice.message.refusal,
+            choice.finish_reason
         )
     })?;
 
-    serde_json::from_str::<JudgeResult>(&content)
+    sonic_rs::from_str::<JudgeResult>(&content)
         .map(|result| result.is_passed)
         .map_err(|err| format!("invalid judge json: {err}; content={content:?}"))
 }

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use serde::Deserialize;
-use serde_json::Value;
+use sonic_rs::{Value, prelude::*};
 
 const PARQUET_ENDPOINT: &str = "https://datasets-server.huggingface.co/parquet";
 const ROWS_ENDPOINT: &str = "https://datasets-server.huggingface.co/rows";
@@ -40,7 +40,7 @@ pub async fn get_parquet_files(dataset: &str) -> Vec<ParquetFile> {
         .await
         .unwrap();
 
-    serde_json::from_str::<ParquetResponse>(&body)
+    sonic_rs::from_str::<ParquetResponse>(&body)
         .unwrap()
         .parquet_files
 }
@@ -62,7 +62,7 @@ pub async fn get_split_row_count(dataset: &str, config: &str, split: &str) -> us
         .await
         .unwrap();
 
-    serde_json::from_str::<Value>(&body).unwrap()["num_rows_total"]
+    sonic_rs::from_str::<Value>(&body).unwrap()["num_rows_total"]
         .as_u64()
         .unwrap() as usize
 }

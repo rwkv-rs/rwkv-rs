@@ -147,7 +147,7 @@ fn parse_verdict_line(stdout: &str) -> Option<SandboxVerdictWire> {
     stdout
         .lines()
         .rev()
-        .find_map(|line| serde_json::from_str::<SandboxVerdictWire>(line.trim()).ok())
+        .find_map(|line| sonic_rs::from_str::<SandboxVerdictWire>(line.trim()).ok())
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@ use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use serde_json::{Map, Value};
+use sonic_rs::Object as Map;
 use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
@@ -65,22 +65,14 @@ impl Benchmark for Algebra222 {
             return true;
         }
 
-        let as_text = |value: &Value| match value {
-            Value::Null => None,
-            Value::String(value) => Some(value.trim().to_string()),
-            Value::Number(value) => Some(value.to_string()),
-            Value::Bool(value) => Some(value.to_string()),
-            Value::Array(value) => serde_json::to_string(value).ok(),
-            Value::Object(value) => serde_json::to_string(value).ok(),
-        };
-
-        self.test = read_csv_items::<Map<String, Value>, _>(&path)
+        self.test = read_csv_items::<Map, _>(&path)
             .into_iter()
             .filter_map(|row| {
                 Some((
-                    row.get("question").and_then(|value| as_text(value))?,
-                    row.get("final_answer")
-                        .and_then(|value| as_text(value))
+                    row.get(&"question")
+                        .and_then(crate::datasets::maths::json_value_as_text)?,
+                    row.get(&"final_answer")
+                        .and_then(crate::datasets::maths::json_value_as_text)
                         .unwrap_or_default(),
                     "math".to_string(),
                 ))

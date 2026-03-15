@@ -10,6 +10,7 @@ use chrono::Utc;
 use futures::{StreamExt, stream::FuturesUnordered};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
+use sonic_rs::{Value, from_str, json, prelude::*, to_string_pretty};
 use tokio::sync::{Semaphore, mpsc};
 
 use crate::metrics::{AggregateMetrics, RequestMetrics, StageBreakdownMs, aggregate_metrics};
@@ -250,16 +251,16 @@ fn format_reqwest_error(context: &str, err: &reqwest::Error) -> String {
     message
 }
 
-fn extract_chunk_text_from_value(value: &serde_json::Value) -> String {
-    if let Some(choices) = value.get("choices").and_then(serde_json::Value::as_array)
+fn extract_chunk_text_from_value(value: &Value) -> String {
+    if let Some(choices) = value.get("choices").and_then(|value| value.as_array())
         && let Some(choice) = choices.first()
     {
-        if let Some(text) = choice.get("text").and_then(serde_json::Value::as_str) {
+        if let Some(text) = choice.get("text").and_then(|value| value.as_str()) {
             return text.to_string();
         }
 
         if let Some(message) = choice.get("message")
-            && let Some(content) = message.get("content").and_then(serde_json::Value::as_str)
+            && let Some(content) = message.get("content").and_then(|value| value.as_str())
         {
             return content.to_string();
         }
@@ -267,17 +268,17 @@ fn extract_chunk_text_from_value(value: &serde_json::Value) -> String {
     String::new()
 }
 
-fn has_finish_reason(value: &serde_json::Value) -> bool {
+fn has_finish_reason(value: &Value) -> bool {
     value
         .get("choices")
-        .and_then(serde_json::Value::as_array)
+        .and_then(|value| value.as_array())
         .and_then(|choices| choices.first())
         .and_then(|choice| choice.get("finish_reason"))
-        .and_then(serde_json::Value::as_str)
+        .and_then(|value| value.as_str())
         .is_some()
 }
 
-fn parse_timings_ms(value: &serde_json::Value) -> StageBreakdownMs {
+fn parse_timings_ms(value: &Value) -> StageBreakdownMs {
     let timings = value.get("timings_ms").cloned().unwrap_or_default();
     StageBreakdownMs {
         validate_ms: read_from(&timings, "validate_ms"),
@@ -292,8 +293,8 @@ fn parse_timings_ms(value: &serde_json::Value) -> StageBreakdownMs {
     }
 }
 
-fn read_from(value: &serde_json::Value, key: &str) -> Option<f64> {
-    value.get(key).and_then(serde_json::Value::as_f64)
+fn read_from(value: &Value, key: &str) -> Option<f64> {
+    value.get(key).and_then(|value| value.as_f64())
 }
 
 fn parse_sse_line(
@@ -321,7 +322,7 @@ fn parse_sse_line(
         return true;
     }
 
-    let value = match serde_json::from_str::<serde_json::Value>(payload) {
+    let value = match from_str::<Value>(payload) {
         Ok(value) => value,
         Err(_) => return false,
     };
@@ -357,7 +358,7 @@ async fn run_single_request(
     let start = Instant::now();
 
     let payload = match cfg.endpoint {
-        Endpoint::Completions => serde_json::json!({
+        Endpoint::Completions => json!({
             "model": cfg.model,
             "prompt": prompt,
             "stream": cfg.stream,
@@ -369,7 +370,7 @@ async fn run_single_request(
             "repetition_penalty": cfg.repetition_penalty,
             "penalty_decay": cfg.penalty_decay,
         }),
-        Endpoint::ChatCompletions => serde_json::json!({
+        Endpoint::ChatCompletions => json!({
             "model": cfg.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": cfg.stream,
@@ -529,7 +530,7 @@ async fn run_single_request(
     let body = response.text().await;
     match body {
         Ok(raw) => {
-            let parsed = serde_json::from_str::<serde_json::Value>(&raw);
+            let parsed = from_str::<Value>(&raw);
             if let Ok(value) = parsed {
                 metrics.stage_ms = parse_timings_ms(&value);
                 let text = extract_chunk_text_from_value(&value);
@@ -752,6 +753,6 @@ pub fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, serde_json::to_string_pretty(value)?)?;
+    std::fs::write(path, to_string_pretty(value)?)?;
     Ok(())
 }

@@ -12,7 +12,9 @@ walkdir = { workspace = true }
 indicatif = { workspace = true }
 parquet = { workspace = true }
 csv = { workspace = true }
-serde_json = { workspace = true }
+sonic-rs = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

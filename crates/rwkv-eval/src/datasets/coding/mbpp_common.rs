@@ -32,7 +32,6 @@ pub fn get_expected_context(prompt: &str, code: &str, cot_mode: CoTMode) -> Stri
     apply_user_assistant_template(user_part, assistant_part)
 }
 
-
 pub fn get_judge_script(
     completion: &str,
     test_imports: &[String],
@@ -97,9 +96,9 @@ else:
     emit(True, "")
 "#,
         imports = imports,
-        completion = serde_json::to_string(completion).unwrap(),
-        test_imports = serde_json::to_string(test_imports).unwrap(),
-        test_list = serde_json::to_string(test_list).unwrap(),
+        completion = sonic_rs::to_string(completion).unwrap(),
+        test_imports = sonic_rs::to_string(test_imports).unwrap(),
+        test_list = sonic_rs::to_string(test_list).unwrap(),
         timeout_secs = timeout_secs,
         helpers = helpers,
     )

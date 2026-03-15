@@ -20,7 +20,7 @@ pub enum BenchError {
     #[error(transparent)]
     Http(#[from] reqwest::Error),
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Json(#[from] sonic_rs::Error),
     #[error(transparent)]
     Join(#[from] tokio::task::JoinError),
     #[error(transparent)]

@@ -206,6 +206,11 @@ impl Tokenizer {
         self.tokens.len()
     }
 
+    /// 获取按 token id 排列的原始词表字节。
+    pub fn vocab_tokens(&self) -> &[Vec<u8>] {
+        &self.tokens
+    }
+
     /// 获取完整词汇表
     ///
     /// # 返回

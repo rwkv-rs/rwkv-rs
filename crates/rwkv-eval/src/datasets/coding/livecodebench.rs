@@ -158,7 +158,7 @@ impl Benchmark for LiveCodeBench {
         }
 
         let item = &self.test[index];
-        
+
         let prompt = &item.prompt.trim();
         let starter_code = &item.starter_code.trim_end();
         let has_starter_code = !starter_code.trim().is_empty();
@@ -206,13 +206,13 @@ impl Benchmark for LiveCodeBench {
                 panic!("livecodebench only supports CoT, got {cot_mode:?}")
             }
         };
-    
+
         apply_user_assistant_template(user_part, assistant_part)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
         let item = &self.test[index];
-        serde_json::json!({
+        sonic_rs::json!({
             "public_test_cases": item.public_test_cases,
             "private_test_cases": item.private_test_cases,
             "metadata": item.metadata,
@@ -279,7 +279,6 @@ impl Benchmark for LiveCodeBench {
         verdict.passed
     }
 }
-
 
 fn get_judge_script(
     completion: &str,
@@ -729,10 +728,10 @@ else:
     emit(result == "passed", "" if result == "passed" else str(result))
 "#,
         imports = imports,
-        completion = serde_json::to_string(completion).unwrap(),
-        public_test_cases = serde_json::to_string(public_test_cases).unwrap(),
-        private_test_cases = serde_json::to_string(private_test_cases).unwrap(),
-        metadata = serde_json::to_string(metadata).unwrap(),
+        completion = sonic_rs::to_string(completion).unwrap(),
+        public_test_cases = sonic_rs::to_string(public_test_cases).unwrap(),
+        private_test_cases = sonic_rs::to_string(private_test_cases).unwrap(),
+        metadata = sonic_rs::to_string(metadata).unwrap(),
         timeout_secs = timeout_secs,
         helpers = helpers,
     )

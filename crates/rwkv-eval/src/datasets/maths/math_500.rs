@@ -10,7 +10,7 @@ use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use serde_json::{Map, Value};
+use sonic_rs::{Object as Map, Value, prelude::*};
 use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
@@ -65,17 +65,9 @@ impl Benchmark for Math500 {
             return true;
         }
 
-        let as_text = |value: &Value| match value {
-            Value::Null => None,
-            Value::String(value) => Some(value.trim().to_string()),
-            Value::Number(value) => Some(value.to_string()),
-            Value::Bool(value) => Some(value.to_string()),
-            Value::Array(value) => serde_json::to_string(value).ok(),
-            Value::Object(value) => serde_json::to_string(value).ok(),
-        };
-        let take = |row: &Map<String, Value>, keys: &[&str]| {
+        let take = |row: &Map, keys: &[&str]| {
             keys.iter()
-                .find_map(|key| row.get(*key).and_then(|value| as_text(value)))
+                .find_map(|key| row.get(&key).and_then(crate::datasets::maths::json_value_as_text))
         };
 
         self.test = read_jsonl_items::<Value, _>(&path)

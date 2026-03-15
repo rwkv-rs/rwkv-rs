@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use plotters::prelude::*;
+use sonic_rs::from_str;
 
 use crate::serving::{ServeRunResult, SweepRunResult};
 use crate::{BenchError, Result};
@@ -382,11 +383,11 @@ pub fn generate_sweep_report(run: &SweepRunResult, report_dir: &Path) -> Result<
 pub fn load_report_input(path: &Path) -> Result<ReportInput> {
     let raw = std::fs::read_to_string(path)?;
 
-    if let Ok(run) = serde_json::from_str::<SweepRunResult>(&raw) {
+    if let Ok(run) = from_str::<SweepRunResult>(&raw) {
         return Ok(ReportInput::Sweep(run));
     }
 
-    if let Ok(run) = serde_json::from_str::<ServeRunResult>(&raw) {
+    if let Ok(run) = from_str::<ServeRunResult>(&raw) {
         return Ok(ReportInput::Serve(run));
     }
 

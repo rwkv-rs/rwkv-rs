@@ -4,7 +4,7 @@ use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use langdetect_rs::detector_factory::DetectorFactory;
 use regex::{Captures, Regex, RegexBuilder};
-use serde_json::{Map, Value};
+use sonic_rs::{Object as Map, Value, prelude::*};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstructionKind {
@@ -38,7 +38,7 @@ pub enum InstructionKind {
 #[derive(Debug, Clone)]
 pub struct InstructionSpec {
     pub kind: InstructionKind,
-    pub args: Map<String, Value>,
+    pub args: Map,
 }
 
 #[derive(Debug, Clone)]
@@ -123,7 +123,7 @@ impl InstructionKind {
 }
 
 impl InstructionSpec {
-    pub fn new(id: impl AsRef<str>, args: Map<String, Value>) -> Self {
+    pub fn new(id: impl AsRef<str>, args: Map) -> Self {
         Self {
             kind: InstructionKind::parse(id.as_ref()),
             args,
@@ -182,7 +182,7 @@ pub fn describe_instructions(instructions: &[InstructionSpec]) -> String {
                 format!(
                     "{} {}",
                     instruction.kind.raw_id(),
-                    serde_json::to_string(&instruction.args).unwrap()
+                    sonic_rs::to_string(&instruction.args).unwrap()
                 )
             }
         })
@@ -335,7 +335,7 @@ fn check_instruction(instruction: &InstructionSpec, response: &str) -> bool {
 fn arg_str<'a>(instruction: &'a InstructionSpec, key: &str) -> &'a str {
     instruction
         .args
-        .get(key)
+        .get(&key)
         .and_then(Value::as_str)
         .unwrap_or_else(|| {
             panic!(
@@ -348,7 +348,7 @@ fn arg_str<'a>(instruction: &'a InstructionSpec, key: &str) -> &'a str {
 fn arg_usize(instruction: &InstructionSpec, key: &str) -> usize {
     instruction
         .args
-        .get(key)
+        .get(&key)
         .and_then(Value::as_u64)
         .unwrap_or_else(|| {
             panic!(
@@ -361,7 +361,7 @@ fn arg_usize(instruction: &InstructionSpec, key: &str) -> usize {
 fn arg_str_list<'a>(instruction: &'a InstructionSpec, key: &str) -> Vec<&'a str> {
     instruction
         .args
-        .get(key)
+        .get(&key)
         .and_then(Value::as_array)
         .unwrap_or_else(|| {
             panic!(
@@ -544,7 +544,7 @@ fn check_json_format(value: &str) -> bool {
         .unwrap_or(value)
         .trim();
     let value = value.strip_suffix("```").unwrap_or(value).trim();
-    serde_json::from_str::<Value>(value).is_ok()
+    sonic_rs::from_str::<Value>(value).is_ok()
 }
 
 fn count_sections(value: &str, splitter: &str) -> usize {
@@ -724,13 +724,13 @@ mod tests {
         InstructionSpec, build_prompt, check_json_format, count_capital_words,
         count_highlighted_sections, count_sentences, evaluate_response,
     };
-    use serde_json::{Map, Value, json};
+    use sonic_rs::{Object as Map, Value, json, prelude::*};
 
     fn spec(id: &str, args: Value) -> InstructionSpec {
-        let Value::Object(args) = args else {
+        let Some(args) = args.as_object() else {
             panic!("expected object args");
         };
-        InstructionSpec::new(id, args)
+        InstructionSpec::new(id, args.clone())
     }
 
     #[test]
