@@ -3,7 +3,8 @@ use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_gzip_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
+    SamplingConfig,
 };
 use crate::evaluators::coding::run_python_verdict_script;
 use async_openai::Client;
@@ -141,10 +142,10 @@ impl Benchmark for MbppPlus {
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
-    ) -> bool {
+    ) -> Record {
         let item = &self.test[index];
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
-        let completion = get_code_completion_with_cot_mode(
+        let generated = get_code_completion_with_cot_mode(
             model_client,
             model_name,
             &expected_context,
@@ -153,9 +154,10 @@ impl Benchmark for MbppPlus {
             1024,
         )
         .await;
+        let answer = extract_code(&generated.completion);
         let verdict = run_python_verdict_script(&get_judge_script(
             &item.task_id,
-            &extract_code(&completion),
+            &answer,
             &item.entry_point,
             &item.canonical_solution,
             &item.base_input,
@@ -171,7 +173,18 @@ impl Benchmark for MbppPlus {
             )
         });
 
-        verdict.passed
+        let ref_answer = self.get_ref_answer(index);
+        Record {
+            context: generated.context,
+            answer,
+            ref_answer,
+            is_passed: verdict.passed,
+            fail_reason: if verdict.passed {
+                String::new()
+            } else {
+                verdict.fail_reason
+            },
+        }
     }
 }
 

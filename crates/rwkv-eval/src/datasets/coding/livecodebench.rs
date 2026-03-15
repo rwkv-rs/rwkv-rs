@@ -1,11 +1,11 @@
-use crate::datasets::coding::{extract_code, get_prompt_for_code_completion};
+use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
-    apply_user_assistant_template, get_prompt_for_cot,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
+    SamplingConfig, apply_user_assistant_template,
 };
-use crate::evaluators::coding::{get_completion, run_python_verdict_script};
+use crate::evaluators::coding::run_python_verdict_script;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
@@ -229,32 +229,20 @@ impl Benchmark for LiveCodeBench {
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
-    ) -> bool {
+    ) -> Record {
         let item = &self.test[index];
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
-        let prompt_for_cot = get_prompt_for_cot(&expected_context);
-        let cot_completion = get_completion(
+        let generated = get_code_completion_with_cot_mode(
             model_client,
             model_name,
-            &prompt_for_cot,
+            &expected_context,
             &LIVECODEBENCH_INFO.sampling_config,
-            vec!["</think>".to_string()],
+            cot_mode,
             8192,
         )
         .await;
-        let prompt_for_code =
-            get_prompt_for_code_completion(&expected_context, Some(&cot_completion));
-        let completion = get_completion(
-            model_client,
-            model_name,
-            &prompt_for_code,
-            &LIVECODEBENCH_INFO.sampling_config,
-            vec!["```".to_string()],
-            8192,
-        )
-        .await;
-        let completion = extract_code(&completion);
-        let completion = if item.starter_code.trim().is_empty() {
+        let completion = extract_code(&generated.completion);
+        let answer = if item.starter_code.trim().is_empty() {
             completion
         } else if completion.is_empty() {
             item.starter_code.trim_end().to_string()
@@ -262,7 +250,7 @@ impl Benchmark for LiveCodeBench {
             format!("{}\n{}", item.starter_code.trim_end(), completion)
         };
         let verdict = run_python_verdict_script(&get_judge_script(
-            &completion,
+            &answer,
             &item.public_test_cases,
             &item.private_test_cases,
             &item.metadata,
@@ -276,7 +264,18 @@ impl Benchmark for LiveCodeBench {
             )
         });
 
-        verdict.passed
+        let ref_answer = self.get_ref_answer(index);
+        Record {
+            context: generated.context,
+            answer,
+            ref_answer,
+            is_passed: verdict.passed,
+            fail_reason: if verdict.passed {
+                String::new()
+            } else {
+                verdict.fail_reason
+            },
+        }
     }
 }
 

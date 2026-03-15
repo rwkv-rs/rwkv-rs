@@ -13,7 +13,8 @@ use crate::datasets::knowledge::{
 };
 use crate::datasets::utils::csv::read_csv_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
+    SamplingConfig,
 };
 
 #[distributed_slice(ALL_BENCHMARKS)]
@@ -143,7 +144,7 @@ impl Benchmark for GpqaMain {
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
-    ) -> bool {
+    ) -> Record {
         let item = &self.test[index];
         let (choices, answer_index) = ordered_gpqa_choices(
             &item.record_id,
@@ -156,8 +157,7 @@ impl Benchmark for GpqaMain {
             ],
         );
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
-
-        get_final_answer_with_cot_mode(
+        let generated = get_final_answer_with_cot_mode(
             model_client,
             model_name,
             &choices,
@@ -165,7 +165,23 @@ impl Benchmark for GpqaMain {
             &GPQA_MAIN_INFO.sampling_config,
             cot_mode,
         )
-        .await
-            == answer_index
+        .await;
+        let ref_answer = self.get_ref_answer(index);
+        let is_passed = generated.answer_index == answer_index;
+
+        Record {
+            context: generated.context,
+            answer: generated.answer_text.clone(),
+            ref_answer: ref_answer.clone(),
+            is_passed,
+            fail_reason: if is_passed {
+                String::new()
+            } else {
+                format!(
+                    "predicted {}, expected {}",
+                    generated.answer_text, ref_answer
+                )
+            },
+        }
     }
 }

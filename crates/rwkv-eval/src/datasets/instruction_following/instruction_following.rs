@@ -1,7 +1,8 @@
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
+    SamplingConfig,
 };
 use crate::evaluators::instruction_following::{
     InstructionSpec, build_prompt, describe_instructions, evaluate_response, generate_response,
@@ -152,7 +153,7 @@ impl Benchmark for Ifeval {
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
-    ) -> bool {
+    ) -> Record {
         let prompt = self.get_expected_context(index, cot_mode, n_shot);
         let response = generate_response(
             model_client,
@@ -161,10 +162,36 @@ impl Benchmark for Ifeval {
             &IFEVAL_INFO.sampling_config,
         )
         .await;
+        let ref_answer = self.get_ref_answer(index);
+        let context = format!("{prompt}{response}");
         if response.trim().is_empty() {
-            return false;
+            return Record {
+                context,
+                answer: response,
+                ref_answer,
+                is_passed: false,
+                fail_reason: "model returned empty response".to_string(),
+            };
         }
 
-        evaluate_response(&self.test[index].instructions, &response).all_passed
+        let eval = evaluate_response(&self.test[index].instructions, &response);
+        let failed_checks = eval
+            .checks
+            .iter()
+            .filter(|check| !check.passed)
+            .map(|check| format!("{:?}", check.kind))
+            .collect::<Vec<_>>();
+
+        Record {
+            context,
+            answer: response,
+            ref_answer,
+            is_passed: eval.all_passed,
+            fail_reason: if eval.all_passed {
+                String::new()
+            } else {
+                format!("failed instruction checks: {}", failed_checks.join(", "))
+            },
+        }
     }
 }

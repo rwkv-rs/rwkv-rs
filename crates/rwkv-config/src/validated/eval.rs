@@ -11,6 +11,11 @@ use crate::raw::eval::{ApiConfig, SpaceDbConfig};
 pub struct FinalEvalConfig {
     pub experiment_name: String,
     pub experiment_desc: String,
+    pub run_mode: String,
+    pub attempt_concurrency: usize,
+    pub judger_concurrency: usize,
+    pub checker_concurrency: usize,
+    pub db_pool_max_connections: u32,
     pub model_arch_versions: Vec<String>,
     pub model_data_versions: Vec<String>,
     pub model_num_params: Vec<String>,

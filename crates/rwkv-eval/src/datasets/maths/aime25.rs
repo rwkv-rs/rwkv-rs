@@ -4,7 +4,8 @@ use crate::datasets::maths::{
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
+    SamplingConfig,
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -131,9 +132,9 @@ impl Benchmark for Aime25 {
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
-    ) -> bool {
+    ) -> Record {
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
-        let final_answer = get_final_answer_with_cot_mode(
+        let generated = get_final_answer_with_cot_mode(
             model_client,
             model_name,
             &expected_context,
@@ -146,13 +147,22 @@ impl Benchmark for Aime25 {
         let judger_model_name = judger_model_name
             .unwrap_or_else(|| panic!("benchmark requires judger_model_name but got None"));
 
-        judge_with_retry(
+        let ref_answer = self.get_ref_answer(index);
+        let outcome = judge_with_retry(
             judger_client,
             judger_model_name,
             &expected_context,
-            &self.test[index].answer,
-            &final_answer,
+            &ref_answer,
+            &generated.answer,
         )
-        .await
+        .await;
+
+        Record {
+            context: generated.context,
+            answer: generated.answer,
+            ref_answer,
+            is_passed: outcome.is_passed,
+            fail_reason: outcome.fail_reason,
+        }
     }
 }

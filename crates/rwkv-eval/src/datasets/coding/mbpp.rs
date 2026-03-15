@@ -5,7 +5,8 @@ use crate::datasets::utils::hf::download_hf_parquet_splits;
 use crate::datasets::utils::hf::viewer::get_split_row_count;
 use crate::datasets::utils::parquet::{get_i64, get_string, get_string_list, read_parquet_items};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
+    SamplingConfig,
 };
 use crate::evaluators::coding::run_python_verdict_script;
 use async_openai::Client;
@@ -129,10 +130,10 @@ impl Benchmark for Mbpp {
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
-    ) -> bool {
+    ) -> Record {
         let item = &self.test[index];
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
-        let completion = get_code_completion_with_cot_mode(
+        let generated = get_code_completion_with_cot_mode(
             model_client,
             model_name,
             &expected_context,
@@ -141,9 +142,9 @@ impl Benchmark for Mbpp {
             1024,
         )
         .await;
-        let completion = extract_code(&completion);
+        let answer = extract_code(&generated.completion);
         let verdict = run_python_verdict_script(&get_judge_script(
-            &completion,
+            &answer,
             &item.test_imports,
             &item.test_list,
             3,
@@ -156,6 +157,17 @@ impl Benchmark for Mbpp {
             )
         });
 
-        verdict.passed
+        let ref_answer = self.get_ref_answer(index);
+        Record {
+            context: generated.context,
+            answer,
+            ref_answer,
+            is_passed: verdict.passed,
+            fail_reason: if verdict.passed {
+                String::new()
+            } else {
+                verdict.fail_reason
+            },
+        }
     }
 }

@@ -14,7 +14,8 @@ use crate::datasets::utils::hf::download_hf_parquet_splits;
 use crate::datasets::utils::hf::viewer::get_split_row_count;
 use crate::datasets::utils::parquet::{get_string, get_string_list, get_u8, read_parquet_items};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
+    SamplingConfig,
 };
 
 #[distributed_slice(ALL_BENCHMARKS)]
@@ -156,11 +157,10 @@ impl Benchmark for Mmlu {
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
-    ) -> bool {
+    ) -> Record {
         let item = &self.test[index];
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
-
-        get_final_answer_with_cot_mode(
+        let generated = get_final_answer_with_cot_mode(
             model_client,
             model_name,
             &item.choices,
@@ -168,7 +168,23 @@ impl Benchmark for Mmlu {
             &MMLU_INFO.sampling_config,
             cot_mode,
         )
-        .await
-            == item.answer
+        .await;
+        let ref_answer = self.get_ref_answer(index);
+        let is_passed = generated.answer_index == item.answer;
+
+        Record {
+            context: generated.context,
+            answer: generated.answer_text.clone(),
+            ref_answer: ref_answer.clone(),
+            is_passed,
+            fail_reason: if is_passed {
+                String::new()
+            } else {
+                format!(
+                    "predicted {}, expected {}",
+                    generated.answer_text, ref_answer
+                )
+            },
+        }
     }
 }

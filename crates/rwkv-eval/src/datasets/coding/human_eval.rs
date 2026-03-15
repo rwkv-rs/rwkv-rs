@@ -3,7 +3,8 @@ use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_gzip_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
+    SamplingConfig,
 };
 use crate::evaluators::coding::run_python_verdict_script;
 use async_openai::Client;
@@ -121,10 +122,10 @@ impl Benchmark for HumanEval {
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
-    ) -> bool {
+    ) -> Record {
         let item = &self.test[index];
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
-        let completion = get_code_completion_with_cot_mode(
+        let generated = get_code_completion_with_cot_mode(
             model_client,
             model_name,
             &expected_context,
@@ -133,10 +134,10 @@ impl Benchmark for HumanEval {
             1024,
         )
         .await;
-        let completion = extract_code(&completion);
-        let program = format!("{}{}", item.prompt, completion);
+        let completion = extract_code(&generated.completion);
+        let answer = format!("{}{}", item.prompt, completion);
         let verdict = run_python_verdict_script(&get_judge_script(
-            &program,
+            &answer,
             &item.test,
             &item.entry_point,
             3,
@@ -149,6 +150,16 @@ impl Benchmark for HumanEval {
             )
         });
 
-        verdict.passed
+        Record {
+            context: generated.context,
+            answer,
+            ref_answer: self.get_ref_answer(index),
+            is_passed: verdict.passed,
+            fail_reason: if verdict.passed {
+                String::new()
+            } else {
+                verdict.fail_reason
+            },
+        }
     }
 }

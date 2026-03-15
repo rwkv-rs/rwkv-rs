@@ -56,6 +56,15 @@ pub struct SamplingConfig {
     pub penalty_decay: f32,
 }
 
+#[derive(Debug, Clone)]
+pub struct Record {
+    pub context: String,
+    pub answer: String,
+    pub ref_answer: String,
+    pub is_passed: bool,
+    pub fail_reason: String,
+}
+
 pub type BenchmarkFactory = fn(PathBuf) -> Box<dyn Benchmark>;
 
 #[async_trait]
@@ -76,7 +85,7 @@ pub trait Benchmark: Send + Sync {
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
-    ) -> bool;
+    ) -> Record;
 }
 
 #[distributed_slice]
@@ -150,4 +159,12 @@ pub fn get_prompt_for_final_answer(
         .unwrap()
         .0
         .to_string()
+}
+
+pub fn render_context(expected_context: &str, replacements: &[(&str, &str)]) -> String {
+    let mut context = expected_context.to_string();
+    for (placeholder, value) in replacements {
+        context = context.replace(placeholder, value);
+    }
+    context
 }

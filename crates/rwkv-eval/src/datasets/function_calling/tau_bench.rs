@@ -7,7 +7,8 @@ use super::{
 };
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
+    SamplingConfig,
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -237,25 +238,54 @@ impl Benchmark for TauBench {
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
-    ) -> bool {
+    ) -> Record {
+        let ref_answer = self.get_ref_answer(index);
         if cot_mode != CoTMode::CoT || n_shot != 0 {
-            return false;
+            return Record {
+                context: self.get_expected_context(index, CoTMode::CoT, 0),
+                answer: String::new(),
+                ref_answer,
+                is_passed: false,
+                fail_reason: format!(
+                    "unsupported tau_bench config: cot_mode={cot_mode:?}, n_shot={n_shot}"
+                ),
+            };
         }
         let item = &self.test[index];
         let mut env = match create_domain_env(item.domain, &self.dataset_root) {
             Ok(env) => env,
-            Err(_) => return false,
+            Err(err) => {
+                return Record {
+                    context: self.get_expected_context(index, cot_mode, n_shot),
+                    answer: String::new(),
+                    ref_answer,
+                    is_passed: false,
+                    fail_reason: format!("failed to create environment: {err}"),
+                };
+            }
         };
         if let Some(initial_state) = &item.task.initial_state {
             if let Some(data) = &initial_state.initialization_data {
                 if let Some(agent_data) = &data.agent_data {
                     if env.update_agent_data(agent_data).is_err() {
-                        return false;
+                        return Record {
+                            context: self.get_expected_context(index, cot_mode, n_shot),
+                            answer: String::new(),
+                            ref_answer,
+                            is_passed: false,
+                            fail_reason: "failed to initialize agent data".to_string(),
+                        };
                     }
                 }
                 if let Some(user_data) = &data.user_data {
                     if env.update_user_data(user_data).is_err() {
-                        return false;
+                        return Record {
+                            context: self.get_expected_context(index, cot_mode, n_shot),
+                            answer: String::new(),
+                            ref_answer,
+                            is_passed: false,
+                            fail_reason: "failed to initialize user data".to_string(),
+                        };
                     }
                 }
             }
@@ -265,7 +295,13 @@ impl Benchmark for TauBench {
                 .unwrap_or(&[])
             {
                 if env.run_env_function(action).is_err() {
-                    return false;
+                    return Record {
+                        context: self.get_expected_context(index, cot_mode, n_shot),
+                        answer: String::new(),
+                        ref_answer,
+                        is_passed: false,
+                        fail_reason: "failed to run initialization action".to_string(),
+                    };
                 }
             }
         }
@@ -273,6 +309,8 @@ impl Benchmark for TauBench {
         let mut steps = Vec::<FunctionCallingStep>::new();
         let mut tool_calls = Vec::<FunctionCall>::new();
         let mut assistant_messages = Vec::<String>::new();
+        let mut last_context = self.get_expected_context(index, cot_mode, n_shot);
+        let mut last_response = String::new();
 
         for _ in 0..TAU_BENCH_MAX_STEPS {
             let cot_context =
@@ -296,6 +334,8 @@ impl Benchmark for TauBench {
                 2048,
             )
             .await;
+            last_context = format!("{decision_prompt}{response}");
+            last_response = response.clone();
 
             match parse_tool_call_or_final_answer(&response) {
                 Ok(FunctionCallingDecision::ToolCall(tool_call)) => {
@@ -312,21 +352,54 @@ impl Benchmark for TauBench {
                     assistant_messages.push(answer);
                     break;
                 }
-                Err(_) => return false,
+                Err(err) => {
+                    return Record {
+                        context: last_context,
+                        answer: last_response,
+                        ref_answer,
+                        is_passed: false,
+                        fail_reason: err,
+                    };
+                }
             }
         }
 
         if assistant_messages.is_empty() {
-            return false;
+            return Record {
+                context: last_context,
+                answer: last_response,
+                ref_answer,
+                is_passed: false,
+                fail_reason: "model never produced a final answer".to_string(),
+            };
         }
 
-        evaluate_task(
+        match evaluate_task(
             item.domain,
             &self.dataset_root,
             &item.task,
             &tool_calls,
             &assistant_messages,
         )
-        .unwrap_or(false)
+        {
+            Ok(is_passed) => Record {
+                context: last_context,
+                answer: assistant_messages.last().cloned().unwrap_or_default(),
+                ref_answer,
+                is_passed,
+                fail_reason: if is_passed {
+                    String::new()
+                } else {
+                    "task evaluation returned false".to_string()
+                },
+            },
+            Err(err) => Record {
+                context: last_context,
+                answer: assistant_messages.last().cloned().unwrap_or_default(),
+                ref_answer,
+                is_passed: false,
+                fail_reason: format!("task evaluation failed: {err}"),
+            },
+        }
     }
 }

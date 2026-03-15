@@ -1,5 +1,10 @@
 experiment_name = "your_experiment_name"
 experiment_desc = "desc desc"
+run_mode = "new"  # new / resume / rerun
+attempt_concurrency = 8
+judger_concurrency = 8
+checker_concurrency = 8
+db_pool_max_connections = 32
 
 model_arch_versions = ["rwkv7"]
 model_data_versions = ["g1d", "g1e"]

@@ -1,4 +1,6 @@
-use crate::datasets::{CoTMode, SamplingConfig, get_completions_of_cot, get_prompt_for_cot};
+use crate::datasets::{
+    CoTMode, SamplingConfig, get_completions_of_cot, get_prompt_for_cot, render_context,
+};
 use crate::evaluators::coding::get_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -13,6 +15,11 @@ pub mod human_eval_plus;
 pub mod livecodebench;
 pub mod mbpp;
 pub mod mbpp_plus;
+
+pub struct CodeGeneration {
+    pub context: String,
+    pub completion: String,
+}
 
 pub fn get_prompt_for_code_completion(
     expected_context: &str,
@@ -39,7 +46,7 @@ pub async fn get_code_completion_with_cot_mode(
     sampling_config: &SamplingConfig,
     cot_mode: CoTMode,
     max_tokens: u32,
-) -> String {
+) -> CodeGeneration {
     let prompt_for_code = match cot_mode {
         CoTMode::CoT => {
             let prompt_for_cot = get_prompt_for_cot(expected_context);
@@ -47,12 +54,33 @@ pub async fn get_code_completion_with_cot_mode(
                 get_completions_of_cot(model_client, model_name, &prompt_for_cot, sampling_config)
                     .await;
 
-            get_prompt_for_code_completion(expected_context, Some(&completions_of_cot))
+            let prompt_for_code =
+                get_prompt_for_code_completion(expected_context, Some(&completions_of_cot));
+            let completion = get_completion(
+                model_client,
+                model_name,
+                &prompt_for_code,
+                sampling_config,
+                vec!["```".to_string()],
+                max_tokens,
+            )
+            .await;
+
+            return CodeGeneration {
+                context: render_context(
+                    expected_context,
+                    &[
+                        ("<|completions_of_cot|>", &completions_of_cot),
+                        ("<|completions|>", &completion),
+                    ],
+                ),
+                completion,
+            };
         }
         CoTMode::FakeCoT | CoTMode::NoCoT => get_prompt_for_code_completion(expected_context, None),
     };
 
-    get_completion(
+    let completion = get_completion(
         model_client,
         model_name,
         &prompt_for_code,
@@ -60,7 +88,15 @@ pub async fn get_code_completion_with_cot_mode(
         vec!["```".to_string()],
         max_tokens,
     )
-    .await
+    .await;
+
+    CodeGeneration {
+        context: render_context(
+            expected_context,
+            &[("<|completions_of_cot|>", ""), ("<|completions|>", &completion)],
+        ),
+        completion,
+    }
 }
 
 pub fn extract_code(text: &str) -> String {

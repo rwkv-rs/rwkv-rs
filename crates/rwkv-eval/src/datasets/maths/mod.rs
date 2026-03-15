@@ -1,11 +1,15 @@
 use crate::datasets::{
     CoTMode, SamplingConfig, apply_user_assistant_template, get_completions_of_cot,
+    render_context,
 };
 use crate::inferers::{CompletionRequest, CompletionResponse};
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use sonic_rs::{Value, json, prelude::*};
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 pub mod aime24;
 pub mod aime25;
@@ -80,6 +84,22 @@ struct MathsJudgeResponseMessage {
     refusal: Option<Value>,
 }
 
+pub struct FreeAnswerRecord {
+    pub context: String,
+    pub answer: String,
+}
+
+pub struct JudgeOutcome {
+    pub is_passed: bool,
+    pub fail_reason: String,
+}
+
+static LLM_JUDGER_SEMAPHORE: OnceCell<Arc<Semaphore>> = OnceCell::new();
+
+pub fn set_llm_judger_semaphore(semaphore: Arc<Semaphore>) {
+    let _ = LLM_JUDGER_SEMAPHORE.set(semaphore);
+}
+
 pub fn json_value_as_text(value: &Value) -> Option<String> {
     if value.is_null() {
         None
@@ -146,7 +166,7 @@ pub async fn get_final_answer_with_cot_mode(
     expected_context: &str,
     sampling_config: &SamplingConfig,
     cot_mode: CoTMode,
-) -> String {
+) -> FreeAnswerRecord {
     if cot_mode != CoTMode::CoT {
         panic!("maths only supports CoT mode, got {cot_mode:?}");
     }
@@ -156,14 +176,24 @@ pub async fn get_final_answer_with_cot_mode(
         get_completions_of_cot(model_client, model_name, &prompt_for_cot, sampling_config).await;
     let prompt_for_final_answer =
         get_prompt_for_final_answer(expected_context, Some(&completions_of_cot));
-
-    get_final_answer(
+    let answer = get_final_answer(
         model_client,
         model_name,
         &prompt_for_final_answer,
         sampling_config,
     )
-    .await
+    .await;
+
+    FreeAnswerRecord {
+        context: render_context(
+            expected_context,
+            &[
+                ("<|completions_of_cot|>", &completions_of_cot),
+                ("<|final_answer|>", &answer),
+            ],
+        ),
+        answer,
+    }
 }
 
 async fn get_final_answer(
@@ -192,8 +222,18 @@ pub async fn judge_with_retry(
     expected_context: &str,
     reference_answer: &str,
     model_final_answer: &str,
-) -> bool {
+) -> JudgeOutcome {
     for attempt in 1..=3 {
+        let _permit = match LLM_JUDGER_SEMAPHORE.get() {
+            Some(semaphore) => Some(
+                Arc::clone(semaphore)
+                    .acquire_owned()
+                    .await
+                    .map_err(|err| format!("acquire judger semaphore failed: {err}"))
+                    .unwrap_or_else(|err| panic!("{err}")),
+            ),
+            None => None,
+        };
         match judge_once(
             judger_client,
             judger_model_name,
@@ -203,7 +243,16 @@ pub async fn judge_with_retry(
         )
         .await
         {
-            Ok(result) => return result,
+            Ok(is_passed) => {
+                return JudgeOutcome {
+                    is_passed,
+                    fail_reason: if is_passed {
+                        String::new()
+                    } else {
+                        "judger marked answer incorrect".to_string()
+                    },
+                };
+            }
             Err(err) if attempt < 3 => {
                 eprintln!(
                     "llm judge failed on attempt {attempt}/3, retrying: {err}; model={judger_model_name}"

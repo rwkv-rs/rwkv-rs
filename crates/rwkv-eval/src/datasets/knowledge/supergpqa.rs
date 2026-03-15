@@ -13,7 +13,8 @@ use crate::datasets::knowledge::{
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
+    SamplingConfig,
 };
 
 const LOCAL_ROOT_NAME: &str = "supergpqa";
@@ -125,12 +126,11 @@ impl Benchmark for SuperGpqa {
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
-    ) -> bool {
+    ) -> Record {
         let item = &self.test[index];
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
         let answer_index = answer_index_from_letter(&item.answer_letter);
-
-        get_final_answer_with_cot_mode(
+        let generated = get_final_answer_with_cot_mode(
             model_client,
             model_name,
             &item.options,
@@ -138,7 +138,23 @@ impl Benchmark for SuperGpqa {
             &SUPERGPQA_INFO.sampling_config,
             cot_mode,
         )
-        .await
-            == answer_index
+        .await;
+        let ref_answer = self.get_ref_answer(index);
+        let is_passed = generated.answer_index == answer_index;
+
+        Record {
+            context: generated.context,
+            answer: generated.answer_text.clone(),
+            ref_answer: ref_answer.clone(),
+            is_passed,
+            fail_reason: if is_passed {
+                String::new()
+            } else {
+                format!(
+                    "predicted {}, expected {}",
+                    generated.answer_text, ref_answer
+                )
+            },
+        }
     }
 }

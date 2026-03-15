@@ -16,7 +16,8 @@ use crate::datasets::utils::parquet::{
     get_i64, get_optional_string, get_string, get_string_list, read_parquet_items,
 };
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
+    SamplingConfig,
 };
 
 const DATASET_ID: &str = "edinburgh-dawg/mmlu-redux-2.0";
@@ -177,7 +178,7 @@ impl Benchmark for MmluRedux {
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
-    ) -> bool {
+    ) -> Record {
         let item = &self.test[index];
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
         let answer_index = match item.correct_answer.as_deref().map(str::trim) {
@@ -186,8 +187,7 @@ impl Benchmark for MmluRedux {
             }
             _ => u8::try_from(item.answer).unwrap(),
         };
-
-        get_final_answer_with_cot_mode(
+        let generated = get_final_answer_with_cot_mode(
             model_client,
             model_name,
             &item.choices,
@@ -195,7 +195,23 @@ impl Benchmark for MmluRedux {
             &MMLU_REDUX_INFO.sampling_config,
             cot_mode,
         )
-        .await
-            == answer_index
+        .await;
+        let ref_answer = self.get_ref_answer(index);
+        let is_passed = generated.answer_index == answer_index;
+
+        Record {
+            context: generated.context,
+            answer: generated.answer_text.clone(),
+            ref_answer: ref_answer.clone(),
+            is_passed,
+            fail_reason: if is_passed {
+                String::new()
+            } else {
+                format!(
+                    "predicted {}, expected {}",
+                    generated.answer_text, ref_answer
+                )
+            },
+        }
     }
 }

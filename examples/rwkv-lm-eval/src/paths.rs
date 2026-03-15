@@ -11,3 +11,7 @@ pub fn config_dir() -> PathBuf {
 pub fn datasets_path() -> PathBuf {
     crate_root().join("datasets")
 }
+
+pub fn logs_path() -> PathBuf {
+    crate_root().join("logs")
+}

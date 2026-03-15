@@ -1,6 +1,6 @@
 use crate::datasets::{
     CoTMode, SamplingConfig, apply_user_assistant_template, get_completions_of_cot,
-    get_prompt_for_cot, get_prompt_for_final_answer,
+    get_prompt_for_cot, get_prompt_for_final_answer, render_context,
 };
 use crate::inferers::{CompletionRequest, CompletionResponse};
 use async_openai::Client;
@@ -22,6 +22,12 @@ pub struct Example {
     pub question: String,
     pub choices: Vec<String>,
     pub answer_index: u8,
+}
+
+pub struct ChoiceRecord {
+    pub context: String,
+    pub answer_index: u8,
+    pub answer_text: String,
 }
 
 fn concat_choices(choices: &[String]) -> String {
@@ -124,6 +130,10 @@ pub fn answer_index_from_letter(answer: &str) -> u8 {
     }
 }
 
+fn answer_letter(answer_index: u8) -> String {
+    char::from(b'A' + answer_index).to_string()
+}
+
 pub async fn get_final_answer_with_cot_mode(
     model_client: &Client<OpenAIConfig>,
     model_name: &str,
@@ -131,7 +141,7 @@ pub async fn get_final_answer_with_cot_mode(
     expected_context: &str,
     sampling_config: &SamplingConfig,
     cot_mode: CoTMode,
-) -> u8 {
+) -> ChoiceRecord {
     match cot_mode {
         CoTMode::CoT => {
             let prompt_for_cot = get_prompt_for_cot(expected_context);
@@ -141,27 +151,48 @@ pub async fn get_final_answer_with_cot_mode(
 
             let prompt_for_final_answer =
                 get_prompt_for_final_answer(expected_context, Some(&completions_of_cot));
-
-            get_final_answer(
+            let answer_index = get_final_answer(
                 model_client,
                 model_name,
                 choices,
                 &prompt_for_final_answer,
                 sampling_config,
             )
-            .await
+            .await;
+            let answer_text = answer_letter(answer_index);
+
+            ChoiceRecord {
+                context: render_context(
+                    expected_context,
+                    &[
+                        ("<|completions_of_cot|>", &completions_of_cot),
+                        ("<|logprobs_of_choices|>", &format!(" {}", answer_text)),
+                    ],
+                ),
+                answer_index,
+                answer_text,
+            }
         }
         CoTMode::FakeCoT | CoTMode::NoCoT => {
             let prompt_for_final_answer = get_prompt_for_final_answer(expected_context, None);
-
-            get_final_answer(
+            let answer_index = get_final_answer(
                 model_client,
                 model_name,
                 choices,
                 &prompt_for_final_answer,
                 sampling_config,
             )
-            .await
+            .await;
+            let answer_text = answer_letter(answer_index);
+
+            ChoiceRecord {
+                context: render_context(
+                    expected_context,
+                    &[("<|logprobs_of_choices|>", &format!(" {}", answer_text))],
+                ),
+                answer_index,
+                answer_text,
+            }
         }
     }
 }
