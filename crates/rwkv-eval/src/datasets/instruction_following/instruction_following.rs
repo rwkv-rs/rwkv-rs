@@ -11,7 +11,7 @@ use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
-use serde_json::{Map, Value};
+use sonic_rs::Object as Map;
 use std::path::{Path, PathBuf};
 use tokio::runtime::Runtime;
 
@@ -52,7 +52,7 @@ struct RawIfevalItem {
     key: usize,
     prompt: String,
     instruction_id_list: Vec<String>,
-    kwargs: Vec<Map<String, Value>>,
+    kwargs: Vec<Map>,
 }
 
 impl Ifeval {
