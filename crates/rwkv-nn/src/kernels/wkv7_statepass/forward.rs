@@ -1,6 +1,6 @@
-use burn::backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement};
-use burn_cubecl::{CubeElement, CubeRuntime};
-
+use crate::kernels::backend::{
+    BoolElement, CubeBackend, CubeElement, CubeRuntime, FloatElement, IntElement,
+};
 use crate::kernels::wkv7_common::{
     Wkv7StateBackwardOutput, Wkv7StatePassForwardOutput,
     host::{wkv7_backward_impl, wkv7_forward_impl},

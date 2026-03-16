@@ -94,14 +94,14 @@ wandb = { git = "https://github.com/rwkv-rs/wandb-rs", rev = "1633ca27afb4e09cac
 plotters = { version = "0.3.7", default-features = false }
 
 # === Deep Learning Core ===
-burn = { version = "0.20.1", default-features = false }
-burn-train = { version = "0.20.1", default-features = false }
-burn-fusion = { version = "0.20.1", default-features = false }
-burn-cubecl = { version = "0.20.1", default-features = false }
-burn-ir = { version = "0.20.1", default-features = false }
-burn-store = { version = "0.20.1", default-features = false }
-burn-optim = { version = "0.20.1", default-features = false }
-burn-ndarray = { version = "0.20.1", default-features = false }
+burn = { version = "0.21.0-pre.2", default-features = false }
+burn-train = { version = "0.21.0-pre.2", default-features = false }
+burn-fusion = { version = "0.21.0-pre.2", default-features = false }
+burn-cubecl = { version = "0.21.0-pre.2", default-features = false }
+burn-ir = { version = "0.21.0-pre.2", default-features = false }
+burn-store = { version = "0.21.0-pre.2", default-features = false }
+burn-optim = { version = "0.21.0-pre.2", default-features = false }
+burn-ndarray = { version = "0.21.0-pre.2", default-features = false }
 
 ndarray = { version = "0.17.2" }
 ndarray-npy = { version = "0.10.0" }

@@ -1,7 +1,6 @@
-use burn::backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement};
 use burn::tensor::ops::{FloatTensor, IntTensor};
-use burn_cubecl::CubeRuntime;
 
+use crate::kernels::backend::{BoolElement, CubeBackend, CubeRuntime, FloatElement, IntElement};
 use crate::kernels::rapid_sample::{
     RapidSampleBackend, RapidSampleOutputPrimitive, host::rapid_sample_topk_topp_impl,
 };

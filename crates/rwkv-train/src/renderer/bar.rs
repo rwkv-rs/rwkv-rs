@@ -5,7 +5,7 @@ use burn::train::{
     metric::{MetricDefinition, MetricId},
     renderer::{
         EvaluationName, EvaluationProgress, MetricState, MetricsRenderer,
-        MetricsRendererEvaluation, MetricsRendererTraining, TrainingProgress,
+        MetricsRendererEvaluation, MetricsRendererTraining, ProgressType, TrainingProgress,
     },
 };
 use indicatif::{ProgressBar, ProgressStyle};
@@ -91,12 +91,17 @@ impl MetricsRendererTraining for BarMetricsRenderer {
         }
     }
 
-    fn render_train(&mut self, item: TrainingProgress) {
+    fn render_train(&mut self, item: TrainingProgress, _progress_indicators: Vec<ProgressType>) {
+        let epoch = item.global_progress.items_processed;
+        let iteration = item
+            .iteration
+            .or_else(|| item.progress.as_ref().map(|progress| progress.items_processed))
+            .unwrap_or(0);
         #[cfg(feature = "trace")]
         let _step_span = tracing::trace_span!(
             "rwkv.train.step",
-            epoch = item.epoch,
-            iteration = item.iteration,
+            epoch = epoch,
+            iteration = iteration,
             train_loss = self.train_loss,
             train_lr = self.train_lr,
             train_kt_s = self.train_kilo_tokens_per_sec
@@ -106,17 +111,19 @@ impl MetricsRendererTraining for BarMetricsRenderer {
         let _nvtx_step = nvtx::range!("rwkv.train.step");
 
         // Reset progress bar when epoch changes
-        if item.epoch != self.epoch_index {
-            self.epoch_index = item.epoch;
+        if epoch != self.epoch_index {
+            self.epoch_index = epoch;
             self.pb.reset();
         }
 
-        // burn-train increments `iteration` per device-local batch in multi-device mode.
-        // Match the progress bar length to that convention.
         let cfg = TRAIN_CFG.get().unwrap();
-        self.pb
-            .set_length((cfg.num_steps_per_mini_epoch_auto * cfg.num_devices_per_node) as u64);
-        self.pb.set_position(item.iteration as u64);
+        let length = item
+            .progress
+            .as_ref()
+            .map(|progress| progress.items_total as u64)
+            .unwrap_or((cfg.num_steps_per_mini_epoch_auto * cfg.num_devices_per_node) as u64);
+        self.pb.set_length(length);
+        self.pb.set_position(iteration as u64);
         self.pb.set_message(format!(
             "Epoch {}/{} | lr {:.2e} | kt/s {} | train_loss {:.5} | valid_loss {}",
             self.epoch_index,
@@ -144,13 +151,14 @@ impl MetricsRendererTraining for BarMetricsRenderer {
         }
     }
 
-    fn render_valid(&mut self, item: TrainingProgress) {
+    fn render_valid(&mut self, item: TrainingProgress, _progress_indicators: Vec<ProgressType>) {
+        let epoch = item.global_progress.items_processed;
         let message = match self.valid_loss {
             Some(loss) => format!(
                 "Epoch {}/{} | valid_loss {:.5}",
-                item.epoch, self.num_epochs, loss
+                epoch, self.num_epochs, loss
             ),
-            None => format!("Epoch {}/{} | valid_loss -", item.epoch, self.num_epochs),
+            None => format!("Epoch {}/{} | valid_loss -", epoch, self.num_epochs),
         };
 
         self.pb.println(message);
@@ -160,7 +168,7 @@ impl MetricsRendererTraining for BarMetricsRenderer {
 impl MetricsRendererEvaluation for BarMetricsRenderer {
     fn update_test(&mut self, _name: EvaluationName, _state: MetricState) {}
 
-    fn render_test(&mut self, _item: EvaluationProgress) {}
+    fn render_test(&mut self, _item: EvaluationProgress, _progress_indicators: Vec<ProgressType>) {}
 }
 
 impl MetricsRenderer for BarMetricsRenderer {

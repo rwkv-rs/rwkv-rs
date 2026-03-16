@@ -1,7 +1,6 @@
 use std::mem::size_of;
 
 use burn::{
-    backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement},
     tensor::{DType, Shape, ops::FloatTensor},
 };
 use burn_cubecl::cubecl::{CubeCount, CubeDim, tensor_line_size_parallel};
@@ -11,6 +10,7 @@ use burn_cubecl::{
     ops::numeric::{empty_device, zeros_client},
 };
 
+use crate::kernels::backend::{BoolElement, CubeBackend, FloatElement, IntElement};
 use crate::kernels::wkv7_common::{
     Wkv7StateBackwardOutput, Wkv7StatePassForwardOutput,
     kernel::{
@@ -92,12 +92,12 @@ fn wkv7_forward_impl_inner<R: CubeRuntime, FE: FloatElement, I: IntElement, BT: 
 
     let client = weight_decay.client.clone();
     let device = weight_decay.device.clone();
-    let shape = weight_decay.shape.clone();
+    let shape = weight_decay.meta.shape().clone();
 
-    let batch_size = shape.dims[0];
-    let seq_len = shape.dims[1];
-    let num_heads = shape.dims[2];
-    let dim = shape.dims[3];
+    let batch_size = shape[0];
+    let seq_len = shape[1];
+    let num_heads = shape[2];
+    let dim = shape[3];
 
     assert!(
         seq_len % chunk_len == 0,
@@ -266,17 +266,14 @@ fn wkv7_backward_impl_inner<R: CubeRuntime, FE: FloatElement, I: IntElement, BT:
 
     let client = weight_decay.client.clone();
     let device = weight_decay.device.clone();
-    let shape = weight_decay.shape.clone();
+    let shape = weight_decay.meta.shape().clone();
 
-    let batch_size = shape.dims[0];
-    let seq_len = shape.dims[1];
-    let num_heads = shape.dims[2];
-    let dim = shape.dims[3];
+    let batch_size = shape[0];
+    let seq_len = shape[1];
+    let num_heads = shape[2];
+    let dim = shape[3];
 
-    assert!(
-        seq_len % chunk_len == 0,
-        "chunk_len must divide sequence length"
-    );
+    assert_eq!(seq_len % chunk_len, 0, "chunk_len must divide sequence length");
 
     let weight_decay_grad = empty_device::<R, FE>(client.clone(), device.clone(), shape.clone());
     let receptance_grad = empty_device::<R, FE>(client.clone(), device.clone(), shape.clone());
@@ -299,10 +296,10 @@ fn wkv7_backward_impl_inner<R: CubeRuntime, FE: FloatElement, I: IntElement, BT:
     };
 
     let state_line_size = tensor_line_size_parallel(
-        state.client.io_optimized_line_sizes(&state.dtype.into()),
-        &state.shape,
-        &state.strides,
-        state.shape.num_dims() - 1,
+        state.client.io_optimized_line_sizes(state.dtype.size()),
+        state.meta.shape(),
+        state.meta.strides(),
+        state.meta.num_dims() - 1,
     );
 
     let config = Wkv7Config {

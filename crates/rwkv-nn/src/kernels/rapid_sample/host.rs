@@ -1,4 +1,3 @@
-use burn::backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement};
 use burn::tensor::{
     DType, Shape,
     ops::{FloatTensor, IntTensor},
@@ -11,6 +10,7 @@ use burn_cubecl::{
     ops::numeric::empty_device,
 };
 
+use crate::kernels::backend::{BoolElement, CubeBackend, FloatElement, IntElement};
 use crate::kernels::rapid_sample::{
     RapidSampleOutput,
     kernel::{
@@ -58,7 +58,7 @@ pub(crate) fn rapid_sample_topk_topp_impl<
 
     let client = logits.client.clone();
     let device = logits.device.clone();
-    let shape = logits.shape.clone();
+    let shape = logits.meta.shape().clone();
 
     debug_assert_eq!(
         shape.num_dims(),
@@ -66,8 +66,8 @@ pub(crate) fn rapid_sample_topk_topp_impl<
         "logits must have shape [batch_size, vocab_size]"
     );
 
-    let batch_size = shape.dims[0];
-    let vocab_size = shape.dims[1];
+    let batch_size = shape[0];
+    let vocab_size = shape[1];
 
     debug_assert!(batch_size > 0, "batch_size must be > 0");
     debug_assert!(vocab_size > 0, "vocab_size must be > 0");
@@ -79,19 +79,19 @@ pub(crate) fn rapid_sample_topk_topp_impl<
 
     let expected_1d = Shape::new([batch_size]);
     debug_assert_eq!(
-        states.shape, expected_1d,
+        states.meta.shape(), &expected_1d,
         "states must have shape [batch_size]"
     );
     debug_assert_eq!(
-        inv_temperatures.shape, expected_1d,
+        inv_temperatures.meta.shape(), &expected_1d,
         "inv_temperatures must have shape [batch_size]"
     );
     debug_assert_eq!(
-        top_ks.shape, expected_1d,
+        top_ks.meta.shape(), &expected_1d,
         "top_ks must have shape [batch_size]"
     );
     debug_assert_eq!(
-        top_ps.shape, expected_1d,
+        top_ps.meta.shape(), &expected_1d,
         "top_ps must have shape [batch_size]"
     );
 
@@ -157,7 +157,7 @@ pub(crate) fn rapid_sample_topk_topp_impl<
                 penalties.dtype
             );
             debug_assert_eq!(
-                penalties.shape, shape,
+                penalties.meta.shape(), &shape,
                 "penalties must have the same shape as logits"
             );
 

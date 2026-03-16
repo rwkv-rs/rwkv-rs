@@ -1,8 +1,10 @@
 use burn::{
+    constant,
     module::Param,
     prelude::*,
     tensor::activation::{sigmoid, tanh},
 };
+use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::functions::init_weights::{
@@ -118,13 +120,27 @@ impl<B: Backend> LoRA<B> {
     }
 }
 
-#[derive(Module, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 
 pub enum ActivationFn {
     Sigmoid,
     Tanh,
     NoOP,
 }
+
+impl fmt::Display for ActivationFn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Self::Sigmoid => "Sigmoid",
+            Self::Tanh => "Tanh",
+            Self::NoOP => "NoOP",
+        };
+
+        f.write_str(name)
+    }
+}
+
+burn::constant!(ActivationFn);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 

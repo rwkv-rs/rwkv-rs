@@ -1,7 +1,8 @@
-use burn::backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement};
 use burn::tensor::ops::FloatTensor;
-use burn_cubecl::{CubeElement, CubeRuntime};
 
+use crate::kernels::backend::{
+    BoolElement, CubeBackend, CubeElement, CubeRuntime, FloatElement, IntElement,
+};
 use crate::kernels::wkv7_infer::{
     Wkv7InferBackend, Wkv7InferForwardOutput, host::wkv7_infer_forward_impl,
 };

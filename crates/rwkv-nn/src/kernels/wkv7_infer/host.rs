@@ -1,4 +1,3 @@
-use burn::backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement};
 use burn::tensor::{Shape, ops::FloatTensor};
 use burn_cubecl::{
     CubeElement, CubeRuntime,
@@ -7,6 +6,7 @@ use burn_cubecl::{
     ops::numeric::empty_device,
 };
 
+use crate::kernels::backend::{BoolElement, CubeBackend, FloatElement, IntElement};
 use crate::kernels::wkv7_infer::{
     Wkv7InferForwardOutput,
     kernel::{
@@ -68,12 +68,12 @@ fn wkv7_infer_forward_impl_inner<
 
     let client = weight_decay.client.clone();
     let device = weight_decay.device.clone();
-    let shape = weight_decay.shape.clone();
+    let shape = weight_decay.meta.shape().clone();
 
-    let batch_size = shape.dims[0];
-    let context_length = shape.dims[1];
-    let num_heads = shape.dims[2];
-    let dim = shape.dims[3];
+    let batch_size = shape[0];
+    let context_length = shape[1];
+    let num_heads = shape[2];
+    let dim = shape[3];
 
     debug_assert!(batch_size > 0, "batch size must be > 0");
     debug_assert!(context_length > 0, "context length must be > 0");
@@ -82,27 +82,27 @@ fn wkv7_infer_forward_impl_inner<
 
     let expected_initial_state_shape = Shape::new([batch_size, num_heads, dim, dim]);
     debug_assert_eq!(
-        initial_state.shape, expected_initial_state_shape,
+        initial_state.meta.shape(), &expected_initial_state_shape,
         "initial_state shape must be [batch_size, num_heads, head_size, head_size]"
     );
     debug_assert_eq!(
-        receptance.shape, shape,
+        receptance.meta.shape(), &shape,
         "receptance shape mismatch with weight_decay"
     );
-    debug_assert_eq!(key.shape, shape, "key shape mismatch with weight_decay");
-    debug_assert_eq!(value.shape, shape, "value shape mismatch with weight_decay");
+    debug_assert_eq!(key.meta.shape(), &shape, "key shape mismatch with weight_decay");
+    debug_assert_eq!(value.meta.shape(), &shape, "value shape mismatch with weight_decay");
     debug_assert_eq!(
-        removal.shape, shape,
+        removal.meta.shape(), &shape,
         "removal shape mismatch with weight_decay"
     );
     debug_assert_eq!(
-        replacement.shape, shape,
+        replacement.meta.shape(), &shape,
         "replacement shape mismatch with weight_decay"
     );
 
     let expected_context_mask_shape = Shape::new([batch_size, context_length]);
     debug_assert_eq!(
-        context_mask.shape, expected_context_mask_shape,
+        context_mask.meta.shape(), &expected_context_mask_shape,
         "context_mask shape must be [batch_size, context_length]"
     );
 
