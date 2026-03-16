@@ -2,13 +2,14 @@ use crate::model::AutoRegressiveModelConfig;
 use rwkv::custom::cubecl::device::DeviceId;
 use rwkv::custom::module::Module;
 use rwkv::custom::prelude::{Backend, DeviceOps};
-use rwkv::custom::record::{FullPrecisionSettings, NamedMpkFileRecorder};
+use rwkv::custom::record::{HalfPrecisionSettings, NamedMpkFileRecorder};
 use rwkv::custom::store::{ModuleSnapshot, PytorchStore};
 
 #[derive(Clone, Debug)]
 pub struct ConvertPthToMpkOptions {
     model_path: String,
     output_path: String,
+    device_id: DeviceId,
 }
 
 impl ConvertPthToMpkOptions {
@@ -16,22 +17,42 @@ impl ConvertPthToMpkOptions {
         Self {
             model_path: model_path.into(),
             output_path: output_path.into(),
+            device_id: DeviceId::new(0, 0),
         }
+    }
+
+    pub fn with_device_id(mut self, device_id: DeviceId) -> Self {
+        self.device_id = device_id;
+        self
     }
 }
 
 pub fn convert_pth_to_mpk<B: Backend>(
     options: &ConvertPthToMpkOptions,
     model_config: AutoRegressiveModelConfig,
-) {
-    pth2mpk::<B>(&options.model_path, &options.output_path, model_config);
+) -> Result<(), String> {
+    pth2mpk_on_device::<B>(
+        &options.model_path,
+        &options.output_path,
+        model_config,
+        options.device_id,
+    )
 }
 
 pub fn pth2mpk<B: Backend>(
     model_path: &str,
     output_path: &str,
     model_config: AutoRegressiveModelConfig,
-) {
+) -> Result<(), String> {
+    pth2mpk_on_device::<B>(model_path, output_path, model_config, DeviceId::new(0, 0))
+}
+
+pub fn pth2mpk_on_device<B: Backend>(
+    model_path: &str,
+    output_path: &str,
+    model_config: AutoRegressiveModelConfig,
+    device_id: DeviceId,
+) -> Result<(), String> {
     fn is_expected_missing_tensor(path: &str) -> bool {
         path.starts_with("state.state.")
     }
@@ -187,14 +208,14 @@ pub fn pth2mpk<B: Backend>(
         )
         .allow_partial(true);
 
-    let device = B::Device::from_id(DeviceId::new(0, 0));
+    let device = B::Device::from_id(device_id);
 
     let mut model = model_config.init::<B>(&device);
 
     // model.init_weights(&device);
     let result = model
         .load_from(&mut store)
-        .expect("failed to load tensors from PyTorch checkpoint");
+        .map_err(|error| format!("failed to load tensors from PyTorch checkpoint: {error}"))?;
 
     let unexpected_missing: Vec<_> = result
         .missing
@@ -238,7 +259,7 @@ pub fn pth2mpk<B: Backend>(
             }
         }
 
-        panic!("{message}");
+        return Err(message);
     }
 
     // let embed_weight: Vec<f32> = model
@@ -283,7 +304,10 @@ pub fn pth2mpk<B: Backend>(
     model
         .save_file(
             output_path,
-            &NamedMpkFileRecorder::<FullPrecisionSettings>::new(),
+            &NamedMpkFileRecorder::<HalfPrecisionSettings>::new(),
         )
-        .expect("Trained model should be saved successfully");
+        .map_err(|error| {
+            format!("failed to save converted checkpoint to {output_path}: {error}")
+        })?;
+    Ok(())
 }
