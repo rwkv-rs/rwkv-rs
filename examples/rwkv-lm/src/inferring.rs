@@ -423,7 +423,7 @@ where
         }
 
         let batch_size = batch_ids.len();
-        let batch_masks = {
+        let batch_masks: Tensor<B, 1> = {
             let mut batch_masks = vec![1.0f32; self.max_batch_size];
             for &batch_id in batch_ids {
                 batch_masks[batch_id] = 0.0;
@@ -446,7 +446,7 @@ where
             TensorData::new(contexts.concat(), [batch_size, context_len]),
             &self.device,
         );
-        let context_masks = Tensor::from_data(
+        let context_masks: Tensor<B, 2> = Tensor::from_data(
             TensorData::new(
                 context_masks.concat().iter().map(|&m| m as f32).collect(),
                 [batch_size, context_len],
@@ -537,7 +537,11 @@ where
 
         match logits {
             Some(logits) => {
-                let logits = logits.squeeze_dim(1).to_data().to_vec::<f32>().unwrap();
+                let logits = logits
+                    .squeeze_dim::<2>(1)
+                    .to_data()
+                    .to_vec::<f32>()
+                    .unwrap();
                 Ok(batch_ids
                     .iter()
                     .copied()

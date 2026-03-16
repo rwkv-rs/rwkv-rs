@@ -5,7 +5,6 @@ use linkme::distributed_slice;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
     Example, answer_index_from_letter, get_expect_context, get_final_answer_with_cot_mode,
@@ -15,8 +14,7 @@ use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::csv::read_csv_items;
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 
 const LOCAL_ROOT_NAME: &str = "cmmlu";
@@ -141,13 +139,12 @@ impl Benchmark for Cmmlu {
         self.dev.is_empty() || self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.dev.is_empty() || self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let root_dir = runtime.block_on(download_url_files(
+    async fn download(&self) {
+        let root_dir = download_url_files(
             &self.dataset_root,
             LOCAL_ROOT_NAME,
             &[UrlDownloadFile {
@@ -155,7 +152,8 @@ impl Benchmark for Cmmlu {
                 url: ARCHIVE_URL.to_string(),
             }],
             1,
-        ));
+        )
+        .await;
 
         let zip_path = root_dir.join(ARCHIVE_NAME);
         let status = Command::new("unzip")

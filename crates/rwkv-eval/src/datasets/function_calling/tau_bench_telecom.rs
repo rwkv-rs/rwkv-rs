@@ -452,11 +452,7 @@ impl TelecomEnv {
         Ok(())
     }
 
-    fn execute_assistant_tool(
-        &mut self,
-        name: &str,
-        args: &Map,
-    ) -> Result<Value, String> {
+    fn execute_assistant_tool(&mut self, name: &str, args: &Map) -> Result<Value, String> {
         match name {
             "get_customer_by_phone" => {
                 let phone_number = str_arg(args, "phone_number")?;
@@ -513,29 +509,21 @@ impl TelecomEnv {
         }
     }
 
-    fn execute_user_tool(
-        &mut self,
-        name: &str,
-        args: &Map,
-    ) -> Result<Value, String> {
+    fn execute_user_tool(&mut self, name: &str, args: &Map) -> Result<Value, String> {
         match name {
             "check_status_bar" => Ok(json!(self.check_status_bar()?)),
             "check_network_status" => Ok(json!(self.check_network_status()?)),
-            "check_network_mode_preference" => {
-                Ok(json!(self.check_network_mode_preference()?))
-            }
-            "set_network_mode_preference" => {
-                Ok(json!(self.set_network_mode_preference(str_arg(args, "mode")?)?))
-            }
+            "check_network_mode_preference" => Ok(json!(self.check_network_mode_preference()?)),
+            "set_network_mode_preference" => Ok(json!(
+                self.set_network_mode_preference(str_arg(args, "mode")?)?
+            )),
             "run_speed_test" => Ok(json!(self.run_speed_test()?)),
             "toggle_airplane_mode" => Ok(json!(self.toggle_airplane_mode()?)),
             "check_sim_status" => Ok(json!(self.check_sim_status()?)),
             "reseat_sim_card" => Ok(json!(self.reseat_sim_card()?)),
             "toggle_data" => Ok(json!(self.toggle_data()?)),
             "toggle_roaming" => Ok(json!(self.toggle_roaming()?)),
-            "check_data_restriction_status" => {
-                Ok(json!(self.check_data_restriction_status()?))
-            }
+            "check_data_restriction_status" => Ok(json!(self.check_data_restriction_status()?)),
             "toggle_data_saver_mode" => Ok(json!(self.toggle_data_saver_mode()?)),
             "check_apn_settings" => Ok(json!(self.check_apn_settings()?)),
             "reset_apn_settings" => Ok(json!(self.reset_apn_settings()?)),
@@ -544,9 +532,9 @@ impl TelecomEnv {
             "check_vpn_status" => Ok(json!(self.check_vpn_status()?)),
             "disconnect_vpn" => Ok(json!(self.disconnect_vpn()?)),
             "check_app_status" => Ok(json!(self.check_app_status(str_arg(args, "app_name")?)?)),
-            "check_app_permissions" => {
-                Ok(json!(self.check_app_permissions(str_arg(args, "app_name")?)?))
-            }
+            "check_app_permissions" => Ok(json!(
+                self.check_app_permissions(str_arg(args, "app_name")?)?
+            )),
             "grant_app_permission" => {
                 Ok(json!(self.grant_app_permission(
                     str_arg(args, "app_name")?,
@@ -653,10 +641,8 @@ impl TelecomEnv {
             return Err("A bill is already awaiting payment for this customer".to_string());
         }
         let bill_idx = self.find_bill_index_by_id(bill_id)?;
-        as_object_mut(self.db_bill_mut(bill_idx)?)?.insert(
-            &"status",
-            json!("Awaiting Payment".to_string()),
-        );
+        as_object_mut(self.db_bill_mut(bill_idx)?)?
+            .insert(&"status", json!("Awaiting Payment".to_string()));
         self.sync_tools()?;
         Ok(json!(format!(
             "Payment request sent to the customer for bill {bill_id}"
@@ -885,10 +871,8 @@ impl TelecomEnv {
                 "Failed to set network mode: '{mode}' is not a valid option."
             ));
         }
-        self.device_mut()?.insert(
-            &"network_mode_preference",
-            json!(mode.to_string()),
-        );
+        self.device_mut()?
+            .insert(&"network_mode_preference", json!(mode.to_string()));
         self.simulate_network_search()?;
         Ok(format!("Preferred Network Mode set to: {mode}"))
     }
@@ -905,17 +889,13 @@ impl TelecomEnv {
 
     fn toggle_airplane_mode(&mut self) -> Result<String, String> {
         let current = get_bool_field(self.device()?, "airplane_mode")?;
-        self.device_mut()?
-            .insert(&"airplane_mode", json!(!current));
+        self.device_mut()?.insert(&"airplane_mode", json!(!current));
         if !current {
-            self.device_mut()?
-                .insert(&"wifi_connected", json!(false));
-            self.device_mut()?
-                .insert(&"wifi_ssid", Value::new_null());
+            self.device_mut()?.insert(&"wifi_connected", json!(false));
+            self.device_mut()?.insert(&"wifi_ssid", Value::new_null());
         }
         if current && get_bool_field(self.device()?, "wifi_enabled")? {
-            self.device_mut()?
-                .insert(&"wifi_connected", json!(false));
+            self.device_mut()?.insert(&"wifi_connected", json!(false));
         }
         if !current {
             self.disconnect_vpn()?;
@@ -941,16 +921,14 @@ impl TelecomEnv {
     }
 
     fn reseat_sim_card(&mut self) -> Result<String, String> {
-        self.device_mut()?
-            .insert(&"sim_card_missing", json!(false));
+        self.device_mut()?.insert(&"sim_card_missing", json!(false));
         self.simulate_network_search()?;
         Ok("SIM card re-seated successfully.".to_string())
     }
 
     fn toggle_data(&mut self) -> Result<String, String> {
         let current = get_bool_field(self.device()?, "data_enabled")?;
-        self.device_mut()?
-            .insert(&"data_enabled", json!(!current));
+        self.device_mut()?.insert(&"data_enabled", json!(!current));
         self.simulate_network_search()?;
         Ok(format!("Mobile Data is now {}.", yes_no(!current)))
     }
@@ -990,8 +968,7 @@ impl TelecomEnv {
     }
 
     fn reset_apn_settings(&mut self) -> Result<String, String> {
-        as_object_mut(self.active_apn_mut()?)?
-            .insert(&"reset_at_reboot", json!(true));
+        as_object_mut(self.active_apn_mut()?)?.insert(&"reset_at_reboot", json!(true));
         Ok("APN settings will reset at reboot.".to_string())
     }
 
@@ -1021,10 +998,8 @@ impl TelecomEnv {
     }
 
     fn disconnect_vpn(&mut self) -> Result<String, String> {
-        self.device_mut()?
-            .insert(&"vpn_connected", json!(false));
-        self.device_mut()?
-            .insert(&"vpn_details", Value::new_null());
+        self.device_mut()?.insert(&"vpn_connected", json!(false));
+        self.device_mut()?.insert(&"vpn_details", Value::new_null());
         Ok("VPN disconnected successfully.".to_string())
     }
 
@@ -1036,12 +1011,7 @@ impl TelecomEnv {
         let permissions = as_object(get_value(app, "permissions")?)?;
         let granted = permissions
             .iter()
-            .filter_map(|(name, value)| {
-                value
-                    .as_bool()
-                    .filter(|enabled| *enabled)
-                    .map(|_| name)
-            })
+            .filter_map(|(name, value)| value.as_bool().filter(|enabled| *enabled).map(|_| name))
             .collect::<Vec<_>>();
         Ok(if granted.is_empty() {
             format!("Status for App: {app_name}\n - Permissions: None granted.")
@@ -1061,12 +1031,7 @@ impl TelecomEnv {
         let permissions = as_object(get_value(app, "permissions")?)?;
         let granted = permissions
             .iter()
-            .filter_map(|(name, value)| {
-                value
-                    .as_bool()
-                    .filter(|enabled| *enabled)
-                    .map(|_| name)
-            })
+            .filter_map(|(name, value)| value.as_bool().filter(|enabled| *enabled).map(|_| name))
             .collect::<Vec<_>>();
         Ok(if granted.is_empty() {
             format!("App '{app_name}' currently has no permissions granted.")
@@ -1116,10 +1081,8 @@ impl TelecomEnv {
                 "mms_port": null,
             });
         }
-        self.device_mut()?.insert(
-            &"network_connection_status",
-            json!("searching".to_string()),
-        );
+        self.device_mut()?
+            .insert(&"network_connection_status", json!("searching".to_string()));
         self.simulate_network_search()?;
         Ok("Restarting network services...".to_string())
     }
@@ -1341,10 +1304,8 @@ impl TelecomEnv {
             signal = "none".to_string();
         }
 
-        self.device_mut()?.insert(
-            &"network_connection_status",
-            json!(connection.to_string()),
-        );
+        self.device_mut()?
+            .insert(&"network_connection_status", json!(connection.to_string()));
         self.device_mut()?.insert(
             &"network_technology_connected",
             json!(technology.to_string()),
@@ -1517,7 +1478,9 @@ impl TelecomEnv {
     fn find_line_index_by_phone(&self, phone_number: &str) -> Result<usize, String> {
         as_array(get_value(as_object(&self.db)?, "lines")?)?
             .iter()
-            .position(|line| line.get(&"phone_number").and_then(Value::as_str) == Some(phone_number))
+            .position(|line| {
+                line.get(&"phone_number").and_then(Value::as_str) == Some(phone_number)
+            })
             .ok_or_else(|| format!("Line with phone number {phone_number} not found"))
     }
 
@@ -1577,8 +1540,7 @@ impl TelecomEnv {
 
     fn set_bill_to_paid(&mut self, bill_id: &str) -> Result<(), String> {
         let idx = self.find_bill_index_by_id(bill_id)?;
-        as_object_mut(self.db_bill_mut(idx)?)?
-            .insert(&"status", json!("Paid".to_string()));
+        as_object_mut(self.db_bill_mut(idx)?)?.insert(&"status", json!("Paid".to_string()));
         Ok(())
     }
 
@@ -1647,10 +1609,7 @@ impl TelecomEnv {
         .push(json!(new_bill_id.to_string()));
         let line = self.db_line_mut(line_idx)?;
         as_object_mut(line)?.insert(&"status", json!("Suspended".to_string()));
-        as_object_mut(line)?.insert(
-            &"suspension_start_date",
-            json!(TODAY.to_string()),
-        );
+        as_object_mut(line)?.insert(&"suspension_start_date", json!(TODAY.to_string()));
         if contract_ended {
             as_object_mut(line)?.insert(
                 &"contract_end_date",
@@ -1734,40 +1693,33 @@ impl TauDomainEnv for TelecomEnv {
                     Ok(json!("User info set".to_string()))
                 }
                 "set_user_location" => {
-                    self.surroundings_mut()?.insert(
-                        &"is_abroad",
-                        json!(bool_arg(&action.arguments, "abroad")?),
-                    );
+                    self.surroundings_mut()?
+                        .insert(&"is_abroad", json!(bool_arg(&action.arguments, "abroad")?));
                     self.sync_tools()?;
                     Ok(json!("User location set".to_string()))
                 }
                 "turn_roaming_off" => {
-                    self.device_mut()?
-                        .insert(&"roaming_enabled", json!(false));
+                    self.device_mut()?.insert(&"roaming_enabled", json!(false));
                     self.simulate_network_search()?;
                     Ok(json!("Data Roaming is now OFF.".to_string()))
                 }
                 "turn_roaming_on" => {
-                    self.device_mut()?
-                        .insert(&"roaming_enabled", json!(true));
+                    self.device_mut()?.insert(&"roaming_enabled", json!(true));
                     self.simulate_network_search()?;
                     Ok(json!("Data Roaming is now ON.".to_string()))
                 }
                 "turn_airplane_mode_on" => {
-                    self.device_mut()?
-                        .insert(&"airplane_mode", json!(true));
+                    self.device_mut()?.insert(&"airplane_mode", json!(true));
                     self.simulate_network_search()?;
                     Ok(json!("Airplane Mode is now ON.".to_string()))
                 }
                 "turn_data_off" => {
-                    self.device_mut()?
-                        .insert(&"data_enabled", json!(false));
+                    self.device_mut()?.insert(&"data_enabled", json!(false));
                     self.simulate_network_search()?;
                     Ok(json!("Data connection broken.".to_string()))
                 }
                 "turn_data_saver_mode_on" => {
-                    self.device_mut()?
-                        .insert(&"data_saver_mode", json!(true));
+                    self.device_mut()?.insert(&"data_saver_mode", json!(true));
                     Ok(json!("Data Saver Mode is now ON.".to_string()))
                 }
                 "set_network_mode_preference" => Ok(json!(
@@ -1813,8 +1765,7 @@ impl TauDomainEnv for TelecomEnv {
                     ))
                 }
                 "break_vpn" => {
-                    self.device_mut()?
-                        .insert(&"vpn_connected", json!(true));
+                    self.device_mut()?.insert(&"vpn_connected", json!(true));
                     self.device_mut()?.insert(
                         &"vpn_details",
                         json!({"server_address":"192.168.1.1","protocol":"OpenVPN","server_performance":"poor"}),
@@ -1843,8 +1794,7 @@ impl TauDomainEnv for TelecomEnv {
                     Ok(json!("App permission removed.".to_string()))
                 }
                 "unseat_sim_card" => {
-                    self.device_mut()?
-                        .insert(&"sim_card_missing", json!(true));
+                    self.device_mut()?.insert(&"sim_card_missing", json!(true));
                     self.simulate_network_search()?;
                     Ok(json!("SIM card un-seated successfully.".to_string()))
                 }
@@ -1982,10 +1932,7 @@ fn parse_date(value: &str) -> Result<NaiveDate, String> {
         .map_err(|err| format!("invalid date {value}: {err}"))
 }
 
-fn get_value_mut<'a>(
-    object: &'a mut Map,
-    key: &str,
-) -> Result<&'a mut Value, String> {
+fn get_value_mut<'a>(object: &'a mut Map, key: &str) -> Result<&'a mut Value, String> {
     object
         .get_mut(&key)
         .ok_or_else(|| format!("missing field `{key}`"))

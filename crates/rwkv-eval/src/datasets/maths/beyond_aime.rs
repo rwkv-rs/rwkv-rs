@@ -5,8 +5,7 @@ use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::hf::download_hf_parquet_splits;
 use crate::datasets::utils::parquet::{get_i64, get_string, read_parquet_items};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -14,7 +13,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static BEYOND_AIME_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -82,20 +80,20 @@ impl Benchmark for BeyondAime {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_hf_parquet_splits(
+    async fn download(&self) {
+        let downloaded_path = download_hf_parquet_splits(
             &self.dataset_root,
             "beyond_aime",
             "ByteDance-Seed/BeyondAIME",
             "default",
             &["test"],
             2,
-        ));
+        )
+        .await;
         println!("beyond_aime dataset: {}", downloaded_path.display());
     }
 

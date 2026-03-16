@@ -1,3 +1,4 @@
+use crate::checker::run_checker;
 use crate::db::{
     BenchmarkInsert, CheckerInsert, CompletionInsert, CompletionKey, CompletionStatus, Db,
     EvalInsert, ModelInsert, ScoreInsert, TaskIdentity, TaskInsert, TaskLookup, TaskStatus,
@@ -5,16 +6,15 @@ use crate::db::{
     insert_completion_and_eval, insert_score, insert_task, list_attempt_records,
     update_task_status, upsert_benchmark, upsert_model,
 };
-use crate::checker::run_checker;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
-use rwkv_config::raw::eval::{ApiConfig, SpaceDbConfig};
+use rwkv_config::raw::eval::{IntApiConfig, SpaceDbConfig};
 use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfig, FinalEvalConfigBuilder};
+use rwkv_eval::datasets::maths::set_llm_judger_semaphore;
 use rwkv_eval::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, CoTMode, Field, SamplingConfig,
     get_benchmarks_with_field,
 };
-use rwkv_eval::datasets::maths::set_llm_judger_semaphore;
 use rwkv_eval::evaluators::coding::ensure_microsandbox_available;
 use rwkv_eval::inferers::{CompletionRequest, CompletionResponse};
 use sonic_rs::json;
@@ -84,7 +84,7 @@ impl Default for EvaluatingOptions {
 }
 
 struct ClientWithConfig {
-    api_cfg: ApiConfig,
+    api_cfg: IntApiConfig,
     client: Client<OpenAIConfig>,
 }
 
@@ -148,6 +148,7 @@ pub async fn evaluating(
     let experiment_desc = eval_cfg.experiment_desc.clone();
     let git_hash = eval_cfg.git_hash.clone();
     let db = connect_db_if_configured(
+        eval_cfg.upload_to_space,
         eval_cfg.space_db.as_ref(),
         options.db_pool_max_connections,
     )
@@ -167,7 +168,7 @@ pub async fn evaluating(
         .into_iter()
         .map(|api_cfg| {
             Arc::new(ClientWithConfig {
-                client: build_client(&api_cfg),
+                client: build_client(&api_cfg.base_url, &api_cfg.api_key),
                 api_cfg,
             })
         })
@@ -176,27 +177,38 @@ pub async fn evaluating(
     let llm_checker_cfg = eval_cfg.llm_checker.clone();
     let judger_semaphore = Arc::new(Semaphore::new(options.judger_concurrency));
     set_llm_judger_semaphore(Arc::clone(&judger_semaphore));
-    let checker_runtime = Arc::new(CheckerRuntime {
-        model_name: llm_checker_cfg.model.clone(),
-        client: Arc::new(build_client(&llm_checker_cfg)),
-        semaphore: Arc::new(Semaphore::new(options.checker_concurrency)),
+    let checker_runtime = db.as_ref().map(|_| {
+        Arc::new(CheckerRuntime {
+            model_name: llm_checker_cfg.model.clone(),
+            client: Arc::new(build_client(
+                &llm_checker_cfg.base_url,
+                &llm_checker_cfg.api_key,
+            )),
+            semaphore: Arc::new(Semaphore::new(options.checker_concurrency)),
+        })
     });
-    let llm_judger_client = Arc::new(build_client(&llm_judger_cfg));
+    let llm_judger_client = Arc::new(build_client(
+        &llm_judger_cfg.base_url,
+        &llm_judger_cfg.api_key,
+    ));
 
     println!("experiment: {experiment_name}");
     println!("run mode: {}", options.run_mode.as_str());
     println!("attempt concurrency: {}", options.attempt_concurrency);
     println!("judger concurrency: {}", options.judger_concurrency);
     println!("checker concurrency: {}", options.checker_concurrency);
-    println!("db pool max connections: {}", options.db_pool_max_connections);
+    println!(
+        "db pool max connections: {}",
+        options.db_pool_max_connections
+    );
     println!("target models: {}", clients_with_cfg.len());
 
     for target_model in &clients_with_cfg {
-        check_client(&target_model.client, &target_model.api_cfg).await;
+        check_client(&target_model.client, &target_model.api_cfg.model).await;
     }
-    check_client(&llm_judger_client, &llm_judger_cfg).await;
-    if db.is_some() {
-        check_client(checker_runtime.client.as_ref(), &llm_checker_cfg).await;
+    check_client(&llm_judger_client, &llm_judger_cfg.model).await;
+    if let Some(checker_runtime) = checker_runtime.as_ref() {
+        check_client(checker_runtime.client.as_ref(), &llm_checker_cfg.model).await;
     }
 
     let mut model_ids = BTreeMap::new();
@@ -226,7 +238,7 @@ pub async fn evaluating(
 
         println!("prepare benchmark: {}", benchmark_info.name.0);
         let mut benchmark_box = (benchmark_info.create)(datasets_path.clone());
-        prepare_benchmark(benchmark_info, benchmark_box.as_mut());
+        prepare_benchmark(benchmark_info, benchmark_box.as_mut()).await;
         let benchmark: Arc<dyn Benchmark> = Arc::from(benchmark_box);
 
         let benchmark_id = if let Some(db) = db.as_ref() {
@@ -259,7 +271,9 @@ pub async fn evaluating(
         let judger_model_name = benchmark_info
             .with_llm_judger
             .then_some(llm_judger_cfg.model.clone());
-        let checker_model_name = llm_checker_cfg.model.clone();
+        let checker_model_name = checker_runtime
+            .as_ref()
+            .map(|runtime| runtime.model_name.clone());
 
         for target_model in &clients_with_cfg {
             println!(
@@ -285,7 +299,7 @@ pub async fn evaluating(
                             n_shot,
                             avg_k,
                             judger_model_name.as_deref(),
-                            Some(checker_model_name.as_str()),
+                            checker_model_name.as_deref(),
                         );
                         let log_path = build_task_log_path(
                             &logs_path,
@@ -372,7 +386,7 @@ pub async fn evaluating(
                                 Arc::clone(target_model),
                                 judger_model_name.as_deref(),
                                 judger_client.clone(),
-                                Arc::clone(&checker_runtime),
+                                checker_runtime.clone(),
                                 cot_mode,
                                 n_shot,
                                 pending_attempts,
@@ -394,7 +408,9 @@ pub async fn evaluating(
                             if let Err(err) = execute_pending_checks(
                                 pending_checks,
                                 db.clone(),
-                                Arc::clone(&checker_runtime),
+                                checker_runtime.clone().unwrap_or_else(|| {
+                                    panic!("pending checker work requires checker runtime")
+                                }),
                                 options.attempt_concurrency.max(1),
                             )
                             .await
@@ -526,7 +542,10 @@ async fn prepare_task_execution(
             })
         }
         RunMode::Resume => {
-            if matches.iter().any(|task| task.status == TaskStatus::Completed) {
+            if matches
+                .iter()
+                .any(|task| task.status == TaskStatus::Completed)
+            {
                 return Err(format!(
                     "run_mode=resume refused because a matching completed task already exists: {}",
                     render_task_lookup_list(&matches)
@@ -611,7 +630,7 @@ async fn execute_attempts(
     target_model: Arc<ClientWithConfig>,
     judger_model_name: Option<&str>,
     judger_client: Option<Arc<Client<OpenAIConfig>>>,
-    checker_runtime: Arc<CheckerRuntime>,
+    checker_runtime: Option<Arc<CheckerRuntime>>,
     cot_mode: CoTMode,
     n_shot: u8,
     pending_attempts: Vec<AttemptKey>,
@@ -631,7 +650,7 @@ async fn execute_attempts(
                 Arc::clone(&target_model),
                 judger_model_name.map(ToOwned::to_owned),
                 judger_client.clone(),
-                Arc::clone(&checker_runtime),
+                checker_runtime.clone(),
                 cot_mode,
                 n_shot,
                 db.clone(),
@@ -652,7 +671,7 @@ async fn execute_attempts(
                         Arc::clone(&target_model),
                         judger_model_name.map(ToOwned::to_owned),
                         judger_client.clone(),
-                        Arc::clone(&checker_runtime),
+                        checker_runtime.clone(),
                         cot_mode,
                         n_shot,
                         db.clone(),
@@ -686,7 +705,7 @@ fn spawn_attempt(
     target_model: Arc<ClientWithConfig>,
     judger_model_name: Option<String>,
     judger_client: Option<Arc<Client<OpenAIConfig>>>,
-    checker_runtime: Arc<CheckerRuntime>,
+    checker_runtime: Option<Arc<CheckerRuntime>>,
     cot_mode: CoTMode,
     n_shot: u8,
     db: Option<Db>,
@@ -727,6 +746,9 @@ fn spawn_attempt(
             .await?;
 
             if !record.is_passed {
+                let checker_runtime = checker_runtime
+                    .as_ref()
+                    .ok_or_else(|| "failed attempt requires checker runtime".to_string())?;
                 run_and_store_checker(
                     db,
                     PendingChecker {
@@ -932,7 +954,7 @@ fn build_attempt_keys(avg_k_plan: &AvgKExecutionPlan, max_pass_k: u8) -> Vec<Att
     attempts
 }
 
-fn collect_models() -> Vec<ApiConfig> {
+fn collect_models() -> Vec<IntApiConfig> {
     let mut target_models = Vec::new();
     for model_arch_version in &EVAL_CFG.get().unwrap().model_arch_versions {
         for model_data_version in &EVAL_CFG.get().unwrap().model_data_versions {
@@ -1053,10 +1075,10 @@ fn parse_field(field_name: &str) -> Field {
     }
 }
 
-fn build_client(api_cfg: &ApiConfig) -> Client<OpenAIConfig> {
+fn build_client(base_url: &str, api_key: &str) -> Client<OpenAIConfig> {
     let config = OpenAIConfig::new()
-        .with_api_key(api_cfg.api_key.clone())
-        .with_api_base(norm_api_url(&api_cfg.base_url));
+        .with_api_key(api_key.to_string())
+        .with_api_base(norm_api_url(base_url));
 
     Client::with_config(config)
 }
@@ -1079,9 +1101,9 @@ fn norm_api_url(base_url: &str) -> String {
     }
 }
 
-async fn check_client(client: &Client<OpenAIConfig>, api_cfg: &ApiConfig) {
+async fn check_client(client: &Client<OpenAIConfig>, model_name: &str) {
     let req = CompletionRequest::new(
-        api_cfg.model.clone(),
+        model_name.to_string(),
         "ping".into(),
         vec!["\n".to_string()],
         1,
@@ -1101,7 +1123,7 @@ async fn check_client(client: &Client<OpenAIConfig>, api_cfg: &ApiConfig) {
         .completions()
         .create_byot(&req)
         .await
-        .unwrap_or_else(|error| panic!("client `{}` is unavailable: {error}", api_cfg.model));
+        .unwrap_or_else(|error| panic!("client `{model_name}` is unavailable: {error}"));
 }
 
 fn build_avg_k_execution_plan(
@@ -1197,15 +1219,23 @@ impl SplitMix64 {
     }
 }
 
-fn prepare_benchmark(benchmark_info: &BenchmarkInfo, benchmark: &mut dyn Benchmark) {
+async fn prepare_benchmark(benchmark_info: &BenchmarkInfo, benchmark: &mut dyn Benchmark) {
     let load_invalid = benchmark.load();
-    let check_invalid = if load_invalid { true } else { benchmark.check() };
+    let check_invalid = if load_invalid {
+        true
+    } else {
+        benchmark.check().await
+    };
 
     if load_invalid || check_invalid {
-        benchmark.download();
+        benchmark.download().await;
 
         let load_invalid = benchmark.load();
-        let check_invalid = if load_invalid { true } else { benchmark.check() };
+        let check_invalid = if load_invalid {
+            true
+        } else {
+            benchmark.check().await
+        };
 
         assert!(
             !load_invalid && !check_invalid,
@@ -1215,28 +1245,39 @@ fn prepare_benchmark(benchmark_info: &BenchmarkInfo, benchmark: &mut dyn Benchma
     }
 }
 
-async fn connect_db_if_configured(cfg: Option<&SpaceDbConfig>, max_connections: u32) -> Option<Db> {
-    let Some(cfg) = cfg.filter(|cfg| is_space_db_configured(cfg)) else {
+async fn connect_db_if_configured(
+    upload_to_space: bool,
+    cfg: Option<&SpaceDbConfig>,
+    max_connections: u32,
+) -> Option<Db> {
+    if !upload_to_space {
         println!("database persistence: disabled");
         return None;
+    }
+
+    let Some(cfg) = cfg else {
+        panic!("upload_to_space=true requires [space_db] config");
     };
+    if !is_space_db_configured(cfg) {
+        panic!("upload_to_space=true requires a complete [space_db] config");
+    }
 
     let db = connect(cfg, max_connections)
         .await
         .unwrap_or_else(|err| panic!("failed to connect to postgres: {err}"));
-    println!(
-        "database persistence: enabled (pool max connections = {max_connections})"
-    );
+    println!("database persistence: enabled (pool max connections = {max_connections})");
     Some(db)
 }
 
 fn is_space_db_configured(cfg: &SpaceDbConfig) -> bool {
     !cfg.host.trim().is_empty()
         && !cfg.username.trim().is_empty()
+        && !cfg.password.trim().is_empty()
+        && !cfg.port.trim().is_empty()
         && !cfg.database_name.trim().is_empty()
 }
 
-fn model_cache_key(api_cfg: &ApiConfig) -> String {
+fn model_cache_key(api_cfg: &IntApiConfig) -> String {
     format!(
         "{}|{}|{}|{}",
         api_cfg.model_arch_version,

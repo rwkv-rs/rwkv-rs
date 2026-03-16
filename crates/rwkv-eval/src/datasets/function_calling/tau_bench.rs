@@ -3,12 +3,11 @@ use super::tau_bench_common::{
 };
 use super::{
     FunctionCall, FunctionCallingDecision, FunctionCallingStep, build_turn_completion_prompt,
-    get_expected_context, get_completion, parse_tool_call_or_final_answer, render_fc_output,
+    get_completion, get_expected_context, parse_tool_call_or_final_answer, render_fc_output,
 };
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -18,7 +17,6 @@ use sonic_rs::{Value, prelude::*};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 const TAU_BENCH_MAX_STEPS: usize = 16;
 const TAU_BENCH_EXPECTED_LEN: usize = 278;
@@ -38,7 +36,7 @@ static TAU_BENCH_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[],
+    avg_ks: &[1.0],
     pass_ks: &[1],
     with_llm_judger: false,
     create: |dataset_root| Box::new(TauBench::new(dataset_root)),
@@ -123,13 +121,12 @@ impl Benchmark for TauBench {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.len() != TAU_BENCH_EXPECTED_LEN
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_url_files(
+    async fn download(&self) {
+        let downloaded_path = download_url_files(
             &self.dataset_root,
             "tau_bench",
             &[
@@ -191,7 +188,7 @@ impl Benchmark for TauBench {
                 },
             ],
             8,
-        ));
+        ).await;
         println!("tau_bench dataset: {}", downloaded_path.display());
     }
 
@@ -313,8 +310,7 @@ impl Benchmark for TauBench {
         let mut last_response = String::new();
 
         for _ in 0..TAU_BENCH_MAX_STEPS {
-            let cot_context =
-                get_expected_context(&item.system_prompt, &item.user_prompt, &steps);
+            let cot_context = get_expected_context(&item.system_prompt, &item.user_prompt, &steps);
             let cot = get_completion(
                 model_client,
                 model_name,
@@ -380,8 +376,7 @@ impl Benchmark for TauBench {
             &item.task,
             &tool_calls,
             &assistant_messages,
-        )
-        {
+        ) {
             Ok(is_passed) => Record {
                 context: last_context,
                 answer: assistant_messages.last().cloned().unwrap_or_default(),

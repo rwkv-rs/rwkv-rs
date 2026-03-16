@@ -4,8 +4,7 @@ use crate::datasets::maths::{
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -13,7 +12,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use sonic_rs::{Object as Map, Value, prelude::*};
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static MATH_ODYSSEY_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -31,7 +29,7 @@ static MATH_ODYSSEY_INFO: BenchmarkInfo = BenchmarkInfo {
     },
     n_shots: &[0],
     avg_ks: &[4.0],
-    pass_ks: &[],
+    pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(MathOdyssey::new(dataset_root)),
 };
@@ -109,8 +107,10 @@ impl Benchmark for MathOdyssey {
         }
 
         let take = |row: &Map, keys: &[&str]| {
-            keys.iter()
-                .find_map(|key| row.get(&key).and_then(crate::datasets::maths::json_value_as_text))
+            keys.iter().find_map(|key| {
+                row.get(&key)
+                    .and_then(crate::datasets::maths::json_value_as_text)
+            })
         };
 
         self.test = read_jsonl_items::<Value, _>(&path)
@@ -138,13 +138,12 @@ impl Benchmark for MathOdyssey {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_url_files(
+    async fn download(&self) {
+        let downloaded_path = download_url_files(
             &self.dataset_root,
             "math_odyssey",
             &[UrlDownloadFile {
@@ -152,7 +151,7 @@ impl Benchmark for MathOdyssey {
                 url: "https://raw.githubusercontent.com/protagolabs/odyssey-math/main/final-odyssey-math-with-levels.jsonl".to_string(),
             }],
             1,
-        ));
+        ).await;
         println!("math_odyssey dataset: {}", downloaded_path.display());
     }
 

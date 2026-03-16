@@ -4,8 +4,7 @@ use crate::datasets::maths::{
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -13,7 +12,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use sonic_rs::{Object as Map, Value, prelude::*};
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 const MAWPS_FILES: &[(&str, &str)] = &[
     (
@@ -49,7 +47,7 @@ static MAWPS_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[],
+    avg_ks: &[1.0],
     pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Mawps::new(dataset_root)),
@@ -81,8 +79,10 @@ impl Benchmark for Mawps {
         self.test.clear();
 
         let take = |row: &Map, keys: &[&str]| {
-            keys.iter()
-                .find_map(|key| row.get(&key).and_then(crate::datasets::maths::json_value_as_text))
+            keys.iter().find_map(|key| {
+                row.get(&key)
+                    .and_then(crate::datasets::maths::json_value_as_text)
+            })
         };
 
         for (file_name, _) in MAWPS_FILES {
@@ -125,11 +125,11 @@ impl Benchmark for Mawps {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
+    async fn download(&self) {
         let files = MAWPS_FILES
             .iter()
             .map(|(file_name, url)| UrlDownloadFile {
@@ -137,10 +137,7 @@ impl Benchmark for Mawps {
                 url: (*url).to_string(),
             })
             .collect::<Vec<_>>();
-
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path =
-            runtime.block_on(download_url_files(&self.dataset_root, "mawps", &files, 4));
+        let downloaded_path = download_url_files(&self.dataset_root, "mawps", &files, 4).await;
         println!("mawps dataset: {}", downloaded_path.display());
     }
 

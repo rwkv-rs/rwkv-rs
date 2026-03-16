@@ -363,8 +363,7 @@ impl AirlineEnv {
     }
 
     fn set_flight(&mut self, flight_number: &str, flight: Value) -> Result<(), String> {
-        self.flights_mut()?
-            .insert(&flight_number, flight);
+        self.flights_mut()?.insert(&flight_number, flight);
         Ok(())
     }
 
@@ -541,7 +540,9 @@ impl AirlineEnv {
                     get_arg_str(args, "flight_number")?,
                     get_arg_str(args, "date")?,
                 )?;
-                Ok(json!(get_string_field(as_object(date_value)?, "status")?.to_string()))
+                Ok(json!(
+                    get_string_field(as_object(date_value)?, "status")?.to_string()
+                ))
             }
             other => Err(format!("unsupported airline tool `{other}`")),
         }
@@ -993,10 +994,7 @@ impl AirlineEnv {
         Ok(reservation)
     }
 
-    fn update_reservation_passengers(
-        &mut self,
-        args: &Map,
-    ) -> Result<Value, String> {
+    fn update_reservation_passengers(&mut self, args: &Map) -> Result<Value, String> {
         let reservation_id = get_arg_str(args, "reservation_id")?;
         let passengers = get_arg_array(args, "passengers")?;
         let mut reservation = self.get_reservation_clone(reservation_id)?;

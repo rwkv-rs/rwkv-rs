@@ -18,9 +18,9 @@ pub struct RawEvalConfig {
     pub extra_benchmark_name: Vec<String>,
     pub upload_to_space: Option<bool>,
     pub git_hash: String,
-    pub models: Vec<ApiConfig>,
-    pub llm_judger: ApiConfig,
-    pub llm_checker: ApiConfig,
+    pub models: Vec<IntApiConfig>,
+    pub llm_judger: ExtApiConfig,
+    pub llm_checker: ExtApiConfig,
     pub space_db: SpaceDbConfig,
 }
 
@@ -40,7 +40,7 @@ impl RawEvalConfig {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct ApiConfig {
+pub struct IntApiConfig {
     pub model_arch_version: String,
     pub model_data_version: String,
     pub model_num_params: String,
@@ -49,6 +49,14 @@ pub struct ApiConfig {
     pub api_key: String,
     pub model: String,
     pub max_batch_size: Option<usize>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ExtApiConfig {
+    pub base_url: String,
+    #[serde(skip_serializing)]
+    pub api_key: String,
+    pub model: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

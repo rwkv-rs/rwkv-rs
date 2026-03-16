@@ -4,8 +4,7 @@ use crate::datasets::maths::{
 use crate::datasets::utils::csv::read_csv_items;
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -13,7 +12,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use sonic_rs::Object as Map;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static ALGEBRA222_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -31,7 +29,7 @@ static ALGEBRA222_INFO: BenchmarkInfo = BenchmarkInfo {
     },
     n_shots: &[0],
     avg_ks: &[4.0],
-    pass_ks: &[],
+    pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Algebra222::new(dataset_root)),
 };
@@ -88,13 +86,12 @@ impl Benchmark for Algebra222 {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_url_files(
+    async fn download(&self) {
+        let downloaded_path = download_url_files(
             &self.dataset_root,
             "algebra222",
             &[UrlDownloadFile {
@@ -102,7 +99,7 @@ impl Benchmark for Algebra222 {
                 url: "https://raw.githubusercontent.com/joyheyueya/declarative-math-word-problem/main/algebra222.csv".to_string(),
             }],
             1,
-        ));
+        ).await;
         println!("algebra222 dataset: {}", downloaded_path.display());
     }
 

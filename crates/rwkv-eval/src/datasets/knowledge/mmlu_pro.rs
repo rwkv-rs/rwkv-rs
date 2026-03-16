@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
     Example, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
@@ -14,8 +13,7 @@ use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files
 use crate::datasets::utils::hf::viewer::{get_parquet_files, get_split_row_count};
 use crate::datasets::utils::parquet::{get_i64, get_string, get_string_list, read_parquet_items};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 
 const DATASET_ID: &str = "TIGER-Lab/MMLU-Pro";
@@ -111,26 +109,25 @@ impl Benchmark for MmluPro {
         self.validation.is_empty() || self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
-        let runtime = Runtime::new().unwrap();
-        let (remote_validation_len, remote_test_len) = runtime.block_on(async {
+    async fn check(&self) -> bool {
+        let (remote_validation_len, remote_test_len) = async {
             tokio::join!(
                 get_split_row_count(DATASET_ID, "default", "validation"),
                 get_split_row_count(DATASET_ID, "default", "test"),
             )
-        });
+        }
+        .await;
 
         self.validation.len() != remote_validation_len || self.test.len() != remote_test_len
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let parquet_files = runtime
-            .block_on(get_parquet_files(DATASET_ID))
+    async fn download(&self) {
+        let parquet_files = get_parquet_files(DATASET_ID)
+            .await
             .into_iter()
             .filter(|file| file.config == "default")
             .collect::<Vec<_>>();
-        let downloaded_path = runtime.block_on(download_url_files(
+        let downloaded_path = download_url_files(
             &self.dataset_root,
             LOCAL_ROOT_NAME,
             &parquet_files
@@ -141,7 +138,8 @@ impl Benchmark for MmluPro {
                 })
                 .collect::<Vec<_>>(),
             4,
-        ));
+        )
+        .await;
         println!("mmlu_pro dataset: {}", downloaded_path.display());
     }
 

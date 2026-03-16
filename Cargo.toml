@@ -30,7 +30,7 @@ bytes = { version = "1.11.1" }
 linkme = { version = "0.3.35" }
 
 # === Data Structures ===
-once_cell = { version = "1.21.3" }
+once_cell = { version = "1.21.4" }
 dashmap = { version = "7.0.0-rc2" }
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 
@@ -47,7 +47,7 @@ hashbrown = { version = "0.16.1" }
 csv-async = { version = "1.3.1", features = ["tokio"] }
 parquet = { version = "58.0.0", features = ["async"] }
 toml = { version = "1.0.6+spec-1.1.0" }
-tempfile = { version = "3.26.0" }
+tempfile = { version = "3.27.0" }
 divan = { version = "0.1.21" }
 
 safetensors = { version = "0.7.0" }
@@ -79,10 +79,10 @@ quote = "1.0.45"
 syn = { version = "2.0.117", features = ["full"] }
 
 # === CLI & Monitoring ===
-clap = { version = "4.5.60", features = ["derive"] }
+clap = { version = "4.6.0", features = ["derive"] }
 log = "0.4.29"
 tracing = { version = "0.1.44" }
-tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 tracing-tracy = { version = "0.11.4" }
 tracy-client = "0.18.4"
 chrono = { version = "0.4.44", features = ["clock"] }

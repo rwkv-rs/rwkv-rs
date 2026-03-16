@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
     get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
@@ -16,8 +15,7 @@ use crate::datasets::utils::parquet::{
     get_i64, get_optional_string, get_string, get_string_list, read_parquet_items,
 };
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 
 const DATASET_ID: &str = "edinburgh-dawg/mmlu-redux-2.0";
@@ -118,18 +116,17 @@ impl Benchmark for MmluRedux {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let parquet_files = runtime
-            .block_on(get_parquet_files(DATASET_ID))
+    async fn download(&self) {
+        let parquet_files = get_parquet_files(DATASET_ID)
+            .await
             .into_iter()
             .filter(|file| file.split == "test")
             .collect::<Vec<_>>();
-        let downloaded_path = runtime.block_on(download_url_files(
+        let downloaded_path = download_url_files(
             &self.dataset_root,
             LOCAL_ROOT_NAME,
             &parquet_files
@@ -140,7 +137,8 @@ impl Benchmark for MmluRedux {
                 })
                 .collect::<Vec<_>>(),
             8,
-        ));
+        )
+        .await;
         println!("mmlu_redux dataset: {}", downloaded_path.display());
     }
 

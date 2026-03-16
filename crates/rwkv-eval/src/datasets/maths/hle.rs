@@ -5,8 +5,7 @@ use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::hf::downloader::download_hf_files;
 use crate::datasets::utils::parquet::{get_optional_string, get_string, read_parquet_items};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -14,7 +13,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static HLE_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -87,20 +85,20 @@ impl Benchmark for Hle {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_hf_files(
+    async fn download(&self) {
+        let downloaded_path = download_hf_files(
             &self.dataset_root,
             "hle",
             "datasets/cais/hle",
             &["data/test-00000-of-00001.parquet"],
             1,
             "main",
-        ));
+        )
+        .await;
         println!("hle dataset: {}", downloaded_path.display());
     }
 

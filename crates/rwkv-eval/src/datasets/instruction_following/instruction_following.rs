@@ -1,8 +1,7 @@
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use crate::evaluators::instruction_following::{
     InstructionSpec, build_prompt, describe_instructions, evaluate_response, generate_response,
@@ -14,7 +13,6 @@ use linkme::distributed_slice;
 use serde::Deserialize;
 use sonic_rs::Object as Map;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static IFEVAL_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -103,13 +101,12 @@ impl Benchmark for Ifeval {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.len() != 541
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_url_files(
+    async fn download(&self) {
+        let downloaded_path = download_url_files(
             &self.dataset_root,
             "ifeval",
             &[UrlDownloadFile {
@@ -117,7 +114,7 @@ impl Benchmark for Ifeval {
                 url: "https://raw.githubusercontent.com/google-research/google-research/master/instruction_following_eval/data/input_data.jsonl".to_string(),
             }],
             1,
-        ));
+        ).await;
         println!("ifeval dataset: {}", downloaded_path.display());
     }
 

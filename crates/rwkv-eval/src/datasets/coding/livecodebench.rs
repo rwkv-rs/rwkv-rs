@@ -12,7 +12,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static LIVECODEBENCH_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -116,12 +115,11 @@ impl Benchmark for LiveCodeBench {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
+    async fn download(&self) {
         let file_names = [
             "test.jsonl",
             "test2.jsonl",
@@ -139,12 +137,8 @@ impl Benchmark for LiveCodeBench {
                 ),
             })
             .collect::<Vec<_>>();
-        let downloaded_path = runtime.block_on(download_url_files(
-            &self.dataset_root,
-            "livecodebench",
-            &files,
-            1,
-        ));
+        let downloaded_path =
+            download_url_files(&self.dataset_root, "livecodebench", &files, 1).await;
         println!("livecodebench dataset: {}", downloaded_path.display());
     }
 

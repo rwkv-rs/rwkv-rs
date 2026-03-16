@@ -3,8 +3,7 @@ use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_gzip_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use crate::evaluators::coding::run_python_verdict_script;
 use async_openai::Client;
@@ -14,7 +13,6 @@ use linkme::distributed_slice;
 use serde::Deserialize;
 use sonic_rs::Value;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static MBPP_PLUS_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -101,13 +99,12 @@ impl Benchmark for MbppPlus {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_url_files(
+    async fn download(&self) {
+        let downloaded_path = download_url_files(
             &self.dataset_root,
             "mbpp_plus",
             &[UrlDownloadFile {
@@ -116,7 +113,7 @@ impl Benchmark for MbppPlus {
                     .to_string(),
             }],
             1,
-        ));
+        ).await;
         println!("mbpp_plus dataset: {}", downloaded_path.display());
     }
 

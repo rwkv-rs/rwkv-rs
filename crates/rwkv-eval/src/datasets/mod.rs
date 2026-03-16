@@ -70,8 +70,8 @@ pub type BenchmarkFactory = fn(PathBuf) -> Box<dyn Benchmark>;
 #[async_trait]
 pub trait Benchmark: Send + Sync {
     fn load(&mut self) -> bool; // return is_invalid
-    fn check(&self) -> bool; // return is_invalid
-    fn download(&self);
+    async fn check(&self) -> bool; // return is_invalid
+    async fn download(&self);
     fn len(&self) -> usize;
 
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, n_shot: u8) -> String;

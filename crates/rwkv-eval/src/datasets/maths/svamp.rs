@@ -3,8 +3,7 @@ use crate::datasets::maths::{
 };
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -12,7 +11,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use sonic_rs::{Object as Map, Value, prelude::*};
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static SVAMP_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -29,7 +27,7 @@ static SVAMP_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[],
+    avg_ks: &[1.0],
     pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Svamp::new(dataset_root)),
@@ -66,8 +64,10 @@ impl Benchmark for Svamp {
         }
 
         let take = |row: &Map, keys: &[&str]| {
-            keys.iter()
-                .find_map(|key| row.get(&key).and_then(crate::datasets::maths::json_value_as_text))
+            keys.iter().find_map(|key| {
+                row.get(&key)
+                    .and_then(crate::datasets::maths::json_value_as_text)
+            })
         };
         let rows = sonic_rs::from_str::<Vec<Value>>(
             &std::fs::read_to_string(&path)
@@ -100,13 +100,12 @@ impl Benchmark for Svamp {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_url_files(
+    async fn download(&self) {
+        let downloaded_path = download_url_files(
             &self.dataset_root,
             "svamp",
             &[UrlDownloadFile {
@@ -115,7 +114,8 @@ impl Benchmark for Svamp {
                     .to_string(),
             }],
             1,
-        ));
+        )
+        .await;
         println!("svamp dataset: {}", downloaded_path.display());
     }
 

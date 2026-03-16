@@ -4,8 +4,7 @@ use crate::datasets::maths::{
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -13,7 +12,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use sonic_rs::{Object as Map, Value, prelude::*};
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static AIME24_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -67,8 +65,10 @@ impl Benchmark for Aime24 {
         }
 
         let take = |row: &Map, keys: &[&str]| {
-            keys.iter()
-                .find_map(|key| row.get(&key).and_then(crate::datasets::maths::json_value_as_text))
+            keys.iter().find_map(|key| {
+                row.get(&key)
+                    .and_then(crate::datasets::maths::json_value_as_text)
+            })
         };
 
         self.test = read_jsonl_items::<Value, _>(&path)
@@ -91,13 +91,12 @@ impl Benchmark for Aime24 {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_url_files(
+    async fn download(&self) {
+        let downloaded_path = download_url_files(
             &self.dataset_root,
             "aime24",
             &[UrlDownloadFile {
@@ -105,7 +104,7 @@ impl Benchmark for Aime24 {
                 url: "https://raw.githubusercontent.com/rwkv-rs/rwkv-skills/main/src/eval/datasets/data_prepper/free_answer/static/aime24_test.jsonl".to_string(),
             }],
             1,
-        ));
+        ).await;
         println!("aime24 dataset: {}", downloaded_path.display());
     }
 

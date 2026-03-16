@@ -3,15 +3,13 @@ use crate::datasets::maths::{
 };
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static ASDIV_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -28,7 +26,7 @@ static ASDIV_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[],
+    avg_ks: &[1.0],
     pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Asdiv::new(dataset_root)),
@@ -124,13 +122,12 @@ impl Benchmark for Asdiv {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_url_files(
+    async fn download(&self) {
+        let downloaded_path = download_url_files(
             &self.dataset_root,
             "asdiv",
             &[UrlDownloadFile {
@@ -138,7 +135,7 @@ impl Benchmark for Asdiv {
                 url: "https://raw.githubusercontent.com/chaochun/nlu-asdiv-dataset/master/dataset/ASDiv.xml".to_string(),
             }],
             1,
-        ));
+        ).await;
         println!("asdiv dataset: {}", downloaded_path.display());
     }
 

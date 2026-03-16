@@ -1,7 +1,7 @@
 use super::tau_bench_common::{
-    as_array, as_array_mut, as_object, as_object_mut, calculate_expression, get_f64_field,
-    get_string_field, get_value, update_json, EnvAssertion, EnvFunctionCall, TauDomainEnv,
-    ToolArgSpec, ToolSpec,
+    EnvAssertion, EnvFunctionCall, TauDomainEnv, ToolArgSpec, ToolSpec, as_array, as_array_mut,
+    as_object, as_object_mut, calculate_expression, get_f64_field, get_string_field, get_value,
+    update_json,
 };
 use super::{FunctionCall, ToolRequestor};
 use sonic_rs::{Object as Map, Value, json, prelude::*};
@@ -176,8 +176,7 @@ const RETAIL_ASSISTANT_TOOLS: &[ToolSpec] = &[
     ToolSpec {
         requestor: ToolRequestor::Assistant,
         name: "exchange_delivered_order_items",
-        description:
-            "Request an exchange for delivered order items with same-product replacements.",
+        description: "Request an exchange for delivered order items with same-product replacements.",
         arguments: ITEM_EXCHANGE_ARGS,
     },
     ToolSpec {
@@ -366,9 +365,7 @@ impl RetailEnv {
         as_object(payment_methods)
     }
 
-    fn retail_payment_methods_mut<'a>(
-        user: &'a mut Value,
-    ) -> Result<&'a mut Map, String> {
+    fn retail_payment_methods_mut<'a>(user: &'a mut Value) -> Result<&'a mut Map, String> {
         let user_object = as_object_mut(user)?;
         let payment_methods = user_object
             .get_mut(&"payment_methods")
@@ -541,20 +538,14 @@ impl RetailEnv {
         )?
         .extend(refunds.iter());
         order_object.insert(&"status", json!("cancelled".to_string()));
-        order_object.insert(
-            &"cancel_reason",
-            json!(reason.to_string()),
-        );
+        order_object.insert(&"cancel_reason", json!(reason.to_string()));
 
         self.set_user(&user_id, user)?;
         self.set_order(order_id, order.clone())?;
         Ok(order)
     }
 
-    fn exchange_delivered_order_items(
-        &mut self,
-        args: &Map,
-    ) -> Result<Value, String> {
+    fn exchange_delivered_order_items(&mut self, args: &Map) -> Result<Value, String> {
         let order_id = get_arg_str(args, "order_id")?;
         let item_ids = get_arg_string_vec(args, "item_ids")?;
         let new_item_ids = get_arg_string_vec(args, "new_item_ids")?;
@@ -611,18 +602,9 @@ impl RetailEnv {
         }
 
         let order_object = as_object_mut(&mut order)?;
-        order_object.insert(
-            &"status",
-            json!("exchange requested".to_string()),
-        );
-        order_object.insert(
-            &"exchange_items",
-            json!(sorted_strings(item_ids)),
-        );
-        order_object.insert(
-            &"exchange_new_items",
-            json!(sorted_strings(new_item_ids)),
-        );
+        order_object.insert(&"status", json!("exchange requested".to_string()));
+        order_object.insert(&"exchange_items", json!(sorted_strings(item_ids)));
+        order_object.insert(&"exchange_new_items", json!(sorted_strings(new_item_ids)));
         order_object.insert(
             &"exchange_payment_method_id",
             json!(payment_method_id.to_string()),
@@ -746,10 +728,7 @@ impl RetailEnv {
                     return Err(format!("Item {old_item_id} not found"));
                 }
             }
-            order_object.insert(
-                &"status",
-                json!("pending (item modified)".to_string()),
-            );
+            order_object.insert(&"status", json!("pending (item modified)".to_string()));
         }
 
         self.set_user(&user_id, user)?;
@@ -813,19 +792,21 @@ impl RetailEnv {
                     .get_mut(&"payment_history")
                     .ok_or_else(|| "missing payment_history".to_string())?,
             )?
-            .extend([
-                json!({
-                    "transaction_type": "payment",
-                    "amount": amount,
-                    "payment_method_id": payment_method_id,
-                }),
-                json!({
-                    "transaction_type": "refund",
-                    "amount": amount,
-                    "payment_method_id": original_payment_method_id,
-                }),
-            ]
-            .iter());
+            .extend(
+                [
+                    json!({
+                        "transaction_type": "payment",
+                        "amount": amount,
+                        "payment_method_id": payment_method_id,
+                    }),
+                    json!({
+                        "transaction_type": "refund",
+                        "amount": amount,
+                        "payment_method_id": original_payment_method_id,
+                    }),
+                ]
+                .iter(),
+            );
         }
 
         let _ = Self::adjust_gift_card_balance(&mut user, payment_method_id, -amount)?;
@@ -882,14 +863,8 @@ impl RetailEnv {
         }
 
         let order_object = as_object_mut(&mut order)?;
-        order_object.insert(
-            &"status",
-            json!("return requested".to_string()),
-        );
-        order_object.insert(
-            &"return_items",
-            json!(sorted_strings(item_ids)),
-        );
+        order_object.insert(&"status", json!("return requested".to_string()));
+        order_object.insert(&"return_items", json!(sorted_strings(item_ids)));
         order_object.insert(
             &"return_payment_method_id",
             json!(payment_method_id.to_string()),

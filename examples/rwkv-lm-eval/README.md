@@ -56,7 +56,8 @@ psql "postgres://username:password@host:5432/database_name?sslmode=verify-full" 
   -f examples/rwkv-lm-eval/scripts/init_db.sql
 ```
 
-If `[space_db]` is left empty, evaluation still runs, but no task/completion/eval/checker/score rows are stored.
+- `upload_to_space = false` disables PostgreSQL entirely, even if `[space_db]` is filled.
+- `upload_to_space = true` requires a complete `[space_db]` config.
 
 ## Usage
 
@@ -76,6 +77,13 @@ Example `example.toml` controls:
 - `llm_judger` / `llm_checker`
 - database connectivity
 - run mode and concurrency
+
+Model config types:
+
+- `[[models]]` uses `IntApiConfig`
+- `[[models]]` must provide `model_arch_version`, `model_data_version`, `model_num_params`
+- `[llm_judger]` and `[llm_checker]` use `ExtApiConfig`
+- `ExtApiConfig` only requires `base_url`, `api_key`, `model`
 
 ## Config Notes
 
@@ -97,6 +105,8 @@ git_hash = "a8dc285c786fc425c9effee232453213b4b5ce8e"
 - `judger_concurrency` must be `> 0`.
 - `checker_concurrency` must be `> 0`.
 - `db_pool_max_connections` must be `> 0`.
+- `upload_to_space = false` is the default dry-run path.
+- `run_mode = resume` requires `upload_to_space = true`.
 
 ## Persistence Behavior
 
@@ -107,5 +117,6 @@ git_hash = "a8dc285c786fc425c9effee232453213b4b5ce8e"
 - If an attempt fails at runtime, the task is marked `Failed` and the process stops.
 - `scores` are written only after the task has a complete set of successful attempts.
 - `resume` reconstructs progress by reading existing completion/eval rows, reuses finished attempts, and fills both missing attempts and missing checker rows.
+- If persistence is disabled, the evaluator does not connect to PostgreSQL and does not persist checker results.
 
 Logs are written under `examples/rwkv-lm-eval/logs/`.

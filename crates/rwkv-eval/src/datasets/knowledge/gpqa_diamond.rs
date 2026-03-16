@@ -13,8 +13,7 @@ use crate::datasets::knowledge::{
 };
 use crate::datasets::utils::csv::read_csv_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 
 #[distributed_slice(ALL_BENCHMARKS)]
@@ -90,12 +89,12 @@ impl Benchmark for GpqaDiamond {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let downloaded_path = download_gpqa_csv(&self.dataset_root, "gpqa_diamond.csv");
+    async fn download(&self) {
+        let downloaded_path = download_gpqa_csv(&self.dataset_root, "gpqa_diamond.csv").await;
         println!("gpqa_diamond dataset: {}", downloaded_path.display());
     }
 

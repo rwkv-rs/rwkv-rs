@@ -5,8 +5,7 @@ use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::hf::download_hf_parquet_splits;
 use crate::datasets::utils::parquet::{get_string, read_parquet_items};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -14,7 +13,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static SIMPLEQA_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -31,7 +29,7 @@ static SIMPLEQA_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[],
+    avg_ks: &[1.0],
     pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Simpleqa::new(dataset_root)),
@@ -82,20 +80,20 @@ impl Benchmark for Simpleqa {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_hf_parquet_splits(
+    async fn download(&self) {
+        let downloaded_path = download_hf_parquet_splits(
             &self.dataset_root,
             "simpleqa",
             "codelion/SimpleQA-Verified",
             "default",
             &["train"],
             2,
-        ));
+        )
+        .await;
         println!("simpleqa dataset: {}", downloaded_path.display());
     }
 

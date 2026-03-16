@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::gpqa_common::join_subject_parts;
 use crate::datasets::knowledge::{
@@ -13,8 +12,7 @@ use crate::datasets::knowledge::{
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 
 const LOCAL_ROOT_NAME: &str = "supergpqa";
@@ -85,13 +83,12 @@ impl Benchmark for SuperGpqa {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         self.test.is_empty()
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_url_files(
+    async fn download(&self) {
+        let downloaded_path = download_url_files(
             &self.dataset_root,
             LOCAL_ROOT_NAME,
             &[UrlDownloadFile {
@@ -99,7 +96,8 @@ impl Benchmark for SuperGpqa {
                 url: FILE_URL.to_string(),
             }],
             1,
-        ));
+        )
+        .await;
         println!("supergpqa dataset: {}", downloaded_path.display());
     }
 

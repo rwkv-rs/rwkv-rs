@@ -5,8 +5,7 @@ use crate::datasets::utils::hf::download_hf_parquet_splits;
 use crate::datasets::utils::hf::viewer::get_split_row_count;
 use crate::datasets::utils::parquet::{get_i64, get_string, get_string_list, read_parquet_items};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use crate::evaluators::coding::run_python_verdict_script;
 use async_openai::Client;
@@ -15,7 +14,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static MBPP_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -85,26 +83,21 @@ impl Benchmark for Mbpp {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
-        let runtime = Runtime::new().unwrap();
+    async fn check(&self) -> bool {
         self.test.len()
-            != runtime.block_on(get_split_row_count(
-                "google-research-datasets/mbpp",
-                "sanitized",
-                "test",
-            ))
+            != get_split_row_count("google-research-datasets/mbpp", "sanitized", "test").await
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_hf_parquet_splits(
+    async fn download(&self) {
+        let downloaded_path = download_hf_parquet_splits(
             &self.dataset_root,
             "mbpp",
             "google-research-datasets/mbpp",
             "sanitized",
             &["test"],
             2,
-        ));
+        )
+        .await;
         println!("mbpp dataset: {}", downloaded_path.display());
     }
 

@@ -5,8 +5,7 @@ use crate::datasets::utils::hf::download_hf_parquet_splits;
 use crate::datasets::utils::hf::viewer::get_split_row_count;
 use crate::datasets::utils::parquet::{get_string, read_parquet_items};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use crate::evaluators::coding::run_python_verdict_script;
 use async_openai::Client;
@@ -15,7 +14,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static HUMAN_EVAL_FIX_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -108,26 +106,20 @@ impl Benchmark for HumanEvalFix {
         self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
-        let runtime = Runtime::new().unwrap();
-        self.test.len()
-            != runtime.block_on(get_split_row_count(
-                "bigcode/humanevalpack",
-                "python",
-                "test",
-            ))
+    async fn check(&self) -> bool {
+        self.test.len() != get_split_row_count("bigcode/humanevalpack", "python", "test").await
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_hf_parquet_splits(
+    async fn download(&self) {
+        let downloaded_path = download_hf_parquet_splits(
             &self.dataset_root,
             "human_eval_fix",
             "bigcode/humanevalpack",
             "python",
             &["test"],
             2,
-        ));
+        )
+        .await;
         println!("human_eval_fix dataset: {}", downloaded_path.display());
     }
 
@@ -169,19 +161,15 @@ impl Benchmark for HumanEvalFix {
         )
         .await;
         let answer = extract_code(&generated.completion);
-        let verdict = run_python_verdict_script(&get_judge_script(
-            &answer,
-            &item.test,
-            &item.entry_point,
-            3,
-        ))
-        .await
-        .unwrap_or_else(|err| {
-            panic!(
-                "human_eval_fix sandbox execution failed: {err}; task={}",
-                item.task_id
-            )
-        });
+        let verdict =
+            run_python_verdict_script(&get_judge_script(&answer, &item.test, &item.entry_point, 3))
+                .await
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "human_eval_fix sandbox execution failed: {err}; task={}",
+                        item.task_id
+                    )
+                });
 
         let ref_answer = self.get_ref_answer(index);
         Record {

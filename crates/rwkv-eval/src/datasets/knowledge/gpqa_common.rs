@@ -1,18 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tokio::runtime::Runtime;
-
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 
 pub fn gpqa_csv_path<P: AsRef<Path>>(dataset_root: P, file_name: &str) -> PathBuf {
     dataset_root.as_ref().join("gpqa").join(file_name)
 }
 
-pub fn download_gpqa_csv<P: AsRef<Path>>(dataset_root: P, file_name: &str) -> PathBuf {
+pub async fn download_gpqa_csv<P: AsRef<Path>>(dataset_root: P, file_name: &str) -> PathBuf {
     let dataset_root = dataset_root.as_ref();
-    let runtime = Runtime::new().unwrap();
-    let root_dir = runtime.block_on(download_url_files(
+    let root_dir = download_url_files(
         dataset_root,
         "gpqa",
         &[UrlDownloadFile {
@@ -20,7 +17,8 @@ pub fn download_gpqa_csv<P: AsRef<Path>>(dataset_root: P, file_name: &str) -> Pa
             url: "https://raw.githubusercontent.com/idavidrein/gpqa/main/dataset.zip".to_string(),
         }],
         1,
-    ));
+    )
+    .await;
 
     let zip_path = root_dir.join("dataset.zip");
     let archived_path = format!("dataset/{file_name}");

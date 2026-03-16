@@ -93,7 +93,10 @@ pub async fn get_code_completion_with_cot_mode(
     CodeGeneration {
         context: render_context(
             expected_context,
-            &[("<|completions_of_cot|>", ""), ("<|completions|>", &completion)],
+            &[
+                ("<|completions_of_cot|>", ""),
+                ("<|completions|>", &completion),
+            ],
         ),
         completion,
     }

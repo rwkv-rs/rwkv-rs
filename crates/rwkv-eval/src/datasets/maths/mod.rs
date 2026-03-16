@@ -1,6 +1,5 @@
 use crate::datasets::{
-    CoTMode, SamplingConfig, apply_user_assistant_template, get_completions_of_cot,
-    render_context,
+    CoTMode, SamplingConfig, apply_user_assistant_template, get_completions_of_cot, render_context,
 };
 use crate::inferers::{CompletionRequest, CompletionResponse};
 use async_openai::Client;
@@ -337,8 +336,7 @@ async fn judge_once(
     let content = choice.message.content.clone().ok_or_else(|| {
         format!(
             "judge returned no content; refusal={:?}; finish_reason={:?}",
-            choice.message.refusal,
-            choice.finish_reason
+            choice.message.refusal, choice.finish_reason
         )
     })?;
 

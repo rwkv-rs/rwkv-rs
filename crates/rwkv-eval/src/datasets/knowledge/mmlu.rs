@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
-use tokio::runtime::Runtime;
 
 use crate::datasets::knowledge::{
     Example, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
@@ -14,8 +13,7 @@ use crate::datasets::utils::hf::download_hf_parquet_splits;
 use crate::datasets::utils::hf::viewer::get_split_row_count;
 use crate::datasets::utils::parquet::{get_string, get_string_list, get_u8, read_parquet_items};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 
 #[distributed_slice(ALL_BENCHMARKS)]
@@ -92,28 +90,28 @@ impl Benchmark for Mmlu {
         self.dev.is_empty() || self.test.is_empty()
     }
 
-    fn check(&self) -> bool {
-        let runtime = Runtime::new().unwrap();
-        let (remote_dev_len, remote_test_len) = runtime.block_on(async {
+    async fn check(&self) -> bool {
+        let (remote_dev_len, remote_test_len) = async {
             tokio::join!(
                 get_split_row_count("cais/mmlu", "all", "dev"),
                 get_split_row_count("cais/mmlu", "all", "test"),
             )
-        });
+        }
+        .await;
 
         self.dev.len() != remote_dev_len || self.test.len() != remote_test_len
     }
 
-    fn download(&self) {
-        let runtime = Runtime::new().unwrap();
-        let downloaded_path = runtime.block_on(download_hf_parquet_splits(
+    async fn download(&self) {
+        let downloaded_path = download_hf_parquet_splits(
             &self.dataset_root,
             "mmlu",
             "cais/mmlu",
             "all",
             &["dev", "test"],
             8,
-        ));
+        )
+        .await;
         println!("mmlu dataset: {}", downloaded_path.display());
     }
 

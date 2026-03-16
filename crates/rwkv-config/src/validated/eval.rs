@@ -4,7 +4,7 @@ use once_cell::sync::OnceCell;
 use rwkv_derive::ConfigBuilder;
 use serde::Serialize;
 
-use crate::raw::eval::{ApiConfig, SpaceDbConfig};
+use crate::raw::eval::{ExtApiConfig, IntApiConfig, SpaceDbConfig};
 
 #[derive(Clone, Debug, Serialize, ConfigBuilder)]
 #[config_builder(raw = "crate::raw::eval::RawEvalConfig", cell = "EVAL_CFG")]
@@ -23,9 +23,9 @@ pub struct FinalEvalConfig {
     pub extra_benchmark_name: Vec<String>,
     pub upload_to_space: bool,
     pub git_hash: String,
-    pub models: Vec<ApiConfig>,
-    pub llm_judger: ApiConfig,
-    pub llm_checker: ApiConfig,
+    pub models: Vec<IntApiConfig>,
+    pub llm_judger: ExtApiConfig,
+    pub llm_checker: ExtApiConfig,
     pub space_db: Option<SpaceDbConfig>,
 }
 
