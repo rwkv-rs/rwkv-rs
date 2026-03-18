@@ -161,8 +161,7 @@ pub async fn run_checker(
     let content = choice.message.content.clone().ok_or_else(|| {
         format!(
             "checker returned no content; refusal={:?}; finish_reason={:?}",
-            choice.message.refusal,
-            choice.finish_reason
+            choice.message.refusal, choice.finish_reason
         )
     })?;
     let wire = sonic_rs::from_str::<CheckerWire>(&content)

@@ -6,6 +6,10 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sonic_rs::{Object as Map, Value, json};
 
+pub mod browsecomp;
+mod browsecomp_common;
+pub mod browsecomp_zh;
+pub mod mcp_universe;
 pub mod tau_bench;
 pub mod tau_bench_airline;
 pub mod tau_bench_common;

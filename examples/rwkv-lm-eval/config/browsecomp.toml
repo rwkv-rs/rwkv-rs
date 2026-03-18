@@ -1,0 +1,44 @@
+experiment_name = "browsecomp_rwkv7_g1d_0_4b"
+experiment_desc = "BrowseComp and BrowseComp-ZH full evaluation for rwkv7-g1d-0.4b"
+run_mode = "rerun"
+attempt_concurrency = 4
+judger_concurrency = 4
+checker_concurrency = 1
+db_pool_max_connections = 8
+
+model_arch_versions = ["rwkv7"]
+model_data_versions = ["g1d"]
+model_num_params = ["0.4b"]
+
+benchmark_field = []
+extra_benchmark_name = ["browsecomp", "browsecomp_zh"]
+
+upload_to_space = true
+git_hash = "fa705ee9d14ff2bc2e64f0f18129007f6d9f91b2"
+
+[[models]]
+model_arch_version = "rwkv7"
+model_data_version = "g1d"
+model_num_params = "0.4b"
+base_url = "127.0.0.1:8080"
+api_key = ""
+model = "rwkv7-g1d-0.4b"
+max_batch_size = 4
+
+[llm_judger]
+base_url = "https://example.invalid/v1"
+api_key = "env_override_required"
+model = "env_override_required"
+
+[llm_checker]
+base_url = "https://example.invalid/v1"
+api_key = "env_override_required"
+model = "env_override_required"
+
+[space_db]
+username = "env_override_required"
+password = "env_override_required"
+host = "env_override_required"
+port = "5432"
+database_name = "env_override_required"
+sslmode = "disable"

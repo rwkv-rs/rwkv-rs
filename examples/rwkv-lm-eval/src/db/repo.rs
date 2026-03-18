@@ -377,7 +377,12 @@ fn parse_port(cfg: &SpaceDbConfig) -> Result<u16, String> {
 }
 
 fn parse_ssl_mode(value: Option<&str>) -> Result<PgSslMode, String> {
-    match value.unwrap_or("prefer").trim().to_ascii_lowercase().as_str() {
+    match value
+        .unwrap_or("prefer")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "disable" => Ok(PgSslMode::Disable),
         "prefer" => Ok(PgSslMode::Prefer),
         "require" => Ok(PgSslMode::Require),

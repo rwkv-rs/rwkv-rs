@@ -95,7 +95,11 @@ impl MetricsRendererTraining for BarMetricsRenderer {
         let epoch = item.global_progress.items_processed;
         let iteration = item
             .iteration
-            .or_else(|| item.progress.as_ref().map(|progress| progress.items_processed))
+            .or_else(|| {
+                item.progress
+                    .as_ref()
+                    .map(|progress| progress.items_processed)
+            })
             .unwrap_or(0);
         #[cfg(feature = "trace")]
         let _step_span = tracing::trace_span!(

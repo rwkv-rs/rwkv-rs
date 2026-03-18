@@ -8,15 +8,14 @@ use crate::db::{
 };
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use rwkv_config::raw::eval::{IntApiConfig, SpaceDbConfig};
 use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfig, FinalEvalConfigBuilder};
 use rwkv_eval::datasets::maths::set_llm_judger_semaphore;
 use rwkv_eval::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, CoTMode, Field, SamplingConfig,
-    get_benchmarks_with_field,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, CoTMode, Field, get_benchmarks_with_field,
 };
 use rwkv_eval::evaluators::coding::ensure_microsandbox_available;
-use rwkv_eval::inferers::{CompletionRequest, CompletionResponse};
 use sonic_rs::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -204,11 +203,27 @@ pub async fn evaluating(
     println!("target models: {}", clients_with_cfg.len());
 
     for target_model in &clients_with_cfg {
-        check_client(&target_model.client, &target_model.api_cfg.model).await;
+        check_client(
+            &target_model.api_cfg.base_url,
+            &target_model.api_cfg.api_key,
+            &target_model.api_cfg.model,
+        )
+        .await;
     }
-    check_client(&llm_judger_client, &llm_judger_cfg.model).await;
+    check_client(
+        &llm_judger_cfg.base_url,
+        &llm_judger_cfg.api_key,
+        &llm_judger_cfg.model,
+    )
+    .await;
     if let Some(checker_runtime) = checker_runtime.as_ref() {
-        check_client(checker_runtime.client.as_ref(), &llm_checker_cfg.model).await;
+        let _ = checker_runtime;
+        check_client(
+            &llm_checker_cfg.base_url,
+            &llm_checker_cfg.api_key,
+            &llm_checker_cfg.model,
+        )
+        .await;
     }
 
     let mut model_ids = BTreeMap::new();
@@ -749,7 +764,7 @@ fn spawn_attempt(
                 let checker_runtime = checker_runtime
                     .as_ref()
                     .ok_or_else(|| "failed attempt requires checker runtime".to_string())?;
-                run_and_store_checker(
+                if let Err(err) = run_and_store_checker(
                     db,
                     PendingChecker {
                         completions_id,
@@ -759,7 +774,13 @@ fn spawn_attempt(
                     },
                     checker_runtime.as_ref(),
                 )
-                .await?;
+                .await
+                {
+                    eprintln!(
+                        "checker failed for task_id={} sample_index={} avg_repeat_index={} pass_index={}: {}",
+                        task_id, key.sample_index, key.avg_repeat_index, key.pass_index, err
+                    );
+                }
             }
         }
 
@@ -828,7 +849,11 @@ fn spawn_pending_checker(
     checker_runtime: Arc<CheckerRuntime>,
 ) {
     join_set.spawn(async move {
-        run_and_store_checker(&db, pending_check, checker_runtime.as_ref()).await
+        if let Err(err) = run_and_store_checker(&db, pending_check, checker_runtime.as_ref()).await
+        {
+            eprintln!("checker failed while backfilling pending rows: {err}");
+        }
+        Ok(())
     });
 }
 
@@ -841,14 +866,32 @@ async fn run_and_store_checker(
         .acquire_owned()
         .await
         .map_err(|err| format!("acquire checker semaphore failed: {err}"))?;
-    let checker = run_checker(
+    let checker = match run_checker(
         checker_runtime.client.as_ref(),
         &checker_runtime.model_name,
         &pending_check.context,
         &pending_check.answer,
         &pending_check.ref_answer,
     )
-    .await?;
+    .await
+    {
+        Ok(checker) => checker,
+        Err(err) => {
+            eprintln!(
+                "checker request degraded to default row with reason=0 for completions_id={}: {err}",
+                pending_check.completions_id
+            );
+            crate::checker::CheckerOutput {
+                answer_correct: false,
+                instruction_following_error: false,
+                world_knowledge_error: false,
+                math_error: false,
+                reasoning_logic_error: false,
+                thought_contains_correct_answer: false,
+                reason: "0".to_string(),
+            }
+        }
+    };
 
     insert_checker(
         db,
@@ -1101,29 +1144,83 @@ fn norm_api_url(base_url: &str) -> String {
     }
 }
 
-async fn check_client(client: &Client<OpenAIConfig>, model_name: &str) {
-    let req = CompletionRequest::new(
-        model_name.to_string(),
-        "ping".into(),
-        vec!["\n".to_string()],
-        1,
-        &SamplingConfig {
-            temperature: 1.0,
-            top_k: 1,
-            top_p: 1.0,
-            presence_penalty: 0.0,
-            repetition_penalty: 0.0,
-            penalty_decay: 1.0,
-        },
-        None,
-        None,
-    );
+async fn check_client(base_url: &str, api_key: &str, model_name: &str) {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|err| panic!("failed to build preflight http client: {err}"));
+    let base_url = norm_api_url(base_url);
 
-    let _: CompletionResponse = client
-        .completions()
-        .create_byot(&req)
+    let completion_body = sonic_rs::to_string(&json!({
+        "model": model_name,
+        "prompt": "ping",
+        "stop": ["\n"],
+        "max_tokens": 1,
+        "temperature": 1.0,
+        "top_p": 1.0,
+    }))
+    .unwrap();
+    if send_preflight_request(
+        &client,
+        &format!("{base_url}/completions"),
+        api_key,
+        completion_body,
+    )
+    .await
+    .is_ok()
+    {
+        return;
+    }
+
+    let chat_body = sonic_rs::to_string(&json!({
+        "model": model_name,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+        "temperature": 1.0,
+        "top_p": 1.0,
+    }))
+    .unwrap();
+    send_preflight_request(
+        &client,
+        &format!("{base_url}/chat/completions"),
+        api_key,
+        chat_body,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("client `{model_name}` is unavailable: {error}"));
+}
+
+async fn send_preflight_request(
+    client: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+    body: String,
+) -> Result<(), String> {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    if !api_key.is_empty() {
+        let value = HeaderValue::from_str(&format!("Bearer {api_key}"))
+            .map_err(|err| format!("invalid authorization header: {err}"))?;
+        headers.insert(AUTHORIZATION, value);
+    }
+
+    let response = client
+        .post(url)
+        .headers(headers)
+        .body(body)
+        .send()
         .await
-        .unwrap_or_else(|error| panic!("client `{model_name}` is unavailable: {error}"));
+        .map_err(|err| format!("request to `{url}` failed: {err}"))?;
+    if response.status().is_success() {
+        return Ok(());
+    }
+
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .unwrap_or_else(|_| "<failed to read response body>".to_string());
+    Err(format!("request to `{url}` returned {status}: {text}"))
 }
 
 fn build_avg_k_execution_plan(

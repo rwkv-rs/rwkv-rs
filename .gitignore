@@ -27,3 +27,5 @@ reference_for_agents/
 /logs
 /examples/rwkv-lm/config/train/logs
 /examples/rwkv-lm/logs
+.env
+**/.env

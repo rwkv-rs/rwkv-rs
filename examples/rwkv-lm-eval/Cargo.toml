@@ -18,3 +18,5 @@ tokio = { workspace = true }
 sonic-rs = { workspace = true }
 serde = { workspace = true }
 sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls"] }
+dotenvy = "0.15.7"
+reqwest = { workspace = true }

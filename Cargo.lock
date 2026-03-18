@@ -7169,6 +7169,7 @@ version = "0.1.0"
 dependencies = [
  "async-openai",
  "async-trait",
+ "base64",
  "chrono",
  "csv",
  "flate2",
@@ -7182,11 +7183,13 @@ dependencies = [
  "reqwest 0.13.2",
  "rwkv-config",
  "serde",
+ "sha2",
  "sonic-rs",
  "thiserror 2.0.18",
  "tokio",
  "toml 1.0.6+spec-1.1.0",
  "walkdir",
+ "zip 0.6.6",
 ]
 
 [[package]]
@@ -7250,6 +7253,8 @@ name = "rwkv-lm-eval"
 version = "0.1.0"
 dependencies = [
  "async-openai",
+ "dotenvy",
+ "reqwest 0.13.2",
  "rwkv-config",
  "rwkv-eval",
  "serde",
