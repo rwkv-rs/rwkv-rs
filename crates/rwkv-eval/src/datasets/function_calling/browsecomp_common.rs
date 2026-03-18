@@ -1,5 +1,7 @@
 use crate::datasets::SamplingConfig;
-use crate::datasets::function_calling::get_completion;
+use crate::datasets::function_calling::{
+    build_turn_completion_prompt, get_completion, get_expected_context,
+};
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use base64::Engine;
@@ -8,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sonic_rs::{Value, json};
 
-const BROWSECOMP_COT_PLACEHOLDER: &str = "<|completions_of_cot|>";
 const BROWSECOMP_JUDGE_SAMPLING_CONFIG: SamplingConfig = SamplingConfig {
     temperature: 0.0,
     top_k: 1,
@@ -98,13 +99,11 @@ pub fn decrypt_xor_base64(ciphertext_b64: &str, password: &str) -> Result<String
 }
 
 pub fn build_browsecomp_expected_context(system_prompt: &str, user_prompt: &str) -> String {
-    format!(
-        "System: {system_prompt}\n\nUser: {user_prompt}\n\nAssistant: <think>{BROWSECOMP_COT_PLACEHOLDER}"
-    )
+    get_expected_context(system_prompt, user_prompt, &[])
 }
 
 pub fn build_browsecomp_turn_completion_prompt(cot_context: &str, cot: &str) -> String {
-    cot_context.replace(BROWSECOMP_COT_PLACEHOLDER, cot) + "</think>\n"
+    build_turn_completion_prompt(cot_context, cot)
 }
 
 pub async fn generate_browsecomp_answer(
@@ -128,7 +127,7 @@ pub async fn generate_browsecomp_answer(
         model_name,
         &answer_prompt,
         sampling_config,
-        vec!["\nUser:".to_string(), "\nSystem:".to_string()],
+        vec!["\nUser:".to_string(), "\nAssistant:".to_string()],
         256,
     )
     .await
