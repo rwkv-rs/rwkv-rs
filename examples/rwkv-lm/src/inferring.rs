@@ -1,4 +1,7 @@
+use crate::model::{AutoRegressiveModel, AutoRegressiveModelConfig, UnembedMode};
 use itertools::izip;
+use rwkv::nn::kernels::addcmul::AddcmulBackend;
+use rwkv::nn::kernels::token_shift_diff::TokenShiftDiffBackend;
 use rwkv::{
     config::{raw::infer::GenerationConfig, validated::model::FinalModelConfig},
     custom::{
@@ -24,8 +27,6 @@ use rwkv::{
     },
 };
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
-
-use crate::model::{AutoRegressiveModel, AutoRegressiveModelConfig, UnembedMode};
 
 rwkv::custom_mode!();
 
@@ -113,7 +114,7 @@ impl<B: Backend + Wkv7Backend + RapidSampleBackend> RwkvLmForward<B> {
 
 impl<B> ModelForward for RwkvLmForward<B>
 where
-    B: Backend + Wkv7Backend + RapidSampleBackend,
+    B: Backend + TokenShiftDiffBackend + AddcmulBackend + Wkv7Backend + RapidSampleBackend,
 {
     fn forward(
         &mut self,
@@ -627,7 +628,13 @@ impl<B> RwkvLmEngineFactory<B> {
 
 impl<B> ModelEngineFactory for RwkvLmEngineFactory<B>
 where
-    B: Backend + Wkv7Backend + RapidSampleBackend + Send + Sync,
+    B: Backend
+        + TokenShiftDiffBackend
+        + AddcmulBackend
+        + Wkv7Backend
+        + RapidSampleBackend
+        + Send
+        + Sync,
 {
     fn build_model_groups(
         &self,

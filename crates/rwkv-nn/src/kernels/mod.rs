@@ -1,6 +1,8 @@
+pub mod addcmul;
 pub(crate) mod backend;
 pub mod l2wrap;
 pub mod rapid_sample;
+pub mod token_shift_diff;
 pub mod wkv7_common;
 pub mod wkv7_infer;
 pub mod wkv7_pretrain;

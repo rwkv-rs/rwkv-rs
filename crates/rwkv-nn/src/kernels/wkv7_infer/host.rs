@@ -82,27 +82,40 @@ fn wkv7_infer_forward_impl_inner<
 
     let expected_initial_state_shape = Shape::new([batch_size, num_heads, dim, dim]);
     debug_assert_eq!(
-        initial_state.meta.shape(), &expected_initial_state_shape,
+        initial_state.meta.shape(),
+        &expected_initial_state_shape,
         "initial_state shape must be [batch_size, num_heads, head_size, head_size]"
     );
     debug_assert_eq!(
-        receptance.meta.shape(), &shape,
+        receptance.meta.shape(),
+        &shape,
         "receptance shape mismatch with weight_decay"
     );
-    debug_assert_eq!(key.meta.shape(), &shape, "key shape mismatch with weight_decay");
-    debug_assert_eq!(value.meta.shape(), &shape, "value shape mismatch with weight_decay");
     debug_assert_eq!(
-        removal.meta.shape(), &shape,
+        key.meta.shape(),
+        &shape,
+        "key shape mismatch with weight_decay"
+    );
+    debug_assert_eq!(
+        value.meta.shape(),
+        &shape,
+        "value shape mismatch with weight_decay"
+    );
+    debug_assert_eq!(
+        removal.meta.shape(),
+        &shape,
         "removal shape mismatch with weight_decay"
     );
     debug_assert_eq!(
-        replacement.meta.shape(), &shape,
+        replacement.meta.shape(),
+        &shape,
         "replacement shape mismatch with weight_decay"
     );
 
     let expected_context_mask_shape = Shape::new([batch_size, context_length]);
     debug_assert_eq!(
-        context_mask.meta.shape(), &expected_context_mask_shape,
+        context_mask.meta.shape(),
+        &expected_context_mask_shape,
         "context_mask shape must be [batch_size, context_length]"
     );
 

@@ -1,11 +1,11 @@
-use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
+use rayon::prelude::*;
 use rwkv::custom::backend::Cuda;
 use rwkv::custom::cubecl::device::{Device as CubeDevice, DeviceId};
 use rwkv::custom::prelude::Backend;
 use rwkv::custom::tensor::bf16;
 use rwkv_lm::model::AutoRegressiveModelConfig;
-use rwkv_lm::pth2mpk::{convert_pth_to_mpk, ConvertPthToMpkOptions};
+use rwkv_lm::pth2mpk::{ConvertPthToMpkOptions, convert_pth_to_mpk};
 use std::collections::HashMap;
 use std::fs;
 use std::io;

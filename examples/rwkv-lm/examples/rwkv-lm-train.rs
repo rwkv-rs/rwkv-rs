@@ -10,7 +10,9 @@ fn main() {
 
 use rwkv::config::{default_cfg_dir, get_arg_value};
 use rwkv::custom::tensor::backend::AutodiffBackend;
+use rwkv::nn::kernels::addcmul::AddcmulBackend;
 use rwkv::nn::kernels::l2wrap::L2WrapBackend;
+use rwkv::nn::kernels::token_shift_diff::TokenShiftDiffBackend;
 use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
 use rwkv::train::learner::init::{BackendDeviceInit, init_cfg, init_devices, init_log};
 use rwkv_lm::paths;
@@ -27,9 +29,17 @@ type ElemType = rwkv::custom::tensor::flex32;
 #[cfg(feature = "f16")]
 type ElemType = rwkv::custom::tensor::f16;
 
-pub fn launch<B: AutodiffBackend + BackendDeviceInit + Wkv7Backend + L2WrapBackend>()
+pub fn launch<
+    B: AutodiffBackend
+        + BackendDeviceInit
+        + Wkv7Backend
+        + TokenShiftDiffBackend
+        + AddcmulBackend
+        + L2WrapBackend,
+>()
 where
-    <B as AutodiffBackend>::InnerBackend: BackendDeviceInit + Wkv7Backend + L2WrapBackend,
+    <B as AutodiffBackend>::InnerBackend:
+        BackendDeviceInit + Wkv7Backend + TokenShiftDiffBackend + AddcmulBackend + L2WrapBackend,
 {
     #[cfg(feature = "trace")]
     {

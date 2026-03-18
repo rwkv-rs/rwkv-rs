@@ -4,10 +4,14 @@ mod weight_prepare;
 
 use burn::{config::Config, module::Module, prelude::*};
 
-use crate::{kernels::wkv7_common::Wkv7Kernel, layers::lora::LoRARanks};
+use crate::{
+    kernels::{
+        addcmul::AddcmulBackend, token_shift_diff::TokenShiftDiffBackend, wkv7_common::Wkv7Kernel,
+    },
+    layers::lora::LoRARanks,
+};
 
 use crate::functions::context_mask::apply_context_mask;
-use crate::functions::token_shift::get_embedded_token_shift;
 use crate::modules::time_mixer::gated_readout::GatedReadoutInput;
 use gated_readout::{GatedReadout, GatedReadoutConfig};
 use weight_prepare::{WeightPrepare, WeightPrepareConfig};
@@ -145,7 +149,11 @@ impl<B: Backend> TimeMixer<B> {
         feature = "trace",
         tracing::instrument(name = "rwkv.infer.model.time_mixer", skip_all)
     )]
-    pub fn forward<K: Wkv7Kernel<B>>(&self, time_mixer_input: TimeMixerIO<B>) -> TimeMixerIO<B> {
+    pub fn forward<K: Wkv7Kernel<B>>(&self, time_mixer_input: TimeMixerIO<B>) -> TimeMixerIO<B>
+    where
+        B: Backend + TokenShiftDiffBackend + AddcmulBackend,
+    {
+        let should_return_token_shift = time_mixer_input.embedded_token_shift.is_some();
         let TimeMixerIO {
             embedded_context,
             context_mask,
@@ -160,10 +168,6 @@ impl<B: Backend> TimeMixer<B> {
 
         let embedded_context = apply_context_mask(embedded_context, context_mask.clone());
         let value_from_first_cell = apply_context_mask(value_from_first_cell, context_mask.clone());
-
-        let output_embedded_token_shift = embedded_token_shift
-            .as_ref()
-            .map(|_| get_embedded_token_shift(embedded_context.clone()));
 
         let weight_prepare_output = self.weight_prepare.forward(
             embedded_context.clone(),
@@ -194,7 +198,8 @@ impl<B: Backend> TimeMixer<B> {
                 weight_prepare_output.value_from_first_cell,
                 context_mask,
             ),
-            embedded_token_shift: output_embedded_token_shift,
+            embedded_token_shift: should_return_token_shift
+                .then_some(weight_prepare_output.next_token_shift),
             state: wkv7_forward_output.next_state,
         }
     }

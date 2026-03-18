@@ -79,19 +79,23 @@ pub(crate) fn rapid_sample_topk_topp_impl<
 
     let expected_1d = Shape::new([batch_size]);
     debug_assert_eq!(
-        states.meta.shape(), &expected_1d,
+        states.meta.shape(),
+        &expected_1d,
         "states must have shape [batch_size]"
     );
     debug_assert_eq!(
-        inv_temperatures.meta.shape(), &expected_1d,
+        inv_temperatures.meta.shape(),
+        &expected_1d,
         "inv_temperatures must have shape [batch_size]"
     );
     debug_assert_eq!(
-        top_ks.meta.shape(), &expected_1d,
+        top_ks.meta.shape(),
+        &expected_1d,
         "top_ks must have shape [batch_size]"
     );
     debug_assert_eq!(
-        top_ps.meta.shape(), &expected_1d,
+        top_ps.meta.shape(),
+        &expected_1d,
         "top_ps must have shape [batch_size]"
     );
 
@@ -157,7 +161,8 @@ pub(crate) fn rapid_sample_topk_topp_impl<
                 penalties.dtype
             );
             debug_assert_eq!(
-                penalties.meta.shape(), &shape,
+                penalties.meta.shape(),
+                &shape,
                 "penalties must have the same shape as logits"
             );
 

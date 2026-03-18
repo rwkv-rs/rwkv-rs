@@ -21,7 +21,7 @@ rocm = ["burn/rocm"]
 
 [dependencies]
 # === Deep Learning Core ===
-burn = { workspace = true, default-features = false, features = ["std", "autodiff", "cubecl"] }
+burn = { workspace = true, default-features = false, features = ["std", "autodiff", "cubecl", "cpu"] }
 burn-fusion = { workspace = true, default-features = false, features = ["std"] }
 burn-cubecl = { workspace = true, default-features = false, features = ["std"] }
 burn-ir = { workspace = true, default-features = false, features = ["std"] }

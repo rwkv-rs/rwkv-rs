@@ -16,14 +16,15 @@ use rwkv::infer::access::http_api::{HttpApiRouterBuilder, HttpApiState};
 use rwkv::infer::access::ipc_api::IpcServer;
 use rwkv::infer::auth::AuthConfig;
 use rwkv::infer::model_pool::LoadedModelRegistry;
+use rwkv::nn::kernels::addcmul::AddcmulBackend;
 use rwkv::nn::kernels::rapid_sample::RapidSampleBackend;
+use rwkv::nn::kernels::token_shift_diff::TokenShiftDiffBackend;
 use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
+use rwkv_lm::inferring::RwkvLmEngineFactory;
+use rwkv_lm::paths;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-
-use rwkv_lm::inferring::RwkvLmEngineFactory;
-use rwkv_lm::paths;
 
 #[cfg(not(any(feature = "f32", feature = "flex32", feature = "f16")))]
 type ElemType = rwkv::custom::tensor::bf16;
@@ -36,7 +37,14 @@ type ElemType = rwkv::custom::tensor::f16;
 
 pub async fn launch<B>() -> rwkv::infer::Result<()>
 where
-    B: Backend + Wkv7Backend + RapidSampleBackend + Send + Sync + 'static,
+    B: Backend
+        + Wkv7Backend
+        + TokenShiftDiffBackend
+        + AddcmulBackend
+        + RapidSampleBackend
+        + Send
+        + Sync
+        + 'static,
 {
     let args: Vec<String> = std::env::args().collect();
     let config_dir = get_arg_value(&args, "--config-dir")

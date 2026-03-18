@@ -1,8 +1,6 @@
 use std::mem::size_of;
 
-use burn::{
-    tensor::{DType, Shape, ops::FloatTensor},
-};
+use burn::tensor::{DType, Shape, ops::FloatTensor};
 use burn_cubecl::cubecl::{CubeCount, CubeDim, tensor_line_size_parallel};
 use burn_cubecl::{
     CubeElement, CubeRuntime,
@@ -273,7 +271,11 @@ fn wkv7_backward_impl_inner<R: CubeRuntime, FE: FloatElement, I: IntElement, BT:
     let num_heads = shape[2];
     let dim = shape[3];
 
-    assert_eq!(seq_len % chunk_len, 0, "chunk_len must divide sequence length");
+    assert_eq!(
+        seq_len % chunk_len,
+        0,
+        "chunk_len must divide sequence length"
+    );
 
     let weight_decay_grad = empty_device::<R, FE>(client.clone(), device.clone(), shape.clone());
     let receptance_grad = empty_device::<R, FE>(client.clone(), device.clone(), shape.clone());
