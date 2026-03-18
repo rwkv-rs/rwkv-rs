@@ -1,48 +1,74 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use rwkv_config::get_arg_value;
-use rwkv_eval::init::init_cfg;
-use rwkv_lm_eval::evaluating::evaluating;
+use clap::Parser;
+use rwkv_config::load_toml;
+use rwkv_config::raw::eval::{RawEvalConfig, SpaceDbConfig};
+use rwkv_lm_eval::config_path::resolve_eval_cfg_path;
+use rwkv_lm_eval::db::connect;
+use rwkv_lm_eval::http_api::serve;
 use rwkv_lm_eval::paths;
 
-fn resolve_eval_cfg_path(config_dir: &std::path::Path, eval_cfg_name: &str) -> PathBuf {
-    [
-        config_dir.join("eval").join(format!("{eval_cfg_name}.toml")),
-        config_dir.join(format!("{eval_cfg_name}.toml")),
-        PathBuf::from("examples")
-            .join("rwkv-lm-eval")
-            .join("config")
-            .join(format!("{eval_cfg_name}.toml")),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
-    .unwrap_or_else(|| {
-        panic!(
-            "failed to locate eval config `{}` under {}",
-            eval_cfg_name,
-            config_dir.display()
-        )
-    })
+#[derive(Debug, Parser)]
+struct Args {
+    #[arg(long, default_value_os_t = paths::config_dir())]
+    config_dir: PathBuf,
+    #[arg(long, default_value = "example")]
+    eval_config: String,
+    #[arg(long, default_value = "127.0.0.1:8080")]
+    bind: SocketAddr,
+    #[arg(long)]
+    db_pool_max_connections: Option<u32>,
+}
+
+fn validate_space_db_config(cfg: &SpaceDbConfig) -> Result<(), String> {
+    if cfg.host.trim().is_empty() {
+        return Err("space_db.host cannot be empty".to_string());
+    }
+    if cfg.username.trim().is_empty() {
+        return Err("space_db.username cannot be empty".to_string());
+    }
+    if cfg.password.trim().is_empty() {
+        return Err("space_db.password cannot be empty".to_string());
+    }
+    if cfg.port.trim().is_empty() {
+        return Err("space_db.port cannot be empty".to_string());
+    }
+    if cfg.database_name.trim().is_empty() {
+        return Err("space_db.database_name cannot be empty".to_string());
+    }
+
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let config_dir = get_arg_value(&args, "--config-dir")
-        .map(PathBuf::from)
-        .unwrap_or_else(paths::config_dir);
-    let eval_cfg_name = get_arg_value(&args, "--eval-config").unwrap_or_else(|| "example".into());
-    let config_path = resolve_eval_cfg_path(&config_dir, &eval_cfg_name);
+    let args = Args::parse();
+    let config_path = resolve_eval_cfg_path(&args.config_dir, &args.eval_config);
+    let mut raw_eval_cfg: RawEvalConfig = load_toml(&config_path);
+    raw_eval_cfg.fill_default();
 
-    let eval_cfg_builder = init_cfg(&config_dir, &eval_cfg_name);
+    validate_space_db_config(&raw_eval_cfg.space_db)
+        .unwrap_or_else(|err| panic!("invalid [space_db] config: {err}"));
+
+    let max_connections = args
+        .db_pool_max_connections
+        .or(raw_eval_cfg.db_pool_max_connections)
+        .unwrap_or(32);
+
+    let db = connect(&raw_eval_cfg.space_db, max_connections)
+        .await
+        .unwrap_or_else(|err| panic!("failed to connect to postgres: {err}"));
 
     println!(
-        "eval cfg: {eval_cfg_name} (config_dir: {config_dir})",
-        config_dir = config_dir.display(),
+        "rwkv-lm-eval api starting on {} (config: {}, pool_max_connections: {})",
+        args.bind,
+        config_path.display(),
+        max_connections
     );
-    println!("config path: {}", config_path.display());
-    println!("datasets dir: {}", paths::datasets_path().display());
-    println!("logs dir: {}", paths::logs_path().display());
+    println!("openapi: http://{}/openapi.json", args.bind);
 
-    evaluating(eval_cfg_builder, paths::datasets_path(), config_path, paths::logs_path()).await;
+    serve(args.bind, db)
+        .await
+        .unwrap_or_else(|err| panic!("http api server failed: {err}"));
 }

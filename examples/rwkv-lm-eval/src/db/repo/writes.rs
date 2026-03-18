@@ -1,21 +1,9 @@
-use super::types::{
-    AttemptRecord, BenchmarkInsert, CheckerInsert, CompletionInsert, Db, EvalInsert, ModelInsert,
-    ScoreInsert, TaskIdentity, TaskInsert, TaskLookup, TaskStatus,
+use sqlx::{query, query_scalar};
+
+use crate::db::{
+    BenchmarkInsert, CheckerInsert, CompletionInsert, Db, EvalInsert, ModelInsert, ScoreInsert,
+    TaskInsert, TaskStatus,
 };
-use rwkv_config::raw::eval::SpaceDbConfig;
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
-use sqlx::{Row, query, query_scalar};
-
-pub async fn connect(cfg: &SpaceDbConfig, max_connections: u32) -> Result<Db, String> {
-    let options = build_connect_options(cfg)?;
-    let pool = PgPoolOptions::new()
-        .max_connections(max_connections)
-        .connect_with(options)
-        .await
-        .map_err(|err| format!("connect postgres failed: {err}"))?;
-
-    Ok(Db { pool })
-}
 
 pub async fn upsert_model(db: &Db, insert: &ModelInsert) -> Result<i32, String> {
     query_scalar(
@@ -107,110 +95,6 @@ pub async fn insert_task(db: &Db, insert: &TaskInsert) -> Result<i32, String> {
     .fetch_one(&db.pool)
     .await
     .map_err(|err| format!("insert task failed: {err}"))
-}
-
-pub async fn find_tasks_by_identity(
-    db: &Db,
-    identity: &TaskIdentity,
-) -> Result<Vec<TaskLookup>, String> {
-    let rows = query(
-        r#"
-        SELECT task_id, status
-        FROM task
-        WHERE config_path IS NOT DISTINCT FROM $1
-          AND evaluator = $2
-          AND git_hash = $3
-          AND model_id = $4
-          AND benchmark_id = $5
-          AND sampling_config = $6::jsonb
-        ORDER BY task_id
-        "#,
-    )
-    .bind(&identity.config_path)
-    .bind(&identity.evaluator)
-    .bind(&identity.git_hash)
-    .bind(identity.model_id)
-    .bind(identity.benchmark_id)
-    .bind(&identity.sampling_config_json)
-    .fetch_all(&db.pool)
-    .await
-    .map_err(|err| format!("find task by identity failed: {err}"))?;
-
-    rows.into_iter()
-        .map(|row| {
-            let status = row
-                .try_get::<String, _>("status")
-                .map_err(|err| format!("decode task status failed: {err}"))?;
-            Ok(TaskLookup {
-                task_id: row
-                    .try_get("task_id")
-                    .map_err(|err| format!("decode task id failed: {err}"))?,
-                status: TaskStatus::parse(&status)?,
-            })
-        })
-        .collect()
-}
-
-pub async fn list_attempt_records(db: &Db, task_id: i32) -> Result<Vec<AttemptRecord>, String> {
-    let rows = query(
-        r#"
-        SELECT
-            c.completions_id,
-            c.context,
-            c.sample_index,
-            c.avg_repeat_index,
-            c.pass_index,
-            e.answer,
-            e.ref_answer,
-            e.is_passed,
-            ch.checker_id IS NOT NULL AS has_checker
-        FROM completions c
-        JOIN eval e ON e.completions_id = c.completions_id
-        LEFT JOIN checker ch ON ch.completions_id = c.completions_id
-        WHERE c.task_id = $1
-        ORDER BY c.avg_repeat_index, c.sample_index, c.pass_index
-        "#,
-    )
-    .bind(task_id)
-    .fetch_all(&db.pool)
-    .await
-    .map_err(|err| format!("list attempt records failed: {err}"))?;
-
-    rows.into_iter()
-        .map(|row| {
-            Ok(AttemptRecord {
-                completions_id: row
-                    .try_get("completions_id")
-                    .map_err(|err| format!("decode completions_id failed: {err}"))?,
-                key: super::types::CompletionKey {
-                    sample_index: row
-                        .try_get("sample_index")
-                        .map_err(|err| format!("decode sample_index failed: {err}"))?,
-                    avg_repeat_index: row
-                        .try_get("avg_repeat_index")
-                        .map_err(|err| format!("decode avg_repeat_index failed: {err}"))?,
-                    pass_index: row
-                        .try_get("pass_index")
-                        .map_err(|err| format!("decode pass_index failed: {err}"))?,
-                },
-                context: row
-                    .try_get("context")
-                    .map_err(|err| format!("decode context failed: {err}"))?,
-                answer: row
-                    .try_get("answer")
-                    .map_err(|err| format!("decode answer failed: {err}"))?,
-                ref_answer: row
-                    .try_get("ref_answer")
-                    .map_err(|err| format!("decode ref_answer failed: {err}"))?,
-                is_passed: row
-                    .try_get("is_passed")
-                    .map_err(|err| format!("decode is_passed failed: {err}"))?,
-                has_checker: row
-                    .try_get("has_checker")
-                    .map_err(|err| format!("decode has_checker failed: {err}"))?,
-            })
-        })
-        .collect()
 }
 
 pub async fn insert_completion_and_eval(
@@ -348,41 +232,4 @@ pub async fn update_task_status(db: &Db, task_id: i32, status: TaskStatus) -> Re
         .map_err(|err| format!("update task status failed: {err}"))?;
 
     Ok(())
-}
-
-fn build_connect_options(cfg: &SpaceDbConfig) -> Result<PgConnectOptions, String> {
-    let mut options = PgConnectOptions::new()
-        .host(&cfg.host)
-        .port(parse_port(cfg)?)
-        .username(&cfg.username)
-        .database(&cfg.database_name)
-        .ssl_mode(parse_ssl_mode(cfg.sslmode.as_deref())?);
-
-    if !cfg.password.is_empty() {
-        options = options.password(&cfg.password);
-    }
-
-    Ok(options)
-}
-
-fn parse_port(cfg: &SpaceDbConfig) -> Result<u16, String> {
-    if cfg.port.trim().is_empty() {
-        return Ok(5432);
-    }
-
-    cfg.port
-        .trim()
-        .parse::<u16>()
-        .map_err(|err| format!("invalid postgres port `{}`: {err}", cfg.port))
-}
-
-fn parse_ssl_mode(value: Option<&str>) -> Result<PgSslMode, String> {
-    match value.unwrap_or("prefer").trim().to_ascii_lowercase().as_str() {
-        "disable" => Ok(PgSslMode::Disable),
-        "prefer" => Ok(PgSslMode::Prefer),
-        "require" => Ok(PgSslMode::Require),
-        "verify-ca" => Ok(PgSslMode::VerifyCa),
-        "verify-full" => Ok(PgSslMode::VerifyFull),
-        other => Err(format!("unsupported postgres sslmode `{other}`")),
-    }
 }

@@ -61,14 +61,42 @@ psql "postgres://username:password@host:5432/database_name?sslmode=verify-full" 
 
 ## Usage
 
+### Run Evaluator
+
 ```bash
 git clone https://github.com/rwkv-rs/rwkv-rs.git
 cd rwkv-rs
 
-cargo run -p rwkv-lm-eval --example rwkv-lm-eval --release -- \
+cargo run -p rwkv-lm-eval --example rwkv-lm-eval-test --release -- \
   --config-dir examples/rwkv-lm-eval/config \
   --eval-config example
 ```
+
+### Run HTTP API
+
+The package now also exposes a read-only Axum API over the persisted evaluation data.
+It loads PostgreSQL credentials from the same eval config file and serves an OpenAPI
+document at `/openapi.json`.
+
+```bash
+cargo run -p rwkv-lm-eval --example rwkv-lm-eval --release -- \
+  --config-dir examples/rwkv-lm-eval/config \
+  --eval-config example \
+  --bind 127.0.0.1:8080
+```
+
+Main endpoints:
+
+- `GET /health`
+- `GET /openapi.json`
+- `GET /api/v1/meta`
+- `GET /api/v1/models`
+- `GET /api/v1/benchmarks`
+- `GET /api/v1/tasks`
+- `GET /api/v1/tasks/{task_id}`
+- `GET /api/v1/tasks/{task_id}/attempts`
+- `GET /api/v1/completions/{completions_id}`
+- `GET /api/v1/review-queue`
 
 Example `example.toml` controls:
 
