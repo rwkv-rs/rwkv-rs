@@ -2,7 +2,7 @@ use crate::access::http_api::{
     ChatCompletionRequest, ChatCompletionTool, ChatCompletionToolChoice, ResponseFormat,
 };
 use crate::inference_core::{ConstraintSpec, RequestedTokenLogprobsConfig, SamplingConfig};
-use sonic_rs::{Value, from_str, json, to_string_pretty};
+use sonic_rs::{Value, json, to_string_pretty};
 
 const DEFAULT_TEMPERATURE: f32 = 1.0;
 const MIN_TEMPERATURE: f32 = 0.001;
@@ -496,6 +496,7 @@ fn build_tool_prompt_preamble(
 
 #[cfg(test)]
 mod tests {
+    use sonic_rs::from_str;
     use super::*;
     use crate::access::http_api::{
         ChatCompletionNamedToolChoice, ChatCompletionNamedToolChoiceFunction,
