@@ -5,9 +5,7 @@ use linkme::distributed_slice;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-use crate::datasets::knowledge::gpqa_common::{
-    download_gpqa_csv, gpqa_csv_path, join_subject_parts, ordered_gpqa_choices,
-};
+use super::{download_gpqa_csv, gpqa_csv_path, join_subject_parts, ordered_gpqa_choices};
 use crate::datasets::knowledge::{
     get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
 };
@@ -17,10 +15,10 @@ use crate::datasets::{
 };
 
 #[distributed_slice(ALL_BENCHMARKS)]
-static GPQA_MAIN_INFO: BenchmarkInfo = BenchmarkInfo {
-    name: BenchmarkName("gpqa_main"),
+static GPQA_EXTENDED_INFO: BenchmarkInfo = BenchmarkInfo {
+    name: BenchmarkName("gpqa_extended"),
     field: Field::Knowledge,
-    display_name: "GPQA Main",
+    display_name: "GPQA Extended",
     cot_mode: &[CoTMode::NoCoT, CoTMode::FakeCoT, CoTMode::CoT],
     sampling_config: SamplingConfig {
         temperature: 0.5,
@@ -34,17 +32,17 @@ static GPQA_MAIN_INFO: BenchmarkInfo = BenchmarkInfo {
     avg_ks: &[1.0],
     pass_ks: &[1],
     with_llm_judger: false,
-    create: |dataset_root| Box::new(GpqaMain::new(dataset_root)),
+    create: |dataset_root| Box::new(GpqaExtended::new(dataset_root)),
 };
 
-pub struct GpqaMain {
+pub struct GpqaExtended {
     dataset_root: PathBuf,
-    test: Vec<GpqaMainItem>,
+    test: Vec<GpqaExtendedItem>,
 }
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-pub struct GpqaMainItem {
+pub struct GpqaExtendedItem {
     #[serde(rename = "Question")]
     question: String,
     #[serde(rename = "Correct Answer")]
@@ -67,7 +65,7 @@ pub struct GpqaMainItem {
     question_writer: Option<String>,
 }
 
-impl GpqaMain {
+impl GpqaExtended {
     pub fn new<P: AsRef<Path>>(dataset_root: P) -> Self {
         Self {
             dataset_root: dataset_root.as_ref().to_path_buf(),
@@ -77,9 +75,9 @@ impl GpqaMain {
 }
 
 #[async_trait]
-impl Benchmark for GpqaMain {
+impl Benchmark for GpqaExtended {
     fn load(&mut self) -> bool {
-        let csv_path = gpqa_csv_path(&self.dataset_root, "gpqa_main.csv");
+        let csv_path = gpqa_csv_path(&self.dataset_root, "gpqa_extended.csv");
         if !csv_path.is_file() {
             return true;
         }
@@ -94,8 +92,8 @@ impl Benchmark for GpqaMain {
     }
 
     async fn download(&self) {
-        let downloaded_path = download_gpqa_csv(&self.dataset_root, "gpqa_main.csv").await;
-        println!("gpqa_main dataset: {}", downloaded_path.display());
+        let downloaded_path = download_gpqa_csv(&self.dataset_root, "gpqa_extended.csv").await;
+        println!("gpqa_extended dataset: {}", downloaded_path.display());
     }
 
     fn len(&self) -> usize {
@@ -161,7 +159,7 @@ impl Benchmark for GpqaMain {
             model_name,
             &choices,
             &expected_context,
-            &GPQA_MAIN_INFO.sampling_config,
+            &GPQA_EXTENDED_INFO.sampling_config,
             cot_mode,
         )
         .await;

@@ -7,10 +7,6 @@ use serde::{Deserialize, Serialize};
 use sonic_rs::{Object as Map, Value, json};
 
 pub mod tau_bench;
-pub mod tau_bench_airline;
-pub mod tau_bench_common;
-pub mod tau_bench_retail;
-pub mod tau_bench_telecom;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

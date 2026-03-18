@@ -8,10 +8,7 @@ use async_openai::config::OpenAIConfig;
 
 pub mod ceval;
 pub mod cmmlu;
-mod gpqa_common;
-pub mod gpqa_diamond;
-pub mod gpqa_extended;
-pub mod gpqa_main;
+pub mod gpqa;
 pub mod mmlu;
 pub mod mmlu_pro;
 pub mod mmlu_redux;

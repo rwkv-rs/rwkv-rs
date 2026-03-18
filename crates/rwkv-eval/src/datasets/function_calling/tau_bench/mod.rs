@@ -1,12 +1,15 @@
+mod airline;
+mod benchmark;
+mod retail;
+mod telecom;
+
 use super::{FunctionCall, ToolRequestor};
 use serde::{Deserialize, Serialize};
 use sonic_rs::{Array, Object as Map, Value, prelude::*};
 use std::fmt::{self, Display};
 use std::path::Path;
 
-use super::tau_bench_airline::AirlineEnv;
-use super::tau_bench_retail::RetailEnv;
-use super::tau_bench_telecom::TelecomEnv;
+use self::{airline::AirlineEnv, retail::RetailEnv, telecom::TelecomEnv};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

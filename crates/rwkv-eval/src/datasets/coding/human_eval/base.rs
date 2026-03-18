@@ -1,7 +1,7 @@
-use super::human_eval_common::{get_expected_context, get_judge_script};
+use super::{get_expected_context, get_judge_script};
 use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
-use crate::datasets::utils::jsonl::read_jsonl_items;
+use crate::datasets::utils::jsonl::read_gzip_jsonl_items;
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
@@ -10,15 +10,14 @@ use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use regex::Regex;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 #[distributed_slice(ALL_BENCHMARKS)]
-static HUMAN_EVAL_CN_INFO: BenchmarkInfo = BenchmarkInfo {
-    name: BenchmarkName("human_eval_cn"),
+static HUMAN_EVAL_INFO: BenchmarkInfo = BenchmarkInfo {
+    name: BenchmarkName("human_eval"),
     field: Field::Coding,
-    display_name: "HumanEval-CN",
+    display_name: "HumanEval",
     cot_mode: &[CoTMode::NoCoT],
     sampling_config: SamplingConfig {
         temperature: 0.3,
@@ -32,15 +31,16 @@ static HUMAN_EVAL_CN_INFO: BenchmarkInfo = BenchmarkInfo {
     avg_ks: &[1.0],
     pass_ks: &[1],
     with_llm_judger: false,
-    create: |dataset_root| Box::new(HumanEvalCn::new(dataset_root)),
+    create: |dataset_root| Box::new(HumanEval::new(dataset_root)),
 };
 
-pub struct HumanEvalCn {
+pub struct HumanEval {
     dataset_root: PathBuf,
-    test: Vec<HumanEvalCnItem>,
+    test: Vec<HumanEvalItem>,
 }
 
-pub struct HumanEvalCnItem {
+#[derive(Debug, Deserialize)]
+pub struct HumanEvalItem {
     task_id: String,
     prompt: String,
     entry_point: String,
@@ -48,17 +48,7 @@ pub struct HumanEvalCnItem {
     test: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct RawHumanEvalCnItem {
-    task_id: String,
-    prompt: String,
-    canonical_solution: String,
-    test: String,
-    declaration: Option<String>,
-    entry_point: Option<String>,
-}
-
-impl HumanEvalCn {
+impl HumanEval {
     pub fn new<P: AsRef<Path>>(dataset_root: P) -> Self {
         Self {
             dataset_root: dataset_root.as_ref().to_path_buf(),
@@ -67,57 +57,20 @@ impl HumanEvalCn {
     }
 }
 
-fn extract_entry_point(raw: &RawHumanEvalCnItem) -> String {
-    if let Some(entry_point) = raw
-        .entry_point
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        return entry_point.trim().to_string();
-    }
-
-    let def_re = Regex::new(r"def\s+(?P<name>[\w_]+)\s*\(").unwrap();
-    for text in [raw.declaration.as_deref(), Some(raw.prompt.as_str())]
-        .into_iter()
-        .flatten()
-    {
-        if let Some(capture) = def_re.captures(text) {
-            return capture["name"].to_string();
-        }
-    }
-
-    panic!(
-        "failed to extract human_eval_cn entry point from task={}",
-        raw.task_id
-    );
-}
-
 #[async_trait]
-impl Benchmark for HumanEvalCn {
+impl Benchmark for HumanEval {
     fn load(&mut self) -> bool {
         self.test.clear();
 
         let path = self
             .dataset_root
-            .join("human_eval_cn")
-            .join("humaneval.jsonl");
+            .join("human_eval")
+            .join("HumanEval.jsonl.gz");
         if !path.is_file() {
             return true;
         }
 
-        self.test = read_jsonl_items::<RawHumanEvalCnItem, _>(path)
-            .into_iter()
-            .map(|item| {
-                let entry_point = extract_entry_point(&item);
-                HumanEvalCnItem {
-                    task_id: item.task_id,
-                    prompt: item.prompt,
-                    entry_point,
-                    canonical_solution: item.canonical_solution,
-                    test: item.test,
-                }
-            })
-            .collect();
+        self.test = read_gzip_jsonl_items(path);
 
         self.test.is_empty()
     }
@@ -129,15 +82,16 @@ impl Benchmark for HumanEvalCn {
     async fn download(&self) {
         let downloaded_path = download_url_files(
             &self.dataset_root,
-            "human_eval_cn",
+            "human_eval",
             &[UrlDownloadFile {
-                relative_path: PathBuf::from("humaneval.jsonl"),
-                url: "https://hf-mirror.com/datasets/zai-org/humaneval-x/resolve/main/data/python/data/humaneval.jsonl"
+                relative_path: PathBuf::from("HumanEval.jsonl.gz"),
+                url: "https://github.com/openai/human-eval/raw/master/data/HumanEval.jsonl.gz"
                     .to_string(),
             }],
             1,
-        ).await;
-        println!("human_eval_cn dataset: {}", downloaded_path.display());
+        )
+        .await;
+        println!("human_eval dataset: {}", downloaded_path.display());
     }
 
     fn len(&self) -> usize {
@@ -146,7 +100,7 @@ impl Benchmark for HumanEvalCn {
 
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         if cot_mode != CoTMode::NoCoT {
-            panic!("human_eval_cn only supports NoCoT, got {cot_mode:?}");
+            panic!("human_eval only supports NoCoT, got {cot_mode:?}");
         }
 
         let item = &self.test[index];
@@ -173,7 +127,7 @@ impl Benchmark for HumanEvalCn {
             model_client,
             model_name,
             &expected_context,
-            &HUMAN_EVAL_CN_INFO.sampling_config,
+            &HUMAN_EVAL_INFO.sampling_config,
             cot_mode,
             1024,
         )
@@ -185,16 +139,15 @@ impl Benchmark for HumanEvalCn {
                 .await
                 .unwrap_or_else(|err| {
                     panic!(
-                        "human_eval_cn sandbox execution failed: {err}; task={}",
+                        "human_eval sandbox execution failed: {err}; task={}",
                         item.task_id
                     )
                 });
 
-        let ref_answer = self.get_ref_answer(index);
         Record {
             context: generated.context,
             answer,
-            ref_answer,
+            ref_answer: self.get_ref_answer(index),
             is_passed: verdict.passed,
             fail_reason: if verdict.passed {
                 String::new()

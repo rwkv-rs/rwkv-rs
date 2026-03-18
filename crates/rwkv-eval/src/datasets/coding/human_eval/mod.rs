@@ -1,3 +1,8 @@
+mod base;
+mod cn;
+mod fix;
+mod plus;
+
 use crate::datasets::{CoTMode, apply_user_assistant_template};
 
 pub fn get_expected_context(prompt: &str, code: Option<&str>, cot_mode: CoTMode) -> String {

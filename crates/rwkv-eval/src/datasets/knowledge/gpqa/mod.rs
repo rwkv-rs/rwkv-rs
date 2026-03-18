@@ -1,3 +1,7 @@
+mod diamond;
+mod extended;
+mod main;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
