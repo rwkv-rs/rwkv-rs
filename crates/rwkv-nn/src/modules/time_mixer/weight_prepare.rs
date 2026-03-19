@@ -6,6 +6,7 @@ use burn::{
     tensor::activation::{sigmoid, softplus},
 };
 
+use crate::kernels::token_shift_diff::TokenShiftDiffOutput;
 use crate::kernels::wkv7_common::Wkv7ForwardInput;
 use crate::{
     functions::{
@@ -15,7 +16,10 @@ use crate::{
         },
         lerp::lerp,
         normalize::normalize,
-        token_shift::token_shift,
+    },
+    kernels::{
+        addcmul::{Addcmul5Output, AddcmulBackend, addcmul5},
+        token_shift_diff::{TokenShiftDiffBackend, token_shift_diff},
     },
     layers::lora::{ActivationFn, LoRA, LoRAConfig, LoRAType},
 };
@@ -208,30 +212,22 @@ impl<B: Backend> WeightPrepare<B> {
         value_from_first_cell: Tensor<B, 3>,
         embedded_token_shift: Option<Tensor<B, 2>>,
         context_mask: Option<Tensor<B, 2>>,
-    ) -> WeightPrepareOutput<B> {
-        let prev = token_shift(
-            embedded_context.clone(),
-            embedded_token_shift,
-            context_mask.clone(),
-        );
-        let mut token_shifted_diff = prev - embedded_context.clone();
-        if let Some(mask) = context_mask {
-            token_shifted_diff = token_shifted_diff * mask.unsqueeze_dim(2);
-        }
-
-        self.forward_with_token_shifted_diff(
-            embedded_context,
-            value_from_first_cell,
+    ) -> WeightPrepareOutput<B>
+    where
+        B: Backend + TokenShiftDiffBackend + AddcmulBackend,
+    {
+        let TokenShiftDiffOutput {
             token_shifted_diff,
-        )
-    }
+            next_token_shift,
+        } = token_shift_diff(embedded_context.clone(), embedded_token_shift, context_mask);
 
-    fn forward_with_token_shifted_diff(
-        &self,
-        embedded_context: Tensor<B, 3>,
-        value_from_first_cell: Tensor<B, 3>,
-        token_shifted_diff: Tensor<B, 3>,
-    ) -> WeightPrepareOutput<B> {
+        // self.forward_with_token_shifted_diff(
+        //     embedded_context,
+        //     token_shift_diff_output.next_token_shift,
+        //     value_from_first_cell,
+        //     token_shift_diff_output.token_shifted_diff,
+        // )
+
         // Paper equations implemented:
         // 355: x^{square}_t = lerp(x_t, x_{t-1}, mu_{square})  -- Time shifting
         // 356: a_t = sigmoid(loramlp_a(Identity, x^a_t, bias=True))  -- In-context
@@ -248,17 +244,21 @@ impl<B: Backend> WeightPrepare<B> {
 
         let (num_heads, head_size) = (self.num_heads, self.head_size);
 
-        let scaled_diff_receptance = token_shifted_diff.clone() * self.param_receptance.val();
-        let scaled_diff_weight_decay = token_shifted_diff.clone() * self.param_weight_decay.val();
-        let scaled_diff_key = token_shifted_diff.clone() * self.param_key.val();
-        let scaled_diff_value = token_shifted_diff.clone() * self.param_value.val();
-        let scaled_diff_learning_rate = token_shifted_diff.clone() * self.param_learning_rate.val();
-
-        let receptance_input = embedded_context.clone() + scaled_diff_receptance;
-        let weight_decay_input = embedded_context.clone() + scaled_diff_weight_decay;
-        let key_input = embedded_context.clone() + scaled_diff_key;
-        let value_input = embedded_context.clone() + scaled_diff_value;
-        let learning_rate_input = embedded_context + scaled_diff_learning_rate;
+        let Addcmul5Output {
+            receptance_input,
+            weight_decay_input,
+            key_input,
+            value_input,
+            learning_rate_input,
+        } = addcmul5(
+            embedded_context,
+            token_shifted_diff.clone(),
+            self.param_receptance.val(),
+            self.param_weight_decay.val(),
+            self.param_key.val(),
+            self.param_value.val(),
+            self.param_learning_rate.val(),
+        );
 
         let receptance = self.projection_receptance.forward(receptance_input);
 
@@ -311,6 +311,7 @@ impl<B: Backend> WeightPrepare<B> {
 
         WeightPrepareOutput {
             token_shifted_diff,
+            next_token_shift,
             value_from_first_cell,
             receptance,
             weight_decay,
@@ -325,6 +326,7 @@ impl<B: Backend> WeightPrepare<B> {
 #[derive(Debug)]
 pub struct WeightPrepareOutput<B: Backend> {
     pub token_shifted_diff: Tensor<B, 3>,
+    pub next_token_shift: Tensor<B, 2>,
     pub value_from_first_cell: Tensor<B, 3>,
     pub receptance: Tensor<B, 3>,
     pub weight_decay: Tensor<B, 3>,

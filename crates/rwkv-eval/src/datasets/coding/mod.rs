@@ -5,16 +5,9 @@ use crate::evaluators::coding::get_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 
-mod human_eval_common;
-mod mbpp_common;
-
 pub mod human_eval;
-pub mod human_eval_cn;
-pub mod human_eval_fix;
-pub mod human_eval_plus;
 pub mod livecodebench;
 pub mod mbpp;
-pub mod mbpp_plus;
 
 pub struct CodeGeneration {
     pub context: String,

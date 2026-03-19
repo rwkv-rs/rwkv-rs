@@ -9,6 +9,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sonic_rs::{Value, json};
+use std::env;
 
 const BROWSECOMP_JUDGE_SAMPLING_CONFIG: SamplingConfig = SamplingConfig {
     temperature: 0.0,
@@ -106,6 +107,25 @@ pub fn decrypt_xor_base64(ciphertext_b64: &str, password: &str) -> Result<String
     String::from_utf8(plaintext).map_err(|err| format!("utf8 decode failed: {err}"))
 }
 
+pub fn browsecomp_sample_limit() -> Option<usize> {
+    env::var("RWKV_EVAL_BROWSECOMP_LIMIT")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value.parse::<usize>().unwrap_or_else(|err| {
+                panic!("invalid RWKV_EVAL_BROWSECOMP_LIMIT `{value}`: {err}")
+            })
+        })
+        .map(|limit| {
+            assert!(
+                limit > 0,
+                "RWKV_EVAL_BROWSECOMP_LIMIT must be greater than 0"
+            );
+            limit
+        })
+}
+
 pub fn build_browsecomp_expected_context(system_prompt: &str, user_prompt: &str) -> String {
     get_expected_context(system_prompt, user_prompt, &[])
 }
@@ -121,6 +141,13 @@ fn build_browsecomp_cot_prompt(expected_context: &str) -> String {
         .unwrap_or_else(|| expected_context.to_string())
 }
 
+fn build_browsecomp_answer_prompt(expected_context: &str, cot: &str) -> String {
+    format!(
+        "{}Explanation: ",
+        build_browsecomp_turn_completion_prompt(expected_context, cot)
+    )
+}
+
 pub async fn generate_browsecomp_answer(
     model_client: &Client<OpenAIConfig>,
     model_name: &str,
@@ -128,7 +155,11 @@ pub async fn generate_browsecomp_answer(
     sampling_config: &SamplingConfig,
 ) -> (String, String) {
     let cot_prompt = build_browsecomp_cot_prompt(expected_context);
-    let mut cot_stop = vec!["</think>".to_string()];
+    let mut cot_stop = vec![
+        "</think>".to_string(),
+        "\nUser:".to_string(),
+        "\nAssistant:".to_string(),
+    ];
     cot_stop.extend(
         BROWSECOMP_CONTROL_MARKERS
             .iter()
@@ -143,14 +174,15 @@ pub async fn generate_browsecomp_answer(
         2048,
     )
     .await;
-    let answer_prompt = build_browsecomp_turn_completion_prompt(expected_context, &cot);
+    let answer_prompt = build_browsecomp_answer_prompt(expected_context, &cot);
     let mut answer_stop = vec!["\nUser:".to_string(), "\nAssistant:".to_string()];
     answer_stop.extend(
-        BROWSECOMP_CONTROL_MARKERS
-            .iter()
-            .map(|marker| (*marker).to_string()),
+        ["<think>", "</think>"]
+            .into_iter()
+            .chain(BROWSECOMP_CONTROL_MARKERS.iter().copied())
+            .map(str::to_string),
     );
-    let answer = get_completion(
+    let answer_body = get_completion(
         model_client,
         model_name,
         &answer_prompt,
@@ -161,8 +193,13 @@ pub async fn generate_browsecomp_answer(
     .await
     .trim()
     .to_string();
+    let answer = if answer_body.is_empty() {
+        String::new()
+    } else {
+        format!("Explanation: {answer_body}")
+    };
 
-    (format!("{answer_prompt}{answer}"), answer)
+    (format!("{answer_prompt}{answer_body}"), answer)
 }
 
 pub async fn judge_with_retry(
@@ -312,8 +349,9 @@ async fn judge_once(
 #[cfg(test)]
 mod tests {
     use super::{
-        BrowseCompLocale, build_browsecomp_cot_prompt, build_browsecomp_expected_context,
-        build_browsecomp_turn_completion_prompt, decrypt_xor_base64,
+        BrowseCompLocale, build_browsecomp_answer_prompt, build_browsecomp_cot_prompt,
+        build_browsecomp_expected_context, build_browsecomp_turn_completion_prompt,
+        decrypt_xor_base64,
     };
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -357,6 +395,18 @@ mod tests {
             "System: sys\n\nUser: user\n\nAssistant: <think><|completions_of_cot|>",
         );
         assert_eq!(prompt, "System: sys\n\nUser: user\n\nAssistant: <think>");
+    }
+
+    #[test]
+    fn answer_prompt_anchors_final_format() {
+        let prompt = build_browsecomp_answer_prompt(
+            "System: sys\n\nUser: user\n\nAssistant: <think><|completions_of_cot|>",
+            "reasoning",
+        );
+        assert_eq!(
+            prompt,
+            "System: sys\n\nUser: user\n\nAssistant: <think>reasoning</think>\nExplanation: "
+        );
     }
 
     #[test]

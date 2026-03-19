@@ -11,10 +11,6 @@ mod browsecomp_common;
 pub mod browsecomp_zh;
 pub mod mcp_universe;
 pub mod tau_bench;
-pub mod tau_bench_airline;
-pub mod tau_bench_common;
-pub mod tau_bench_retail;
-pub mod tau_bench_telecom;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

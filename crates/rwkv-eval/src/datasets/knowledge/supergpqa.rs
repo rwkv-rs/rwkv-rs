@@ -5,7 +5,7 @@ use linkme::distributed_slice;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-use crate::datasets::knowledge::gpqa_common::join_subject_parts;
+use crate::datasets::knowledge::gpqa::join_subject_parts;
 use crate::datasets::knowledge::{
     answer_index_from_letter, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
 };

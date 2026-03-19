@@ -33,8 +33,10 @@ use rwkv::custom::nn::loss::CrossEntropyLossConfig;
 use rwkv::custom::tensor::backend::AutodiffBackend;
 #[cfg(feature = "training")]
 use rwkv::custom::train::{InferenceStep, TrainOutput, TrainStep};
+use rwkv::nn::kernels::addcmul::AddcmulBackend;
 #[cfg(feature = "training")]
 use rwkv::nn::kernels::l2wrap::{L2WrapBackend, l2wrap};
+use rwkv::nn::kernels::token_shift_diff::TokenShiftDiffBackend;
 #[cfg(feature = "training")]
 use rwkv::nn::kernels::wkv7_common::Wkv7Kernel;
 #[cfg(feature = "training")]
@@ -125,7 +127,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
         NextTokenPredictionOutput<B>,
     )
     where
-        B: L2WrapBackend,
+        B: Backend + TokenShiftDiffBackend + AddcmulBackend + L2WrapBackend,
     {
         let [batch_size, context_length] = item.inputs.dims();
         let device = &self.embed.devices()[0];
@@ -181,7 +183,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
         unembed_mode: UnembedMode,
     ) -> Option<Tensor<B, 3>>
     where
-        B: Wkv7Backend,
+        B: Backend + TokenShiftDiffBackend + AddcmulBackend + Wkv7Backend,
     {
         debug_assert_eq!(
             embedded_token_shift_for_time_mix.len(),
@@ -269,7 +271,9 @@ impl<B: Backend> AutoRegressiveModel<B> {
 }
 
 #[cfg(feature = "training")]
-impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegressiveModel<B> {
+impl<B: AutodiffBackend + TokenShiftDiffBackend + AddcmulBackend + Wkv7Backend + L2WrapBackend>
+    TrainStep for AutoRegressiveModel<B>
+{
     type Input = AutoRegressiveBatch<B>;
     type Output = NextTokenPredictionOutput<B>;
 
@@ -377,7 +381,9 @@ impl<B: AutodiffBackend + Wkv7Backend + L2WrapBackend> TrainStep for AutoRegress
 
 /// Define validation step
 #[cfg(feature = "training")]
-impl<B: Backend + Wkv7Backend + L2WrapBackend> InferenceStep for AutoRegressiveModel<B> {
+impl<B: Backend + TokenShiftDiffBackend + AddcmulBackend + Wkv7Backend + L2WrapBackend>
+    InferenceStep for AutoRegressiveModel<B>
+{
     type Input = AutoRegressiveBatch<B>;
     type Output = NextTokenPredictionOutput<B>;
 

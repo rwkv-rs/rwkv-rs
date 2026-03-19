@@ -19,7 +19,7 @@ async-trait = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 rwkv-config = { path = "../rwkv-config" }
-async-openai = { version = "0.33.0", default-features = false, features = ["rustls", "completions", "chat-completion", "byot"] }
+async-openai = { workspace = true }
 linkme = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }

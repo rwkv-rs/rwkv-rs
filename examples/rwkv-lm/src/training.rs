@@ -5,6 +5,8 @@
 // to build a learner, which is used to train the model. The trained model and the configuration are
 // then saved to the specified directory.
 
+use crate::data::batcher::AutoRegressiveBatcher;
+use crate::model::AutoRegressiveModelConfig;
 use log::info;
 #[cfg(not(feature = "tui"))]
 use log::warn;
@@ -28,7 +30,9 @@ use rwkv::custom::train::{
     metric::{CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric},
 };
 use rwkv::data::mmap::sample::Sampler;
+use rwkv::nn::kernels::addcmul::AddcmulBackend;
 use rwkv::nn::kernels::l2wrap::L2WrapBackend;
+use rwkv::nn::kernels::token_shift_diff::TokenShiftDiffBackend;
 use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
 use rwkv::train::data::sliding::{MmapBinReader, SlidingDataset};
 use rwkv::train::learner::init::init_wandb_metric_logger;
@@ -39,9 +43,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::data::batcher::AutoRegressiveBatcher;
-use crate::model::AutoRegressiveModelConfig;
-
 rwkv::custom_mode!();
 
 // Define train function
@@ -51,8 +52,8 @@ pub fn train<B: AutodiffBackend>(
     mut train_cfg_builder: FinalTrainConfigBuilder,
     exp_log_path: &Path, // Experiment log directory (also used for artifacts)
 ) where
-    B: Wkv7Backend + L2WrapBackend,
-    B::InnerBackend: Wkv7Backend + L2WrapBackend,
+    B: TokenShiftDiffBackend + AddcmulBackend + Wkv7Backend + L2WrapBackend,
+    B::InnerBackend: TokenShiftDiffBackend + AddcmulBackend + Wkv7Backend + L2WrapBackend,
 {
     rwkv_bench::trace_scope!("rwkv.train.pipeline");
 

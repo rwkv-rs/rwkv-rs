@@ -124,8 +124,50 @@ fn default_penalty_decay() -> f32 {
     0.996
 }
 
+const LIVE_RATE_WINDOW_SECS: f64 = 5.0;
+
+#[derive(Clone, Copy, Debug)]
+struct CountedEvent {
+    at: Instant,
+    count: usize,
+}
+
+#[derive(Default)]
+struct SlidingWindowCounter {
+    total: usize,
+    events: VecDeque<CountedEvent>,
+}
+
+impl SlidingWindowCounter {
+    fn record(&mut self, at: Instant, count: usize) {
+        if count == 0 {
+            return;
+        }
+        self.total += count;
+        self.events.push_back(CountedEvent { at, count });
+    }
+
+    fn rate(&mut self, now: Instant, window_secs: f64) -> f64 {
+        let safe_window = window_secs.max(1e-9);
+        self.prune(now, safe_window);
+        self.total as f64 / safe_window
+    }
+
+    fn prune(&mut self, now: Instant, window_secs: f64) {
+        let cutoff = now
+            .checked_sub(Duration::from_secs_f64(window_secs))
+            .unwrap_or(now);
+        while self.events.front().is_some_and(|event| event.at < cutoff) {
+            if let Some(event) = self.events.pop_front() {
+                self.total = self.total.saturating_sub(event.count);
+            }
+        }
+    }
+}
+
 struct TokenEvent {
     at: Instant,
+    count: usize,
 }
 
 #[derive(Default)]
@@ -133,18 +175,18 @@ struct LiveStats {
     processed: usize,
     completed: usize,
     failed: usize,
-    output_tokens: usize,
     e2el_sum_s: f64,
     first_error: Option<String>,
-    token_window: VecDeque<Instant>,
+    request_window: SlidingWindowCounter,
+    token_window: SlidingWindowCounter,
 }
 
 impl LiveStats {
-    fn observe(&mut self, metrics: &RequestMetrics) {
+    fn observe(&mut self, metrics: &RequestMetrics, at: Instant) {
         self.processed += 1;
         if metrics.success {
             self.completed += 1;
-            self.output_tokens += metrics.output_tokens;
+            self.request_window.record(at, 1);
         } else {
             self.failed += 1;
             if self.first_error.is_none() {
@@ -154,31 +196,75 @@ impl LiveStats {
         self.e2el_sum_s += metrics.e2el_s.max(0.0);
     }
 
-    fn record_token(&mut self, at: Instant) {
-        self.token_window.push_back(at);
+    fn record_token(&mut self, at: Instant, count: usize) {
+        self.token_window.record(at, count);
     }
 
-    fn instant_tok_s(&mut self, window_secs: f64) -> f64 {
-        let cutoff = Instant::now() - Duration::from_secs_f64(window_secs);
-        while self.token_window.front().map_or(false, |t| *t < cutoff) {
-            self.token_window.pop_front();
-        }
-        self.token_window.len() as f64 / window_secs
+    fn instant_rps(&mut self, now: Instant, window_secs: f64) -> f64 {
+        self.request_window.rate(now, window_secs)
     }
 
-    fn status_line(&self, elapsed_s: f64, inflight: usize, inst_tok_s: f64) -> String {
-        let safe_elapsed = elapsed_s.max(1e-9);
-        let success_rps = self.completed as f64 / safe_elapsed;
+    fn instant_tok_s(&mut self, now: Instant, window_secs: f64) -> f64 {
+        self.token_window.rate(now, window_secs)
+    }
+
+    fn status_line(&self, inflight: usize, inst_rps: f64, inst_tok_s: Option<f64>) -> String {
         let mean_e2el_ms = if self.processed > 0 {
             self.e2el_sum_s * 1000.0 / self.processed as f64
         } else {
             0.0
         };
+        let tok_s = inst_tok_s
+            .map(|value| format!("{value:.1}"))
+            .unwrap_or_else(|| "N/A".to_string());
 
         format!(
-            "ok={} fail={} inflight={} rps={success_rps:.1} tok/s={inst_tok_s:.1} e2el={mean_e2el_ms:.1}ms",
+            "ok={} fail={} inflight={} rps={inst_rps:.1} tok/s={tok_s} e2el={mean_e2el_ms:.1}ms",
             self.completed, self.failed, inflight
         )
+    }
+}
+
+fn live_status_line(live_stats: &mut LiveStats, inflight: usize, stream: bool) -> String {
+    let now = Instant::now();
+    let inst_rps = live_stats.instant_rps(now, LIVE_RATE_WINDOW_SECS);
+    let inst_tok_s = stream.then(|| live_stats.instant_tok_s(now, LIVE_RATE_WINDOW_SECS));
+    live_stats.status_line(inflight, inst_rps, inst_tok_s)
+}
+
+fn drain_token_events(
+    live_stats: &mut LiveStats,
+    token_rx: &mut mpsc::UnboundedReceiver<TokenEvent>,
+) {
+    while let Ok(event) = token_rx.try_recv() {
+        live_stats.record_token(event.at, event.count);
+    }
+}
+
+fn refresh_live_progress(
+    progress: &ProgressBar,
+    live_stats: &mut LiveStats,
+    submitted: usize,
+    total_requests: usize,
+    stream: bool,
+    progress_visible: bool,
+    bench_start: Instant,
+    last_text_update: &mut Instant,
+) {
+    let inflight_count = submitted.saturating_sub(live_stats.processed);
+    let status = live_status_line(live_stats, inflight_count, stream);
+    progress.set_message(status.clone());
+    progress.tick();
+
+    if !progress_visible && last_text_update.elapsed() >= Duration::from_secs(2) {
+        eprintln!(
+            "[{}] {}/{} req {}",
+            format_elapsed(bench_start.elapsed()),
+            live_stats.processed,
+            total_requests,
+            status
+        );
+        *last_text_update = Instant::now();
     }
 }
 
@@ -251,6 +337,21 @@ fn format_reqwest_error(context: &str, err: &reqwest::Error) -> String {
     message
 }
 
+fn extract_content_text(value: &Value) -> Option<String> {
+    if let Some(text) = value.as_str() {
+        return Some(text.to_string());
+    }
+
+    let mut combined = String::new();
+    for part in value.as_array()? {
+        if let Some(text) = part.get("text").and_then(|value| value.as_str()) {
+            combined.push_str(text);
+        }
+    }
+
+    (!combined.is_empty()).then_some(combined)
+}
+
 fn extract_chunk_text_from_value(value: &Value) -> String {
     if let Some(choices) = value.get("choices").and_then(|value| value.as_array())
         && let Some(choice) = choices.first()
@@ -260,9 +361,17 @@ fn extract_chunk_text_from_value(value: &Value) -> String {
         }
 
         if let Some(message) = choice.get("message")
-            && let Some(content) = message.get("content").and_then(|value| value.as_str())
+            && let Some(content) = message.get("content")
+            && let Some(text) = extract_content_text(content)
         {
-            return content.to_string();
+            return text;
+        }
+
+        if let Some(delta) = choice.get("delta")
+            && let Some(content) = delta.get("content")
+            && let Some(text) = extract_content_text(content)
+        {
+            return text;
         }
     }
     String::new()
@@ -297,43 +406,60 @@ fn read_from(value: &Value, key: &str) -> Option<f64> {
     value.get(key).and_then(|value| value.as_f64())
 }
 
+fn count_text_units(text: &str) -> usize {
+    text.split_whitespace().count()
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct SseLineOutcome {
+    terminal: bool,
+    new_tokens: usize,
+}
+
 fn parse_sse_line(
     line: &str,
     bench_start: Instant,
+    output_text: &mut String,
     first_token_s: &mut Option<f64>,
     last_token_s: &mut Option<f64>,
     itl_s: &mut Vec<f64>,
     output_tokens: &mut usize,
     stage_ms: &mut StageBreakdownMs,
     saw_terminal: &mut bool,
-) -> bool {
+) -> SseLineOutcome {
     let trimmed = line.trim();
     if !trimmed.starts_with("data:") {
-        return false;
+        return SseLineOutcome::default();
     }
 
     let payload = trimmed.trim_start_matches("data:").trim();
     if payload.is_empty() {
-        return false;
+        return SseLineOutcome::default();
     }
 
     if payload == "[DONE]" {
         *saw_terminal = true;
-        return true;
+        return SseLineOutcome {
+            terminal: true,
+            new_tokens: 0,
+        };
     }
 
     let value = match from_str::<Value>(payload) {
         Ok(value) => value,
-        Err(_) => return false,
+        Err(_) => return SseLineOutcome::default(),
     };
     let text = extract_chunk_text_from_value(&value);
     if text.is_empty() {
         if has_finish_reason(&value) {
             *stage_ms = parse_timings_ms(&value);
             *saw_terminal = true;
-            return true;
+            return SseLineOutcome {
+                terminal: true,
+                new_tokens: 0,
+            };
         }
-        return false;
+        return SseLineOutcome::default();
     }
 
     let now_s = bench_start.elapsed().as_secs_f64();
@@ -344,8 +470,22 @@ fn parse_sse_line(
     }
 
     *last_token_s = Some(now_s);
-    *output_tokens += 1;
-    false
+    output_text.push_str(&text);
+
+    let updated_tokens = count_text_units(output_text);
+    let new_tokens = updated_tokens.saturating_sub(*output_tokens);
+    *output_tokens = updated_tokens;
+
+    let terminal = has_finish_reason(&value);
+    if terminal {
+        *stage_ms = parse_timings_ms(&value);
+        *saw_terminal = true;
+    }
+
+    SseLineOutcome {
+        terminal,
+        new_tokens,
+    }
 }
 
 async fn run_single_request(
@@ -423,13 +563,12 @@ async fn run_single_request(
 
     if !response.status().is_success() {
         let status = response.status();
-        let body = match response.text().await {
-            Ok(body) => body,
-            Err(err) => format!(
+        let body = response.text().await.unwrap_or_else(|err| {
+            format!(
                 "<failed to read body: {}>",
                 format_reqwest_error("body read failed", &err)
-            ),
-        };
+            )
+        });
         metrics.error = Some(format!("http {}: {}", status.as_u16(), body));
         metrics.e2el_s = start.elapsed().as_secs_f64();
         return metrics;
@@ -442,6 +581,7 @@ async fn run_single_request(
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
         let mut byte_stream = response.bytes_stream();
+        let mut output_text = String::new();
         let mut sse_buffer = String::new();
         let mut first_token_s = None;
         let mut last_token_s = None;
@@ -466,22 +606,26 @@ async fn run_single_request(
             while let Some(newline_idx) = sse_buffer.find('\n') {
                 let line = sse_buffer[..newline_idx].trim_end_matches('\r').to_string();
                 sse_buffer.replace_range(..=newline_idx, "");
-                let prev_tokens = metrics.output_tokens;
-                if parse_sse_line(
+                let outcome = parse_sse_line(
                     &line,
                     start,
+                    &mut output_text,
                     &mut first_token_s,
                     &mut last_token_s,
                     &mut metrics.itl_s,
                     &mut metrics.output_tokens,
                     &mut metrics.stage_ms,
                     &mut saw_terminal,
-                ) {
+                );
+                if outcome.terminal {
                     metrics.success = true;
                 }
-                if metrics.output_tokens > prev_tokens {
+                if outcome.new_tokens > 0 {
                     if let Some(tx) = &token_tx {
-                        let _ = tx.send(TokenEvent { at: Instant::now() });
+                        let _ = tx.send(TokenEvent {
+                            at: Instant::now(),
+                            count: outcome.new_tokens,
+                        });
                     }
                 }
             }
@@ -489,22 +633,26 @@ async fn run_single_request(
 
         if metrics.error.is_none() && !sse_buffer.trim().is_empty() {
             for line in sse_buffer.lines() {
-                let prev_tokens = metrics.output_tokens;
-                if parse_sse_line(
+                let outcome = parse_sse_line(
                     line,
                     start,
+                    &mut output_text,
                     &mut first_token_s,
                     &mut last_token_s,
                     &mut metrics.itl_s,
                     &mut metrics.output_tokens,
                     &mut metrics.stage_ms,
                     &mut saw_terminal,
-                ) {
+                );
+                if outcome.terminal {
                     metrics.success = true;
                 }
-                if metrics.output_tokens > prev_tokens {
+                if outcome.new_tokens > 0 {
                     if let Some(tx) = &token_tx {
-                        let _ = tx.send(TokenEvent { at: Instant::now() });
+                        let _ = tx.send(TokenEvent {
+                            at: Instant::now(),
+                            count: outcome.new_tokens,
+                        });
                     }
                 }
             }
@@ -571,6 +719,7 @@ pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
     let mut last_text_update = Instant::now();
     let (token_tx, mut token_rx) = mpsc::unbounded_channel::<TokenEvent>();
     let mut submitted = 0usize;
+    let mut token_channel_open = true;
 
     for request_id in 0..cfg.num_requests {
         if cfg.request_rate.is_finite() && cfg.request_rate > 0.0 {
@@ -615,47 +764,56 @@ pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
     while !inflight.is_empty() {
         tokio::select! {
             biased;
-            _ = tick.tick() => {
-                while let Ok(ev) = token_rx.try_recv() {
-                    live_stats.record_token(ev.at);
-                }
-                let inst_tok_s = live_stats.instant_tok_s(5.0);
-                let inflight_count = submitted.saturating_sub(live_stats.processed);
-                let status = live_stats.status_line(
-                    bench_start.elapsed().as_secs_f64(),
-                    inflight_count,
-                    inst_tok_s,
-                );
-                progress.set_message(status.clone());
-                progress.tick();
-
-                if !progress_visible
-                    && last_text_update.elapsed() >= Duration::from_secs(2)
-                {
-                    eprintln!(
-                        "[{}] {}/{} req {}",
-                        format_elapsed(bench_start.elapsed()),
-                        live_stats.processed,
-                        cfg.num_requests,
-                        status
-                    );
-                    last_text_update = Instant::now();
-                }
-            }
             maybe = inflight.next() => {
                 let Some((_request_id, metrics)) = maybe else {
                     break;
                 };
-                live_stats.observe(&metrics);
+                live_stats.observe(&metrics, Instant::now());
+                drain_token_events(&mut live_stats, &mut token_rx);
                 progress.inc(1);
-                let inflight_count = submitted.saturating_sub(live_stats.processed);
-                let inst_tok_s = live_stats.instant_tok_s(5.0);
-                progress.set_message(live_stats.status_line(
-                    bench_start.elapsed().as_secs_f64(),
-                    inflight_count,
-                    inst_tok_s,
-                ));
+                refresh_live_progress(
+                    &progress,
+                    &mut live_stats,
+                    submitted,
+                    cfg.num_requests,
+                    cfg.stream,
+                    progress_visible,
+                    bench_start,
+                    &mut last_text_update,
+                );
                 requests.push(metrics);
+            }
+            maybe_event = token_rx.recv(), if token_channel_open => {
+                match maybe_event {
+                    Some(event) => {
+                        live_stats.record_token(event.at, event.count);
+                        drain_token_events(&mut live_stats, &mut token_rx);
+                        refresh_live_progress(
+                            &progress,
+                            &mut live_stats,
+                            submitted,
+                            cfg.num_requests,
+                            cfg.stream,
+                            progress_visible,
+                            bench_start,
+                            &mut last_text_update,
+                        );
+                    }
+                    None => token_channel_open = false,
+                }
+            }
+            _ = tick.tick() => {
+                drain_token_events(&mut live_stats, &mut token_rx);
+                refresh_live_progress(
+                    &progress,
+                    &mut live_stats,
+                    submitted,
+                    cfg.num_requests,
+                    cfg.stream,
+                    progress_visible,
+                    bench_start,
+                    &mut last_text_update,
+                );
             }
         }
     }
@@ -663,11 +821,9 @@ pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
     requests.sort_by_key(|request| request.request_id);
 
     let duration_s = bench_start.elapsed().as_secs_f64();
-    let final_tok_s = live_stats.instant_tok_s(5.0);
-    progress.finish_with_message(format!(
-        "done {}",
-        live_stats.status_line(duration_s, 0, final_tok_s)
-    ));
+    drain_token_events(&mut live_stats, &mut token_rx);
+    let done_status = live_status_line(&mut live_stats, 0, cfg.stream);
+    progress.finish_with_message(format!("done {done_status}"));
     if let Some(err) = live_stats.first_error.as_deref() {
         eprintln!("first request error: {err}");
     }
@@ -755,4 +911,189 @@ pub fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     }
     std::fs::write(path, to_string_pretty(value)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request_metrics(success: bool) -> RequestMetrics {
+        RequestMetrics {
+            request_id: 0,
+            success,
+            error: (!success).then_some("boom".to_string()),
+            prompt_tokens: 8,
+            output_tokens: 0,
+            ttft_s: None,
+            itl_s: Vec::new(),
+            tpot_s: None,
+            e2el_s: 0.25,
+            stage_ms: StageBreakdownMs::default(),
+        }
+    }
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn live_stats_use_sliding_windows() {
+        let base = Instant::now();
+        let mut stats = LiveStats::default();
+        let success = request_metrics(true);
+
+        stats.observe(&success, base);
+        stats.observe(&success, base + Duration::from_secs(2));
+        stats.record_token(base + Duration::from_secs(1), 3);
+        stats.record_token(base + Duration::from_secs(4), 2);
+
+        assert_close(stats.instant_rps(base + Duration::from_secs(5), 5.0), 0.4);
+        assert_close(stats.instant_tok_s(base + Duration::from_secs(5), 5.0), 1.0);
+        assert_close(stats.instant_rps(base + Duration::from_secs(7), 5.0), 0.2);
+        assert_close(stats.instant_tok_s(base + Duration::from_secs(7), 5.0), 0.4);
+    }
+
+    #[test]
+    fn status_line_uses_na_for_non_stream_token_rate() {
+        let mut stats = LiveStats::default();
+        stats.observe(&request_metrics(true), Instant::now());
+
+        let status = stats.status_line(3, 1.2, None);
+        assert!(status.contains("tok/s=N/A"));
+        assert!(status.contains("rps=1.2"));
+    }
+
+    #[test]
+    fn parse_sse_line_supports_openai_delta_content() {
+        let mut output_text = String::new();
+        let mut first_token_s = None;
+        let mut last_token_s = None;
+        let mut itl_s = Vec::new();
+        let mut output_tokens = 0;
+        let mut stage_ms = StageBreakdownMs::default();
+        let mut saw_terminal = false;
+
+        let outcome = parse_sse_line(
+            r#"data: {"choices":[{"delta":{"content":"hello world"}}]}"#,
+            Instant::now(),
+            &mut output_text,
+            &mut first_token_s,
+            &mut last_token_s,
+            &mut itl_s,
+            &mut output_tokens,
+            &mut stage_ms,
+            &mut saw_terminal,
+        );
+
+        assert_eq!(
+            outcome,
+            SseLineOutcome {
+                terminal: false,
+                new_tokens: 2,
+            }
+        );
+        assert_eq!(output_text, "hello world");
+        assert_eq!(output_tokens, 2);
+        assert!(first_token_s.is_some());
+        assert!(last_token_s.is_some());
+        assert!(!saw_terminal);
+    }
+
+    #[test]
+    fn parse_sse_line_ignores_role_only_delta_events() {
+        let mut output_text = String::new();
+        let mut first_token_s = None;
+        let mut last_token_s = None;
+        let mut itl_s = Vec::new();
+        let mut output_tokens = 0;
+        let mut stage_ms = StageBreakdownMs::default();
+        let mut saw_terminal = false;
+
+        let outcome = parse_sse_line(
+            r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#,
+            Instant::now(),
+            &mut output_text,
+            &mut first_token_s,
+            &mut last_token_s,
+            &mut itl_s,
+            &mut output_tokens,
+            &mut stage_ms,
+            &mut saw_terminal,
+        );
+
+        assert_eq!(outcome, SseLineOutcome::default());
+        assert_eq!(output_tokens, 0);
+        assert!(first_token_s.is_none());
+        assert!(last_token_s.is_none());
+        assert!(!saw_terminal);
+    }
+
+    #[test]
+    fn parse_sse_line_marks_finish_reason_as_terminal() {
+        let mut output_text = String::new();
+        let mut first_token_s = None;
+        let mut last_token_s = None;
+        let mut itl_s = Vec::new();
+        let mut output_tokens = 0;
+        let mut stage_ms = StageBreakdownMs::default();
+        let mut saw_terminal = false;
+
+        let outcome = parse_sse_line(
+            r#"data: {"choices":[{"delta":{"content":"hello"},"finish_reason":"stop"}],"timings_ms":{"request_total_ms":12.0}}"#,
+            Instant::now(),
+            &mut output_text,
+            &mut first_token_s,
+            &mut last_token_s,
+            &mut itl_s,
+            &mut output_tokens,
+            &mut stage_ms,
+            &mut saw_terminal,
+        );
+
+        assert_eq!(
+            outcome,
+            SseLineOutcome {
+                terminal: true,
+                new_tokens: 1,
+            }
+        );
+        assert_eq!(output_tokens, 1);
+        assert_eq!(stage_ms.request_total_ms, Some(12.0));
+        assert!(saw_terminal);
+    }
+
+    #[test]
+    fn parse_sse_line_handles_done_event() {
+        let mut output_text = String::new();
+        let mut first_token_s = None;
+        let mut last_token_s = None;
+        let mut itl_s = Vec::new();
+        let mut output_tokens = 0;
+        let mut stage_ms = StageBreakdownMs::default();
+        let mut saw_terminal = false;
+
+        let outcome = parse_sse_line(
+            "data: [DONE]",
+            Instant::now(),
+            &mut output_text,
+            &mut first_token_s,
+            &mut last_token_s,
+            &mut itl_s,
+            &mut output_tokens,
+            &mut stage_ms,
+            &mut saw_terminal,
+        );
+
+        assert_eq!(
+            outcome,
+            SseLineOutcome {
+                terminal: true,
+                new_tokens: 0,
+            }
+        );
+        assert!(saw_terminal);
+    }
 }

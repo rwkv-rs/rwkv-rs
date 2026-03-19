@@ -37,12 +37,14 @@ pub struct ServeArgs {
     pub concurrency: usize,
     #[arg(long, default_value_t = 0.0)]
     pub request_rate: f64,
-    #[arg(long, default_value_t = 256)]
+    #[arg(long, default_value_t = 128)]
     pub input_tokens: usize,
-    #[arg(long, default_value_t = 256)]
+    #[arg(long, default_value_t = 128)]
     pub output_tokens: usize,
     #[arg(long, default_value_t = true)]
     pub stream: bool,
+    #[arg(long, default_value_t = false)]
+    pub no_stream: bool,
     #[arg(long, default_value_t = 1.0)]
     pub temperature: f32,
     #[arg(long, default_value_t = 500)]
@@ -76,7 +78,7 @@ impl From<ServeArgs> for ServeConfig {
             request_rate: sanitize_request_rate(args.request_rate),
             input_tokens: args.input_tokens,
             output_tokens: args.output_tokens,
-            stream: args.stream,
+            stream: if args.no_stream { false } else { args.stream },
             temperature: args.temperature,
             top_k: args.top_k,
             top_p: args.top_p,

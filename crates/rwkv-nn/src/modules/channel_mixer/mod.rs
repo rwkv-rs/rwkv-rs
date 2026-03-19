@@ -9,7 +9,10 @@ use burn::{
 use crate::functions::{
     context_mask::apply_context_mask,
     init_weights::{get_token_shift_diff_scale, uniform_init, zeros_init},
-    token_shift::{get_embedded_token_shift, token_shift},
+};
+use crate::kernels::{
+    addcmul::{AddcmulBackend, addcmul},
+    token_shift_diff::{TokenShiftDiffBackend, token_shift_diff},
 };
 
 #[derive(Config, Debug)]
@@ -68,12 +71,15 @@ impl<B: Backend> ChannelMixer<B> {
             device,
         ));
     }
+}
 
+impl<B: AddcmulBackend + TokenShiftDiffBackend> ChannelMixer<B> {
     #[cfg_attr(
         feature = "trace",
         tracing::instrument(name = "rwkv.infer.model.channel_mixer", skip_all)
     )]
     pub fn forward(&self, channel_mixer_input: ChannelMixerIO<B>) -> ChannelMixerIO<B> {
+        let should_return_token_shift = channel_mixer_input.embedded_token_shift.is_some();
         let ChannelMixerIO {
             embedded_context,
             embedded_token_shift,
@@ -84,24 +90,16 @@ impl<B: Backend> ChannelMixer<B> {
         // Padding timesteps must be strict no-ops for the token-shift state; otherwise the
         // first real token would see an incorrect previous token.
         let embedded_context = apply_context_mask(embedded_context, context_mask.clone());
-
-        // Left-padding guarantees the last timestep is always valid (per lane), so no gating.
-        let output_embedded_token_shift = embedded_token_shift
-            .as_ref()
-            .map(|_| get_embedded_token_shift(embedded_context.clone()));
-
-        let prev = token_shift(
+        let token_shift_diff_output = token_shift_diff(
             embedded_context.clone(),
             embedded_token_shift,
             context_mask.clone(),
         );
-        let mut token_shifted_diff = prev - embedded_context.clone();
-        if let Some(mask) = context_mask.clone() {
-            token_shifted_diff = token_shifted_diff * mask.unsqueeze_dim(2);
-        }
-
-        let embedded_context_shift =
-            embedded_context.clone() + token_shifted_diff * self.token_shift_diff_scale.val();
+        let embedded_context_shift = addcmul(
+            embedded_context,
+            token_shift_diff_output.token_shifted_diff,
+            self.token_shift_diff_scale.val(),
+        );
 
         let activated_key = relu(self.key.forward(embedded_context_shift)).powf_scalar(2.0);
 
@@ -110,7 +108,8 @@ impl<B: Backend> ChannelMixer<B> {
 
         ChannelMixerIO {
             embedded_context: value,
-            embedded_token_shift: output_embedded_token_shift,
+            embedded_token_shift: should_return_token_shift
+                .then_some(token_shift_diff_output.next_token_shift),
             context_mask,
         }
     }

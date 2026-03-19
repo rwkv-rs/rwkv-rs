@@ -1,5 +1,5 @@
 use super::browsecomp_common::{
-    BrowseCompLocale, build_browsecomp_expected_context, decrypt_xor_base64,
+    BrowseCompLocale, browsecomp_sample_limit, build_browsecomp_expected_context, decrypt_xor_base64,
     generate_browsecomp_answer, judge_with_retry,
 };
 use crate::datasets::utils::csv::read_csv_items;
@@ -81,6 +81,7 @@ impl BrowseComp {
                     .map_err(|err| format!("row {index} answer decrypt failed: {err}"))?;
                 Ok(BrowseCompItem { question, answer })
             })
+            .take(browsecomp_sample_limit().unwrap_or(usize::MAX))
             .collect()
     }
 }
@@ -125,7 +126,13 @@ impl Benchmark for BrowseComp {
     }
 
     async fn check(&self) -> bool {
-        self.test.len() != BROWSECOMP_EXPECTED_LEN
+        let size_invalid = if let Some(limit) = browsecomp_sample_limit() {
+            self.test.len() != limit.min(BROWSECOMP_EXPECTED_LEN)
+        } else {
+            self.test.len() != BROWSECOMP_EXPECTED_LEN
+        };
+
+        size_invalid
             || self
                 .test
                 .iter()
