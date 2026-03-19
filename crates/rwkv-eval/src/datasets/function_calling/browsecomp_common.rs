@@ -19,6 +19,14 @@ const BROWSECOMP_JUDGE_SAMPLING_CONFIG: SamplingConfig = SamplingConfig {
     penalty_decay: 1.0,
 };
 
+const BROWSECOMP_CONTROL_MARKERS: &[&str] = &[
+    "<|user|>",
+    "<|assistant|>",
+    "<|system|>",
+    "<|completions|>",
+    "<|completions_of_cot|>",
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowseCompLocale {
     En,
@@ -106,28 +114,48 @@ pub fn build_browsecomp_turn_completion_prompt(cot_context: &str, cot: &str) -> 
     build_turn_completion_prompt(cot_context, cot)
 }
 
+fn build_browsecomp_cot_prompt(expected_context: &str) -> String {
+    expected_context
+        .split_once("<|completions_of_cot|>")
+        .map(|(prefix, _)| prefix.to_string())
+        .unwrap_or_else(|| expected_context.to_string())
+}
+
 pub async fn generate_browsecomp_answer(
     model_client: &Client<OpenAIConfig>,
     model_name: &str,
     expected_context: &str,
     sampling_config: &SamplingConfig,
 ) -> (String, String) {
+    let cot_prompt = build_browsecomp_cot_prompt(expected_context);
+    let mut cot_stop = vec!["</think>".to_string()];
+    cot_stop.extend(
+        BROWSECOMP_CONTROL_MARKERS
+            .iter()
+            .map(|marker| (*marker).to_string()),
+    );
     let cot = get_completion(
         model_client,
         model_name,
-        expected_context,
+        &cot_prompt,
         sampling_config,
-        vec!["</think>".to_string()],
+        cot_stop,
         2048,
     )
     .await;
     let answer_prompt = build_browsecomp_turn_completion_prompt(expected_context, &cot);
+    let mut answer_stop = vec!["\nUser:".to_string(), "\nAssistant:".to_string()];
+    answer_stop.extend(
+        BROWSECOMP_CONTROL_MARKERS
+            .iter()
+            .map(|marker| (*marker).to_string()),
+    );
     let answer = get_completion(
         model_client,
         model_name,
         &answer_prompt,
         sampling_config,
-        vec!["\nUser:".to_string(), "\nAssistant:".to_string()],
+        answer_stop,
         256,
     )
     .await
@@ -284,7 +312,7 @@ async fn judge_once(
 #[cfg(test)]
 mod tests {
     use super::{
-        BrowseCompLocale, build_browsecomp_expected_context,
+        BrowseCompLocale, build_browsecomp_cot_prompt, build_browsecomp_expected_context,
         build_browsecomp_turn_completion_prompt, decrypt_xor_base64,
     };
     use base64::Engine;
@@ -321,6 +349,14 @@ mod tests {
             "x",
         );
         assert_eq!(prompt, "Assistant: <think>x</think>\n");
+    }
+
+    #[test]
+    fn cot_prompt_excludes_placeholder_marker() {
+        let prompt = build_browsecomp_cot_prompt(
+            "System: sys\n\nUser: user\n\nAssistant: <think><|completions_of_cot|>",
+        );
+        assert_eq!(prompt, "System: sys\n\nUser: user\n\nAssistant: <think>");
     }
 
     #[test]
