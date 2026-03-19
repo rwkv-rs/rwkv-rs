@@ -142,6 +142,7 @@ git_hash = "a8dc285c786fc425c9effee232453213b4b5ce8e"
 - Failed answers additionally write one `checker` row.
 - `checker` only runs for attempts with `eval.is_passed = false`.
 - `checker` is diagnostic only and does not change `eval.is_passed` or `scores`.
+- On startup, any persisted `Running` task is marked `Failed`; related `Running` completions are also marked `Failed`.
 - If an attempt fails at runtime, the task is marked `Failed` and the process stops.
 - `scores` are written only after the task has a complete set of successful attempts.
 - `resume` reconstructs progress by reading existing completion/eval rows, reuses finished attempts, and fills both missing attempts and missing checker rows.

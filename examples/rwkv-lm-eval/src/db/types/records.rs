@@ -99,6 +99,12 @@ pub struct CheckerRecord {
     pub created_at: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StartupRecoveryStats {
+    pub failed_task_count: u64,
+    pub failed_completion_count: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TaskAttemptRecord {
     pub completions_id: i32,

@@ -1,6 +1,7 @@
 use rwkv_config::raw::eval::SpaceDbConfig;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
 
+use super::writes::recover_running_tasks;
 use crate::db::Db;
 
 pub async fn connect(cfg: &SpaceDbConfig, max_connections: u32) -> Result<Db, String> {
@@ -11,7 +12,14 @@ pub async fn connect(cfg: &SpaceDbConfig, max_connections: u32) -> Result<Db, St
         .await
         .map_err(|err| format!("connect postgres failed: {err}"))?;
 
-    Ok(Db { pool })
+    let db = Db { pool };
+    let stats = recover_running_tasks(&db).await?;
+    println!(
+        "startup recovery: marked {} running tasks as Failed, {} running completions as Failed",
+        stats.failed_task_count, stats.failed_completion_count
+    );
+
+    Ok(db)
 }
 
 fn build_connect_options(cfg: &SpaceDbConfig) -> Result<PgConnectOptions, String> {

@@ -1,8 +1,9 @@
-use sqlx::{query, query_scalar};
+use sqlx::{Postgres, QueryBuilder, query, query_scalar};
 
+use crate::db::CompletionStatus;
 use crate::db::{
     BenchmarkInsert, CheckerInsert, CompletionInsert, Db, EvalInsert, ModelInsert, ScoreInsert,
-    TaskInsert, TaskStatus,
+    StartupRecoveryStats, TaskInsert, TaskStatus,
 };
 
 pub async fn upsert_model(db: &Db, insert: &ModelInsert) -> Result<i32, String> {
@@ -232,4 +233,59 @@ pub async fn update_task_status(db: &Db, task_id: i32, status: TaskStatus) -> Re
         .map_err(|err| format!("update task status failed: {err}"))?;
 
     Ok(())
+}
+
+pub async fn recover_running_tasks(db: &Db) -> Result<StartupRecoveryStats, String> {
+    let mut tx = db
+        .pool
+        .begin()
+        .await
+        .map_err(|err| format!("begin startup recovery transaction failed: {err}"))?;
+
+    let task_ids: Vec<i32> = query_scalar(
+        r#"
+        UPDATE task
+        SET status = $1
+        WHERE status = $2
+        RETURNING task_id
+        "#,
+    )
+    .bind(TaskStatus::Failed.as_str())
+    .bind(TaskStatus::Running.as_str())
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|err| format!("mark running tasks as failed failed: {err}"))?;
+
+    let failed_completion_count = if task_ids.is_empty() {
+        0
+    } else {
+        let mut builder = QueryBuilder::<Postgres>::new("UPDATE completions SET status = ");
+        builder
+            .push_bind(CompletionStatus::Failed.as_str())
+            .push(" WHERE status = ")
+            .push_bind(CompletionStatus::Running.as_str())
+            .push(" AND task_id IN (");
+
+        let mut separated = builder.separated(", ");
+        for task_id in &task_ids {
+            separated.push_bind(task_id);
+        }
+        separated.push_unseparated(")");
+
+        builder
+            .build()
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| format!("mark running completions as failed failed: {err}"))?
+            .rows_affected()
+    };
+
+    tx.commit()
+        .await
+        .map_err(|err| format!("commit startup recovery transaction failed: {err}"))?;
+
+    Ok(StartupRecoveryStats {
+        failed_task_count: task_ids.len() as u64,
+        failed_completion_count,
+    })
 }
