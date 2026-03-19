@@ -86,13 +86,10 @@ impl BrowseComp {
     }
 }
 
-fn build_system_prompt() -> &'static str {
-    "You are a browsing benchmark assistant. Think through the question carefully and then answer directly."
-}
-
 fn build_user_prompt(question: &str) -> String {
     format!(
         concat!(
+            "You are a browsing benchmark assistant. Think through the question carefully and then answer directly.\n\n",
             "Answer the following browsing-intensive question using your own knowledge.\n",
             "Do not refuse by asking the user to search the web themselves.\n",
             "If you are uncertain, still provide your best concrete answer.\n\n",
@@ -161,10 +158,7 @@ impl Benchmark for BrowseComp {
         assert_eq!(cot_mode, CoTMode::CoT, "browsecomp only supports CoT");
         assert_eq!(n_shot, 0, "browsecomp only supports 0-shot");
 
-        build_browsecomp_expected_context(
-            build_system_prompt(),
-                &build_user_prompt(&self.test[index].question),
-        )
+        build_browsecomp_expected_context(&build_user_prompt(&self.test[index].question))
     }
 
     fn get_ref_answer(&self, index: usize) -> String {

@@ -88,13 +88,10 @@ impl BrowseCompZh {
     }
 }
 
-fn build_system_prompt() -> &'static str {
-    "你是一个浏览基准测试助手。请先仔细思考，再直接回答问题。"
-}
-
 fn build_user_prompt(question: &str) -> String {
     format!(
         concat!(
+            "你是一个浏览基准测试助手。请先仔细思考，再直接回答问题。\n\n",
             "请基于你自己的知识回答下面这个需要较强检索能力的问题。\n",
             "不要通过让用户自己去搜索网页来回避作答。\n",
             "即使你不完全确定，也要给出你当前最具体的答案。\n\n",
@@ -163,10 +160,7 @@ impl Benchmark for BrowseCompZh {
         assert_eq!(cot_mode, CoTMode::CoT, "browsecomp_zh only supports CoT");
         assert_eq!(n_shot, 0, "browsecomp_zh only supports 0-shot");
 
-        build_browsecomp_expected_context(
-            build_system_prompt(),
-            &build_user_prompt(&self.test[index].question),
-        )
+        build_browsecomp_expected_context(&build_user_prompt(&self.test[index].question))
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
