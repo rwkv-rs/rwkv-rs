@@ -138,7 +138,14 @@ fn build_browsecomp_cot_prompt(expected_context: &str) -> String {
 
 fn build_browsecomp_answer_prompt(expected_context: &str, cot: &str) -> String {
     format!(
-        "{}Explanation: ",
+        concat!(
+            "{}",
+            "Now continue by completing the final answer in this exact format:\n",
+            "Explanation: <brief explanation>\n",
+            "Exact Answer: <succinct final answer>\n",
+            "Confidence: <0% to 100%>\n\n",
+            "Explanation: "
+        ),
         build_browsecomp_turn_completion_prompt(expected_context, cot)
     )
 }
@@ -190,6 +197,8 @@ pub async fn generate_browsecomp_answer(
     .to_string();
     let answer = if answer_body.is_empty() {
         String::new()
+    } else if answer_body.starts_with("Explanation:") {
+        answer_body.clone()
     } else {
         format!("Explanation: {answer_body}")
     };
@@ -389,7 +398,14 @@ mod tests {
         let prompt = build_browsecomp_answer_prompt("User: user\n\nAssistant: <think>", "reasoning");
         assert_eq!(
             prompt,
-            "User: user\n\nAssistant: <think>reasoning</think>\nExplanation: "
+            concat!(
+                "User: user\n\nAssistant: <think>reasoning</think>\n",
+                "Now continue by completing the final answer in this exact format:\n",
+                "Explanation: <brief explanation>\n",
+                "Exact Answer: <succinct final answer>\n",
+                "Confidence: <0% to 100%>\n\n",
+                "Explanation: "
+            )
         );
     }
 
