@@ -210,10 +210,7 @@ fn spawn_attempt(
             )
             .await?;
 
-            if !record.is_passed {
-                let checker_runtime = checker_runtime
-                    .as_ref()
-                    .ok_or_else(|| "failed attempt requires checker runtime".to_string())?;
+            if let Some(checker_runtime) = checker_runtime.as_ref().filter(|_| !record.is_passed) {
                 run_and_store_checker(
                     db,
                     PendingChecker {

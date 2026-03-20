@@ -11,6 +11,7 @@ use super::runtime::{AttemptKey, PendingChecker, TaskExecutionState};
 pub(crate) async fn prepare_task_execution(
     db: &Db,
     run_mode: RunMode,
+    skip_checker: bool,
     identity: TaskIdentity,
     insert: TaskInsert,
 ) -> Result<TaskExecutionState, String> {
@@ -67,16 +68,20 @@ pub(crate) async fn prepare_task_execution(
                     .iter()
                     .map(|record| (AttemptKey::from(record.key), record.is_passed))
                     .collect(),
-                pending_checks: existing
-                    .into_iter()
-                    .filter(|record| !record.is_passed && !record.has_checker)
-                    .map(|record| PendingChecker {
-                        completions_id: record.completions_id,
-                        context: record.context,
-                        answer: record.answer,
-                        ref_answer: record.ref_answer,
-                    })
-                    .collect(),
+                pending_checks: if skip_checker {
+                    Vec::new()
+                } else {
+                    existing
+                        .into_iter()
+                        .filter(|record| !record.is_passed && !record.has_checker)
+                        .map(|record| PendingChecker {
+                            completions_id: record.completions_id,
+                            context: record.context,
+                            answer: record.answer,
+                            ref_answer: record.ref_answer,
+                        })
+                        .collect()
+                },
             })
         }
         RunMode::Rerun => {

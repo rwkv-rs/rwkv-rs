@@ -19,6 +19,7 @@ examples/rwkv-lm-eval/
 - Use `--eval-config <name>` with the config file stem only, no `.toml` suffix.
 - Runtime control is now part of `eval/*.toml`, not CLI flags:
   - `run_mode`
+  - `skip_checker`
   - `attempt_concurrency`
   - `judger_concurrency`
   - `checker_concurrency`
@@ -121,6 +122,7 @@ Relevant fields in `example.toml`:
 experiment_name = "your_experiment_name"
 experiment_desc = "desc desc"
 run_mode = "new"
+skip_checker = false
 attempt_concurrency = 8
 judger_concurrency = 8
 checker_concurrency = 8
@@ -129,9 +131,10 @@ git_hash = "a8dc285c786fc425c9effee232453213b4b5ce8e"
 ```
 
 - `run_mode` must be one of `new`, `resume`, `rerun`.
+- `skip_checker = true` disables checker requests and skips retrying missing checker rows on `resume`.
 - `attempt_concurrency` must be `> 0`.
 - `judger_concurrency` must be `> 0`.
-- `checker_concurrency` must be `> 0`.
+- `checker_concurrency` must be `> 0` when checker is enabled.
 - `db_pool_max_connections` must be `> 0`.
 - `upload_to_space = false` is the default dry-run path.
 - `run_mode = resume` requires `upload_to_space = true`.
@@ -142,6 +145,7 @@ git_hash = "a8dc285c786fc425c9effee232453213b4b5ce8e"
 - Failed answers additionally write one `checker` row.
 - `checker` only runs for attempts with `eval.is_passed = false`.
 - `checker` is diagnostic only and does not change `eval.is_passed` or `scores`.
+- `skip_checker = true` keeps failed attempts in `eval` but skips checker persistence entirely.
 - On startup, any persisted `Running` task is marked `Failed`; related `Running` completions are also marked `Failed`.
 - If an attempt fails at runtime, the task is marked `Failed` and the process stops.
 - `scores` are written only after the task has a complete set of successful attempts.

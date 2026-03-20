@@ -88,16 +88,20 @@ pub async fn evaluating(
     let llm_checker_cfg = eval_cfg.llm_checker.clone();
     let judger_semaphore = Arc::new(Semaphore::new(options.judger_concurrency));
     set_llm_judger_semaphore(Arc::clone(&judger_semaphore));
-    let checker_runtime = db.as_ref().map(|_| {
-        Arc::new(CheckerRuntime {
-            model_name: llm_checker_cfg.model.clone(),
-            client: Arc::new(build_client(
-                &llm_checker_cfg.base_url,
-                &llm_checker_cfg.api_key,
-            )),
-            semaphore: Arc::new(Semaphore::new(options.checker_concurrency)),
+    let checker_runtime = if options.skip_checker {
+        None
+    } else {
+        db.as_ref().map(|_| {
+            Arc::new(CheckerRuntime {
+                model_name: llm_checker_cfg.model.clone(),
+                client: Arc::new(build_client(
+                    &llm_checker_cfg.base_url,
+                    &llm_checker_cfg.api_key,
+                )),
+                semaphore: Arc::new(Semaphore::new(options.checker_concurrency)),
+            })
         })
-    });
+    };
     let llm_judger_client = Arc::new(build_client(
         &llm_judger_cfg.base_url,
         &llm_judger_cfg.api_key,
@@ -105,6 +109,7 @@ pub async fn evaluating(
 
     println!("experiment: {experiment_name}");
     println!("run mode: {}", options.run_mode.as_str());
+    println!("skip checker: {}", options.skip_checker);
     println!("attempt concurrency: {}", options.attempt_concurrency);
     println!("judger concurrency: {}", options.judger_concurrency);
     println!("checker concurrency: {}", options.checker_concurrency);
@@ -278,6 +283,7 @@ async fn run_target_model(
                     prepare_task_execution(
                         db,
                         options.run_mode,
+                        options.skip_checker,
                         crate::db::TaskIdentity {
                             config_path: Some(config_path.display().to_string()),
                             evaluator: EVALUATOR_NAME.to_string(),
