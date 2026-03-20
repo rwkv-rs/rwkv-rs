@@ -1,4 +1,3 @@
-pub mod checker;
 pub mod config_path;
 pub mod db;
 pub mod evaluating;

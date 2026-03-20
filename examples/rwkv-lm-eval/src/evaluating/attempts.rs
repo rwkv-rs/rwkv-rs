@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
+use rwkv_eval::checkers::run_checker;
 use rwkv_eval::datasets::{Benchmark, CoTMode};
 use tokio::task::JoinSet;
 
-use crate::checker::run_checker;
 use crate::db::{
     CheckerInsert, CompletionInsert, CompletionStatus, Db, EvalInsert, insert_checker,
     insert_completion_and_eval,
