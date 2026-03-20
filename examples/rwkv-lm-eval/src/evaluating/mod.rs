@@ -405,7 +405,6 @@ async fn run_target_model(
                                 benchmark_info,
                                 &avg_k_plan,
                                 max_pass_k,
-                                &metrics.raw_success_counts,
                                 &metrics.pass_at_k_hits,
                                 metrics.passed,
                                 metrics.total,

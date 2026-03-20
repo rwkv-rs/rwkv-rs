@@ -5,7 +5,6 @@ use super::runtime::AttemptKey;
 use super::sampling::AvgKExecutionPlan;
 
 pub(crate) struct ComputedMetrics {
-    pub raw_success_counts: Vec<Vec<u8>>,
     pub pass_at_k_hits: BTreeMap<u8, usize>,
     pub passed: usize,
     pub total: usize,
@@ -17,12 +16,10 @@ pub(crate) fn compute_metrics(
     max_pass_k: u8,
     results: &BTreeMap<AttemptKey, bool>,
 ) -> Result<ComputedMetrics, String> {
-    let mut raw_success_counts = Vec::with_capacity(avg_k_plan.repeat_count);
     let mut pass_at_k_hits = BTreeMap::<u8, usize>::new();
+    let mut passed = 0usize;
 
     for avg_repeat_index in 0..avg_k_plan.repeat_count {
-        let mut success_counts = Vec::with_capacity(avg_k_plan.indices.len());
-
         for &index in &avg_k_plan.indices {
             let mut sample_attempts = Vec::with_capacity(max_pass_k as usize);
             for pass_index in 0..max_pass_k {
@@ -40,7 +37,9 @@ pub(crate) fn compute_metrics(
                 sample_attempts.push(is_passed);
             }
 
-            let success_count = sample_attempts.iter().filter(|&&passed| passed).count() as u8;
+            if sample_attempts.iter().any(|&passed| passed) {
+                passed += 1;
+            }
             for &pass_k in benchmark_info.pass_ks {
                 if sample_attempts
                     .iter()
@@ -50,21 +49,12 @@ pub(crate) fn compute_metrics(
                     *pass_at_k_hits.entry(pass_k).or_insert(0) += 1;
                 }
             }
-            success_counts.push(success_count);
         }
-
-        raw_success_counts.push(success_counts);
     }
 
-    let passed = raw_success_counts
-        .iter()
-        .flatten()
-        .filter(|&&success_count| success_count > 0)
-        .count();
     let total = avg_k_plan.repeat_count * avg_k_plan.indices.len();
 
     Ok(ComputedMetrics {
-        raw_success_counts,
         pass_at_k_hits,
         passed,
         total,
