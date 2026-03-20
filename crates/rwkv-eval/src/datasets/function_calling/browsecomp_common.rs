@@ -125,7 +125,7 @@ pub fn browsecomp_sample_limit() -> Option<usize> {
 }
 
 pub fn build_browsecomp_expected_context(user_prompt: &str) -> String {
-    format!("User: {user_prompt}\n\nAssistant: <think")
+    format!("User: {user_prompt}\n\nAssistant: <think>")
 }
 
 pub fn build_browsecomp_turn_completion_prompt(cot_context: &str, cot: &str) -> String {
@@ -172,7 +172,7 @@ pub async fn generate_browsecomp_answer(
     let answer_prompt = build_browsecomp_answer_prompt(expected_context, &cot);
     let mut answer_stop = vec!["\nUser:".to_string(), "\nAssistant:".to_string()];
     answer_stop.extend(
-        ["<think", "</think>"]
+        ["<think>", "</think>"]
             .into_iter()
             .chain(BROWSECOMP_CONTROL_MARKERS.iter().copied())
             .map(str::to_string),
@@ -183,7 +183,7 @@ pub async fn generate_browsecomp_answer(
         &answer_prompt,
         sampling_config,
         answer_stop,
-        256,
+        1024,
     )
     .await
     .trim()
@@ -369,27 +369,27 @@ mod tests {
     #[test]
     fn builds_browsecomp_expected_context() {
         let text = build_browsecomp_expected_context("user");
-        assert_eq!(text, "User: user\n\nAssistant: <think");
+        assert_eq!(text, "User: user\n\nAssistant: <think>");
     }
 
     #[test]
     fn builds_browsecomp_turn_completion_prompt() {
-        let prompt = build_browsecomp_turn_completion_prompt("Assistant: <think", "x");
-        assert_eq!(prompt, "Assistant: <thinkx</think>\n");
+        let prompt = build_browsecomp_turn_completion_prompt("Assistant: <think>", "x");
+        assert_eq!(prompt, "Assistant: <think>x</think>\n");
     }
 
     #[test]
     fn cot_prompt_excludes_placeholder_marker() {
-        let prompt = build_browsecomp_cot_prompt("User: user\n\nAssistant: <think");
-        assert_eq!(prompt, "User: user\n\nAssistant: <think");
+        let prompt = build_browsecomp_cot_prompt("User: user\n\nAssistant: <think>");
+        assert_eq!(prompt, "User: user\n\nAssistant: <think>");
     }
 
     #[test]
     fn answer_prompt_anchors_final_format() {
-        let prompt = build_browsecomp_answer_prompt("User: user\n\nAssistant: <think", "reasoning");
+        let prompt = build_browsecomp_answer_prompt("User: user\n\nAssistant: <think>", "reasoning");
         assert_eq!(
             prompt,
-            "User: user\n\nAssistant: <thinkreasoning</think>\nExplanation: "
+            "User: user\n\nAssistant: <think>reasoning</think>\nExplanation: "
         );
     }
 
