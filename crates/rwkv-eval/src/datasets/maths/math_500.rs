@@ -101,10 +101,12 @@ impl Benchmark for Math500 {
             "math_500",
             &[UrlDownloadFile {
                 relative_path: PathBuf::from("test.jsonl"),
-                url: "https://raw.githubusercontent.com/openai/prm800k/main/prm800k/math_splits/test.jsonl".to_string(),
+                url: "https://huggingface.co/datasets/HuggingFaceH4/MATH-500/raw/main/test.jsonl"
+                    .to_string(),
             }],
             1,
-        ).await;
+        )
+        .await;
         println!("math_500 dataset: {}", downloaded_path.display());
     }
 
