@@ -1,5 +1,5 @@
 use crate::datasets::SamplingConfig;
-use crate::inferers::{CompletionRequest, CompletionResponse};
+use crate::inferers::generate_text_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use microsandbox::{BaseSandbox, PythonSandbox, SandboxOptions, StartOptions};
@@ -35,17 +35,16 @@ pub async fn get_completion(
     stop: Vec<String>,
     max_tokens: u32,
 ) -> String {
-    let req = CompletionRequest::new(
-        model_name.to_string(),
-        prompt.into(),
+    generate_text_completion(
+        model_client,
+        model_name,
+        prompt,
         stop,
         max_tokens,
         sampling_config,
-        None,
-        None,
-    );
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
-    resp.choices[0].text.clone()
+    )
+    .await
+    .unwrap()
 }
 
 pub async fn ensure_microsandbox_available() -> Result<(), String> {

@@ -1,7 +1,22 @@
 use std::env;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
-use rwkv_config::{load_toml, raw::eval::RawEvalConfig, validated::eval::FinalEvalConfigBuilder};
+use once_cell::sync::Lazy;
+use rwkv_config::{
+    load_toml,
+    raw::eval::{ExtApiConfig, RawEvalConfig},
+    validated::eval::FinalEvalConfigBuilder,
+};
+
+#[derive(Clone, Debug, Default)]
+pub struct RuntimeExtApiConfigOverrides {
+    pub llm_judger: Option<ExtApiConfig>,
+    pub llm_checker: Option<ExtApiConfig>,
+}
+
+static RUNTIME_EXT_API_CONFIG_OVERRIDES: Lazy<RwLock<RuntimeExtApiConfigOverrides>> =
+    Lazy::new(|| RwLock::new(RuntimeExtApiConfigOverrides::default()));
 
 fn candidate_eval_cfg_paths(config_dir: &Path, eval_cfg_name: &str) -> [PathBuf; 3] {
     [
@@ -25,10 +40,38 @@ fn read_env_nonempty(names: &[&str]) -> Option<String> {
     })
 }
 
+fn is_env_override_required(value: &str) -> bool {
+    value.trim() == "env_override_required"
+}
+
 fn apply_eval_env_overrides(raw_eval_cfg: &mut RawEvalConfig) {
     let shared_ext_model = read_env_nonempty(&["RWKV_EVAL_EXT_MODEL"]);
     let shared_ext_base_url = read_env_nonempty(&["RWKV_EVAL_EXT_BASE_URL"]);
     let shared_ext_api_key = read_env_nonempty(&["RWKV_EVAL_EXT_API_KEY"]);
+    let target_model_override =
+        read_env_nonempty(&["RWKV_EVAL_TARGET_MODEL"]).or_else(|| shared_ext_model.clone());
+    let target_base_url_override =
+        read_env_nonempty(&["RWKV_EVAL_TARGET_BASE_URL"]).or_else(|| shared_ext_base_url.clone());
+    let target_api_key_override =
+        read_env_nonempty(&["RWKV_EVAL_TARGET_API_KEY"]).or_else(|| shared_ext_api_key.clone());
+
+    for model_cfg in &mut raw_eval_cfg.models {
+        if is_env_override_required(&model_cfg.model) {
+            if let Some(model) = target_model_override.clone() {
+                model_cfg.model = model;
+            }
+        }
+        if is_env_override_required(&model_cfg.base_url) {
+            if let Some(base_url) = target_base_url_override.clone() {
+                model_cfg.base_url = base_url;
+            }
+        }
+        if is_env_override_required(&model_cfg.api_key) {
+            if let Some(api_key) = target_api_key_override.clone() {
+                model_cfg.api_key = api_key;
+            }
+        }
+    }
 
     if let Some(model) =
         read_env_nonempty(&["RWKV_EVAL_LLM_JUDGER_MODEL"]).or_else(|| shared_ext_model.clone())
@@ -80,6 +123,24 @@ fn apply_eval_env_overrides(raw_eval_cfg: &mut RawEvalConfig) {
     if let Some(sslmode) = read_env_nonempty(&["RWKV_EVAL_SPACE_DB_SSLMODE"]) {
         raw_eval_cfg.space_db.sslmode = Some(sslmode);
     }
+}
+
+pub fn set_runtime_ext_api_config_overrides(
+    llm_judger: Option<ExtApiConfig>,
+    llm_checker: Option<ExtApiConfig>,
+) {
+    let mut guard = RUNTIME_EXT_API_CONFIG_OVERRIDES
+        .write()
+        .unwrap_or_else(|err| panic!("runtime ext api config overrides lock poisoned: {err}"));
+    guard.llm_judger = llm_judger;
+    guard.llm_checker = llm_checker;
+}
+
+pub fn runtime_ext_api_config_overrides() -> RuntimeExtApiConfigOverrides {
+    RUNTIME_EXT_API_CONFIG_OVERRIDES
+        .read()
+        .unwrap_or_else(|err| panic!("runtime ext api config overrides lock poisoned: {err}"))
+        .clone()
 }
 
 pub fn init_cfg<P: AsRef<Path>>(config_dir: P, eval_cfg_name: &str) -> FinalEvalConfigBuilder {

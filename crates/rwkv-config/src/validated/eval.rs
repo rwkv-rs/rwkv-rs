@@ -16,6 +16,8 @@ pub struct FinalEvalConfig {
     pub judger_concurrency: usize,
     pub checker_concurrency: usize,
     pub db_pool_max_connections: u32,
+    pub browsecomp_cot_max_tokens: u32,
+    pub browsecomp_answer_max_tokens: u32,
     pub model_arch_versions: Vec<String>,
     pub model_data_versions: Vec<String>,
     pub model_num_params: Vec<String>,

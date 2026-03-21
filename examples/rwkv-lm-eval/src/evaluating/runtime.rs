@@ -27,6 +27,8 @@ impl From<CompletionKey> for AttemptKey {
 pub(crate) struct AttemptOutcome {
     pub key: AttemptKey,
     pub is_passed: bool,
+    pub fail_reason: Option<String>,
+    pub context: Option<String>,
 }
 
 pub(crate) struct PendingChecker {

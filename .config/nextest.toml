@@ -1,0 +1,13 @@
+nextest-version = { recommended = "0.9.123" }
+
+[profile.default]
+retries = 0
+
+[test-groups]
+benchmark-downloads = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(test-unit)'
+test-group = 'benchmark-downloads'
+retries = { backoff = "fixed", count = 1, delay = "2s" }
+slow-timeout = { period = "5m", terminate-after = 2 }

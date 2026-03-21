@@ -1,7 +1,7 @@
 use crate::datasets::{
     CoTMode, SamplingConfig, apply_user_assistant_template, get_completions_of_cot, render_context,
 };
-use crate::inferers::{CompletionRequest, CompletionResponse};
+use crate::inferers::generate_text_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use once_cell::sync::OnceCell;
@@ -32,6 +32,7 @@ pub mod mawps;
 pub mod minerva_math;
 pub mod olympiadbench;
 pub mod omni_math;
+pub mod polymath;
 pub mod simpleqa;
 pub mod svamp;
 
@@ -201,18 +202,16 @@ async fn get_final_answer(
     prompt_for_final_answer: &str,
     sampling_config: &SamplingConfig,
 ) -> String {
-    let req = CompletionRequest::new(
-        model_name.to_string(),
-        prompt_for_final_answer.into(),
+    generate_text_completion(
+        model_client,
+        model_name,
+        &prompt_for_final_answer,
         vec![],
         128,
         sampling_config,
-        None,
-        None,
-    );
-
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
-    resp.choices[0].text.clone()
+    )
+    .await
+    .unwrap()
 }
 
 pub async fn judge_with_retry(

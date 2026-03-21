@@ -5,7 +5,7 @@ pub mod knowledge;
 pub mod maths;
 pub mod utils;
 
-use crate::inferers::{CompletionRequest, CompletionResponse};
+use crate::inferers::generate_text_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
@@ -133,19 +133,16 @@ pub async fn get_completions_of_cot(
     prompt_for_cot: &str,
     sampling_config: &SamplingConfig,
 ) -> String {
-    let req = CompletionRequest::new(
-        model_name.to_string(),
-        prompt_for_cot.into(),
+    generate_text_completion(
+        model_client,
+        model_name,
+        prompt_for_cot,
         vec!["</think>".to_string()],
         4096,
         &sampling_config,
-        None,
-        None,
-    );
-
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
-
-    resp.choices[0].text.clone()
+    )
+    .await
+    .unwrap()
 }
 
 pub fn get_prompt_for_final_answer(

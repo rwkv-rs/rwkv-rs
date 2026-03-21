@@ -54,6 +54,9 @@ pub(crate) async fn execute_attempts(
     while let Some(result) = join_set.join_next().await {
         match result {
             Ok(Ok(outcome)) => {
+                if !outcome.is_passed && db.is_none() {
+                    print_failed_attempt(&outcome);
+                }
                 task_results.insert(outcome.key, outcome.is_passed);
                 if let Some(next_key) = pending_iter.next() {
                     spawn_attempt(
@@ -231,8 +234,54 @@ fn spawn_attempt(
         Ok(AttemptOutcome {
             key,
             is_passed: record.is_passed,
+            fail_reason: (!record.is_passed).then(|| record.fail_reason.clone()),
+            context: (!record.is_passed).then(|| record.context.clone()),
         })
     });
+}
+
+fn print_failed_attempt(outcome: &AttemptOutcome) {
+    println!(
+        "    failed sample_index={} avg_repeat_index={} pass_index={}",
+        outcome.key.sample_index, outcome.key.avg_repeat_index, outcome.key.pass_index,
+    );
+    println!(
+        "      fail_reason:\n{}",
+        indent_block(
+            &truncate_for_log(outcome.fail_reason.as_deref().unwrap_or_default(), 600,),
+            "        "
+        )
+    );
+    println!(
+        "      context:\n{}",
+        indent_block(
+            &truncate_for_log(outcome.context.as_deref().unwrap_or_default(), 2000),
+            "        "
+        )
+    );
+}
+
+fn truncate_for_log(value: &str, max_chars: usize) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "<empty>".to_string();
+    }
+
+    let mut chars = trimmed.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}\n...<truncated>")
+    } else {
+        truncated
+    }
+}
+
+fn indent_block(value: &str, prefix: &str) -> String {
+    value
+        .lines()
+        .map(|line| format!("{prefix}{line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn spawn_pending_checker(

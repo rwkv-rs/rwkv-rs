@@ -496,12 +496,12 @@ fn build_tool_prompt_preamble(
 
 #[cfg(test)]
 mod tests {
-    use sonic_rs::from_str;
     use super::*;
     use crate::access::http_api::{
         ChatCompletionNamedToolChoice, ChatCompletionNamedToolChoiceFunction,
         ChatCompletionToolFunction, ChatMessage,
     };
+    use sonic_rs::from_str;
 
     fn base_chat_request() -> ChatCompletionRequest {
         ChatCompletionRequest {

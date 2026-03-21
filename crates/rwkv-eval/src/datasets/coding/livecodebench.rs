@@ -1,5 +1,5 @@
 use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
-use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
+use crate::datasets::utils::hf::downloader::download_hf_files;
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
@@ -128,17 +128,15 @@ impl Benchmark for LiveCodeBench {
             "test5.jsonl",
             "test6.jsonl",
         ];
-        let files = file_names
-            .iter()
-            .map(|file_name| UrlDownloadFile {
-                relative_path: PathBuf::from(file_name),
-                url: format!(
-                    "https://huggingface.co/datasets/livecodebench/code_generation_lite/resolve/main/{file_name}"
-                ),
-            })
-            .collect::<Vec<_>>();
-        let downloaded_path =
-            download_url_files(&self.dataset_root, "livecodebench", &files, 1).await;
+        let downloaded_path = download_hf_files(
+            &self.dataset_root,
+            "livecodebench",
+            "datasets/livecodebench/code_generation_lite",
+            &file_names,
+            1,
+            "main",
+        )
+        .await;
         println!("livecodebench dataset: {}", downloaded_path.display());
     }
 

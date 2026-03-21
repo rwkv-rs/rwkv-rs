@@ -1,5 +1,7 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
+use reqwest::Client;
 use serde::Deserialize;
 use sonic_rs::{Value, prelude::*};
 
@@ -29,8 +31,16 @@ struct ParquetResponse {
     parquet_files: Vec<ParquetFile>,
 }
 
+fn new_http_client() -> Client {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(60))
+        .build()
+        .unwrap_or_else(|err| panic!("构建 HF viewer HTTP client 失败: {err}"))
+}
+
 pub async fn get_parquet_files(dataset: &str) -> Vec<ParquetFile> {
-    let body = reqwest::Client::new()
+    let body = new_http_client()
         .get(PARQUET_ENDPOINT)
         .query(&[("dataset", dataset)])
         .send()
@@ -46,7 +56,7 @@ pub async fn get_parquet_files(dataset: &str) -> Vec<ParquetFile> {
 }
 
 pub async fn get_split_row_count(dataset: &str, config: &str, split: &str) -> usize {
-    let body = reqwest::Client::new()
+    let body = new_http_client()
         .get(ROWS_ENDPOINT)
         .query(&[
             ("dataset", dataset),

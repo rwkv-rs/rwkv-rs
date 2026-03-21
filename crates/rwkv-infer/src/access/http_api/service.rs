@@ -836,7 +836,7 @@ fn build_chat_prompt(
     }
     prompt.push_str("Assistant: ");
     if !structured_output {
-        prompt.push_str("<think");
+        prompt.push_str("<think>");
     }
     Ok(prompt)
 }
@@ -919,5 +919,22 @@ mod tests {
         assert_eq!(choice.finish_reason.as_deref(), Some("stop"));
         assert_eq!(choice.message.content.as_deref(), Some("not valid json"));
         assert!(choice.message.tool_calls.is_none());
+    }
+
+    #[test]
+    fn build_chat_prompt_uses_complete_think_tag_for_plain_text() {
+        let prompt = build_chat_prompt(
+            &[ChatMessage {
+                role: "user".to_string(),
+                content: Some("hello".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            }],
+            None,
+            false,
+        )
+        .expect("build prompt");
+
+        assert_eq!(prompt, "User: hello\n\nAssistant: <think>");
     }
 }

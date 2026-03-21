@@ -18,6 +18,7 @@ use std::sync::Arc;
 use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfigBuilder};
 use rwkv_eval::datasets::Benchmark;
 use rwkv_eval::datasets::maths::set_llm_judger_semaphore;
+use rwkv_eval::init::set_runtime_ext_api_config_overrides;
 use tokio::sync::Semaphore;
 
 use crate::db::{
@@ -30,7 +31,9 @@ use self::benchmark::{
     collect_benchmarks, ensure_microsandbox_for_coding_benchmarks, prepare_benchmark,
     validate_benchmark_info,
 };
-use self::client::{ClientWithConfig, build_client, check_chat_client, check_completion_client};
+use self::client::{
+    ClientWithConfig, build_client, check_completion_client, resolve_chat_ext_api_config,
+};
 use self::db::connect_db_if_configured;
 use self::metrics::compute_metrics;
 use self::models::{collect_models, model_cache_key};
@@ -84,8 +87,28 @@ pub async fn evaluating(
             })
         })
         .collect::<Vec<_>>();
-    let llm_judger_cfg = eval_cfg.llm_judger.clone();
-    let llm_checker_cfg = eval_cfg.llm_checker.clone();
+    let llm_judger_cfg = resolve_chat_ext_api_config(
+        "llm_judger",
+        &eval_cfg.llm_judger,
+        "RWKV_EVAL_LLM_JUDGER_MODELS",
+        "RWKV_EVAL_EXT_MODELS",
+    )
+    .await;
+    let llm_checker_cfg = if db.is_some() {
+        resolve_chat_ext_api_config(
+            "llm_checker",
+            &eval_cfg.llm_checker,
+            "RWKV_EVAL_LLM_CHECKER_MODELS",
+            "RWKV_EVAL_EXT_MODELS",
+        )
+        .await
+    } else {
+        eval_cfg.llm_checker.clone()
+    };
+    set_runtime_ext_api_config_overrides(
+        Some(llm_judger_cfg.clone()),
+        db.as_ref().map(|_| llm_checker_cfg.clone()),
+    );
     let judger_semaphore = Arc::new(Semaphore::new(options.judger_concurrency));
     set_llm_judger_semaphore(Arc::clone(&judger_semaphore));
     let checker_runtime = db.as_ref().map(|_| {
@@ -113,13 +136,13 @@ pub async fn evaluating(
         options.db_pool_max_connections
     );
     println!("target models: {}", clients_with_cfg.len());
+    println!("llm judger model: {}", llm_judger_cfg.model);
+    if db.is_some() {
+        println!("llm checker model: {}", llm_checker_cfg.model);
+    }
 
     for target_model in &clients_with_cfg {
         check_completion_client(&target_model.client, &target_model.api_cfg.model).await;
-    }
-    check_chat_client(&llm_judger_client, &llm_judger_cfg.model).await;
-    if let Some(checker_runtime) = checker_runtime.as_ref() {
-        check_chat_client(checker_runtime.client.as_ref(), &llm_checker_cfg.model).await;
     }
 
     let mut model_ids = BTreeMap::new();

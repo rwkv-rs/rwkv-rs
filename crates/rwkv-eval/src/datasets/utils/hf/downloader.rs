@@ -19,6 +19,14 @@ pub struct UrlDownloadFile {
     pub url: String,
 }
 
+fn new_http_client() -> Client {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(60))
+        .build()
+        .unwrap_or_else(|err| panic!("构建 HTTP client 失败: {err}"))
+}
+
 pub async fn download_hf_repo<P: AsRef<Path>>(
     path: P,
     repo: &str,
@@ -63,7 +71,7 @@ pub async fn download_hf_repo<P: AsRef<Path>>(
     let base = hf_base_url(token.as_deref())
         .trim_end_matches('/')
         .to_string();
-    let client = Client::new();
+    let client = new_http_client();
     let sem = Arc::new(Semaphore::new(tasks));
 
     let mut handles = Vec::with_capacity(lfs.len());
@@ -165,7 +173,7 @@ pub async fn download_url_files<P: AsRef<Path>>(
     );
     pb.set_message(format!("Downloading URL files ({} files)", files.len()));
 
-    let client = Client::new();
+    let client = new_http_client();
     let sem = Arc::new(Semaphore::new(tasks));
 
     let mut handles = Vec::with_capacity(files.len());
@@ -183,13 +191,20 @@ pub async fn download_url_files<P: AsRef<Path>>(
             let _permit = permit;
             let out_path = root_dir.join(&file.relative_path);
 
-            let body = retry(
+            if let Some(parent) = out_path.parent() {
+                create_dir_all(parent).unwrap_or_else(|e| {
+                    panic!("创建文件父目录失败: {}. error: {}", parent.display(), e);
+                });
+            }
+
+            retry(
                 &format!("下载文件 {}", file.relative_path.display()),
                 || {
                     let client = client.clone();
                     let url = file.url.clone();
+                    let out_path = out_path.clone();
                     async move {
-                        let resp = client
+                        let mut resp = client
                             .get(&url)
                             .send()
                             .await
@@ -198,29 +213,28 @@ pub async fn download_url_files<P: AsRef<Path>>(
                         if !status.is_success() {
                             return Err(format!("HTTP 状态码异常: {}", status));
                         }
-                        resp.bytes()
+
+                        let mut output = File::create(&out_path).map_err(|e| {
+                            format!("创建输出文件失败: {}. error: {}", out_path.display(), e)
+                        })?;
+                        while let Some(chunk) = resp
+                            .chunk()
                             .await
-                            .map_err(|e| format!("读取响应体失败: {}", e))
+                            .map_err(|e| format!("读取响应体失败: {}", e))?
+                        {
+                            output.write_all(&chunk).map_err(|e| {
+                                format!("写入文件失败: {}. error: {}", out_path.display(), e)
+                            })?;
+                        }
+                        output.flush().map_err(|e| {
+                            format!("刷新文件失败: {}. error: {}", out_path.display(), e)
+                        })?;
+
+                        Ok(())
                     }
                 },
             )
             .await;
-
-            if let Some(parent) = out_path.parent() {
-                create_dir_all(parent).unwrap_or_else(|e| {
-                    panic!("创建文件父目录失败: {}. error: {}", parent.display(), e);
-                });
-            }
-
-            let mut output = File::create(&out_path).unwrap_or_else(|e| {
-                panic!("创建输出文件失败: {}. error: {}", out_path.display(), e);
-            });
-            output.write_all(&body).unwrap_or_else(|e| {
-                panic!("写入文件失败: {}. error: {}", out_path.display(), e);
-            });
-            output.flush().unwrap_or_else(|e| {
-                panic!("刷新文件失败: {}. error: {}", out_path.display(), e);
-            });
             pb.inc(1);
         }));
     }
@@ -277,7 +291,7 @@ pub async fn download_hf_files<P: AsRef<Path>>(
     let base = hf_base_url(token.as_deref())
         .trim_end_matches('/')
         .to_string();
-    let client = Client::new();
+    let client = new_http_client();
     let sem = Arc::new(Semaphore::new(tasks));
 
     let mut handles = Vec::with_capacity(files.len());
@@ -301,12 +315,19 @@ pub async fn download_hf_files<P: AsRef<Path>>(
             let url = build_hf_resolve_url(&base, &repo_id, &revision, &rel_path);
             let out_path = root_dir.join(&rel_path);
 
-            let body = retry(&format!("下载文件 {}", rel_path), || {
+            if let Some(parent) = out_path.parent() {
+                create_dir_all(parent).unwrap_or_else(|e| {
+                    panic!("创建文件父目录失败: {}. error: {}", parent.display(), e);
+                });
+            }
+
+            retry(&format!("下载文件 {}", rel_path), || {
                 let client = client.clone();
                 let url = url.clone();
                 let token = token.clone();
+                let out_path = out_path.clone();
                 async move {
-                    let resp = with_optional_auth(client.get(&url), token.as_deref())
+                    let mut resp = with_optional_auth(client.get(&url), token.as_deref())
                         .send()
                         .await
                         .map_err(|e| format!("请求发送失败: {}", e))?;
@@ -314,28 +335,27 @@ pub async fn download_hf_files<P: AsRef<Path>>(
                     if !status.is_success() {
                         return Err(format!("HTTP 状态码异常: {}", status));
                     }
-                    resp.bytes()
+
+                    let mut file = File::create(&out_path).map_err(|e| {
+                        format!("创建输出文件失败: {}. error: {}", out_path.display(), e)
+                    })?;
+                    while let Some(chunk) = resp
+                        .chunk()
                         .await
-                        .map_err(|e| format!("读取响应体失败: {}", e))
+                        .map_err(|e| format!("读取响应体失败: {}", e))?
+                    {
+                        file.write_all(&chunk).map_err(|e| {
+                            format!("写入文件失败: {}. error: {}", out_path.display(), e)
+                        })?;
+                    }
+                    file.flush().map_err(|e| {
+                        format!("刷新文件失败: {}. error: {}", out_path.display(), e)
+                    })?;
+
+                    Ok(())
                 }
             })
             .await;
-
-            if let Some(parent) = out_path.parent() {
-                create_dir_all(parent).unwrap_or_else(|e| {
-                    panic!("创建文件父目录失败: {}. error: {}", parent.display(), e);
-                });
-            }
-
-            let mut file = File::create(&out_path).unwrap_or_else(|e| {
-                panic!("创建输出文件失败: {}. error: {}", out_path.display(), e);
-            });
-            file.write_all(&body).unwrap_or_else(|e| {
-                panic!("写入文件失败: {}. error: {}", out_path.display(), e);
-            });
-            file.flush().unwrap_or_else(|e| {
-                panic!("刷新文件失败: {}. error: {}", out_path.display(), e);
-            });
             pb.inc(1);
         }));
     }

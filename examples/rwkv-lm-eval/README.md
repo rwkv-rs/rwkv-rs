@@ -112,6 +112,8 @@ Model config types:
 - `[[models]]` must provide `model_arch_version`, `model_data_version`, `model_num_params`
 - `[llm_judger]` and `[llm_checker]` use `ExtApiConfig`
 - `ExtApiConfig` only requires `base_url`, `api_key`, `model`
+- `.env` also supports `RWKV_EVAL_EXT_MODELS` plus role-specific `RWKV_EVAL_LLM_JUDGER_MODELS` / `RWKV_EVAL_LLM_CHECKER_MODELS`
+- Fallback model lists are tried in order against the same `base_url` and `api_key`; the first healthy OpenAI-compatible chat model is selected at runtime
 
 ## Config Notes
 

@@ -5,6 +5,8 @@ attempt_concurrency = 4
 judger_concurrency = 4
 checker_concurrency = 1
 db_pool_max_connections = 8
+browsecomp_cot_max_tokens = 2048
+browsecomp_answer_max_tokens = 1024
 
 model_arch_versions = ["rwkv7"]
 model_data_versions = ["g1e"]

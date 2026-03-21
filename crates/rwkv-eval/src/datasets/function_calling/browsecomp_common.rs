@@ -4,6 +4,7 @@ use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use rwkv_config::validated::eval::EVAL_CFG;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sonic_rs::{Value, json};
@@ -111,9 +112,9 @@ pub fn browsecomp_sample_limit() -> Option<usize> {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .map(|value| {
-            value.parse::<usize>().unwrap_or_else(|err| {
-                panic!("invalid RWKV_EVAL_BROWSECOMP_LIMIT `{value}`: {err}")
-            })
+            value
+                .parse::<usize>()
+                .unwrap_or_else(|err| panic!("invalid RWKV_EVAL_BROWSECOMP_LIMIT `{value}`: {err}"))
         })
         .map(|limit| {
             assert!(
@@ -150,6 +151,20 @@ fn build_browsecomp_answer_prompt(expected_context: &str, cot: &str) -> String {
     )
 }
 
+fn browsecomp_cot_max_tokens() -> u32 {
+    EVAL_CFG
+        .get()
+        .map(|cfg| cfg.browsecomp_cot_max_tokens)
+        .unwrap_or(2048)
+}
+
+fn browsecomp_answer_max_tokens() -> u32 {
+    EVAL_CFG
+        .get()
+        .map(|cfg| cfg.browsecomp_answer_max_tokens)
+        .unwrap_or(1024)
+}
+
 pub async fn generate_browsecomp_answer(
     model_client: &Client<OpenAIConfig>,
     model_name: &str,
@@ -173,7 +188,7 @@ pub async fn generate_browsecomp_answer(
         &cot_prompt,
         sampling_config,
         cot_stop,
-        2048,
+        browsecomp_cot_max_tokens(),
     )
     .await;
     let answer_prompt = build_browsecomp_answer_prompt(expected_context, &cot);
@@ -190,7 +205,7 @@ pub async fn generate_browsecomp_answer(
         &answer_prompt,
         sampling_config,
         answer_stop,
-        1024,
+        browsecomp_answer_max_tokens(),
     )
     .await
     .trim()
@@ -395,7 +410,8 @@ mod tests {
 
     #[test]
     fn answer_prompt_anchors_final_format() {
-        let prompt = build_browsecomp_answer_prompt("User: user\n\nAssistant: <think>", "reasoning");
+        let prompt =
+            build_browsecomp_answer_prompt("User: user\n\nAssistant: <think>", "reasoning");
         assert_eq!(
             prompt,
             concat!(

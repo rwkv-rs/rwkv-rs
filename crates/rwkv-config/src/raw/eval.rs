@@ -11,6 +11,8 @@ pub struct RawEvalConfig {
     pub judger_concurrency: Option<usize>,
     pub checker_concurrency: Option<usize>,
     pub db_pool_max_connections: Option<u32>,
+    pub browsecomp_cot_max_tokens: Option<u32>,
+    pub browsecomp_answer_max_tokens: Option<u32>,
     pub model_arch_versions: Vec<String>,
     pub model_data_versions: Vec<String>,
     pub model_num_params: Vec<String>,
@@ -33,7 +35,9 @@ impl RawEvalConfig {
             attempt_concurrency: 8,
             judger_concurrency: 8,
             checker_concurrency: 8,
-            db_pool_max_connections: 32
+            db_pool_max_connections: 32,
+            browsecomp_cot_max_tokens: 2048,
+            browsecomp_answer_max_tokens: 1024
         );
         self.space_db.fill_default();
     }

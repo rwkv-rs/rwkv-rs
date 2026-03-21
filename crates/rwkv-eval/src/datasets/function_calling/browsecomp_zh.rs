@@ -1,6 +1,6 @@
 use super::browsecomp_common::{
-    BrowseCompLocale, browsecomp_sample_limit, build_browsecomp_expected_context, decrypt_xor_base64,
-    generate_browsecomp_answer, judge_with_retry,
+    BrowseCompLocale, browsecomp_sample_limit, build_browsecomp_expected_context,
+    decrypt_xor_base64, generate_browsecomp_answer, judge_with_retry,
 };
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::{
