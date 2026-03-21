@@ -25,7 +25,11 @@ use rwkv_lm::paths;
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(feature = "trace")]
+use log::info;
 use tokio::net::TcpListener;
+#[cfg(feature = "trace")]
+use rwkv_bench::trace::init_tracing;
 
 #[cfg(not(any(feature = "f32", feature = "flex32", feature = "f16")))]
 type ElemType = rwkv::custom::tensor::bf16;
@@ -54,18 +58,14 @@ where
     let infer_cfg = get_arg_value(&args, "--infer-cfg").unwrap_or_else(|| "rwkv-7.2b-g1e".into());
 
     let log_dir = paths::logs_dir();
-    create_dir_all(&log_dir)
-        .map_err(|e| {
-            rwkv::infer::Error::Internal(format!(
-                "failed to create infer log directory {}: {e}",
-                log_dir.display()
-            ))
-        })
-        .unwrap();
+    create_dir_all(&log_dir).unwrap_or_else(|e| panic!(
+        "failed to create infer log directory {}: {e}",
+        log_dir.display()
+    ));
     #[cfg(not(feature = "trace"))]
     let log_dir_text = log_dir.to_string_lossy().to_string();
     #[cfg(feature = "trace")]
-    let trace_mode = rwkv::infer::trace::init_tracing("rwkv-lm-infer").unwrap();
+    let trace_mode = init_tracing("rwkv-lm-infer").unwrap();
 
     #[cfg(feature = "trace")]
     let _log_guard: Option<clia_tracing_config::WorkerGuard> = None;
@@ -105,13 +105,11 @@ where
 
     #[cfg(feature = "ipc")]
     let _ipc_server_thread = if loaded_model_registry.ipc_enabled() {
-        let server =
-            IpcServer::from_runtime_manager(loaded_model_registry.clone(), app.auth_cfg.clone())
-                .unwrap();
-        log::info!(
-            "starting iceoryx2 ipc service: {}",
-            loaded_model_registry.ipc_service_name()
-        );
+        let server = IpcServer::from_runtime_manager(
+            loaded_model_registry.clone(),
+            app.auth_cfg.clone()
+        ).unwrap();
+        info!("starting ipc service: {}", loaded_model_registry.ipc_service_name());
         Some(server.spawn().unwrap())
     } else {
         None
