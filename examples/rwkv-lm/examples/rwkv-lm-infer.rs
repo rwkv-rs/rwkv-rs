@@ -12,7 +12,7 @@ use axum::serve;
 use rwkv::config::{default_cfg_dir, get_arg_value};
 use rwkv::custom::prelude::Backend;
 use rwkv::infer::access::http_api::{HttpApiRouterBuilder, HttpApiState};
-#[cfg(feature = "ipc-iceoryx2")]
+#[cfg(feature = "ipc")]
 use rwkv::infer::access::ipc_api::IpcServer;
 use rwkv::infer::auth::AuthConfig;
 use rwkv::infer::model_pool::LoadedModelRegistry;
@@ -22,6 +22,7 @@ use rwkv::nn::kernels::token_shift_diff::TokenShiftDiffBackend;
 use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
 use rwkv_lm::inferring::RwkvLmEngineFactory;
 use rwkv_lm::paths;
+use std::fs::create_dir_all;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -35,7 +36,7 @@ type ElemType = rwkv::custom::tensor::flex32;
 #[cfg(feature = "f16")]
 type ElemType = rwkv::custom::tensor::f16;
 
-pub async fn launch<B>() -> rwkv::infer::Result<()>
+pub async fn launch<B>()
 where
     B: Backend
         + Wkv7Backend
@@ -50,19 +51,21 @@ where
     let config_dir = get_arg_value(&args, "--config-dir")
         .map(PathBuf::from)
         .unwrap_or_else(default_cfg_dir);
-    let infer_cfg = get_arg_value(&args, "--infer-cfg").unwrap_or_else(|| "rwkv-lm-7.2b".into());
+    let infer_cfg = get_arg_value(&args, "--infer-cfg").unwrap_or_else(|| "rwkv-7.2b-g1e".into());
 
     let log_dir = paths::logs_dir();
-    std::fs::create_dir_all(&log_dir).map_err(|e| {
-        rwkv::infer::Error::Internal(format!(
-            "failed to create infer log directory {}: {e}",
-            log_dir.display()
-        ))
-    })?;
+    create_dir_all(&log_dir)
+        .map_err(|e| {
+            rwkv::infer::Error::Internal(format!(
+                "failed to create infer log directory {}: {e}",
+                log_dir.display()
+            ))
+        })
+        .unwrap();
     #[cfg(not(feature = "trace"))]
     let log_dir_text = log_dir.to_string_lossy().to_string();
     #[cfg(feature = "trace")]
-    let trace_mode = rwkv::infer::trace::init_tracing("rwkv-lm-infer")?;
+    let trace_mode = rwkv::infer::trace::init_tracing("rwkv-lm-infer").unwrap();
 
     #[cfg(feature = "trace")]
     let _log_guard: Option<clia_tracing_config::WorkerGuard> = None;
@@ -84,11 +87,14 @@ where
     #[cfg(feature = "trace")]
     println!("trace mode: {trace_mode:?}");
 
-    let loaded_model_registry = Arc::new(LoadedModelRegistry::bootstrap(
-        config_dir,
-        infer_cfg,
-        Arc::new(RwkvLmEngineFactory::<B>::new()),
-    )?);
+    let loaded_model_registry = Arc::new(
+        LoadedModelRegistry::bootstrap(
+            config_dir,
+            infer_cfg,
+            Arc::new(RwkvLmEngineFactory::<B>::new()),
+        )
+        .unwrap(),
+    );
 
     let app = HttpApiState {
         auth_cfg: AuthConfig {
@@ -97,36 +103,41 @@ where
         runtime_manager: loaded_model_registry.clone(),
     };
 
-    #[cfg(feature = "ipc-iceoryx2")]
+    #[cfg(feature = "ipc")]
     let _ipc_server_thread = if loaded_model_registry.ipc_enabled() {
         let server =
-            IpcServer::from_runtime_manager(loaded_model_registry.clone(), app.auth_cfg.clone())?;
+            IpcServer::from_runtime_manager(loaded_model_registry.clone(), app.auth_cfg.clone())
+                .unwrap();
         log::info!(
             "starting iceoryx2 ipc service: {}",
             loaded_model_registry.ipc_service_name()
         );
-        Some(server.spawn()?)
+        Some(server.spawn().unwrap())
     } else {
         None
     };
 
-    #[cfg(not(feature = "ipc-iceoryx2"))]
-    if loaded_model_registry.ipc_enabled() {
-        return Err(rwkv::infer::Error::bad_request(
-            "ipc is enabled in infer config but feature `ipc-iceoryx2` is not enabled",
-        ));
-    }
+    #[cfg(not(feature = "ipc"))]
+    assert!(
+        loaded_model_registry.ipc_enabled(),
+        "ipc is enabled in infer config but feature `ipc` is not enabled"
+    );
 
-    let router = HttpApiRouterBuilder::new(app).build().await?;
+    let router = HttpApiRouterBuilder::new(app).build().await.unwrap();
 
     let bind_addr = loaded_model_registry.http_bind_addr();
-    let listener = TcpListener::bind(&bind_addr).await.map_err(|e| {
-        rwkv::infer::Error::Internal(format!("failed to bind http listener {}: {e}", bind_addr))
-    })?;
-    serve(listener, router).await.map_err(|e| {
-        rwkv::infer::Error::Internal(format!("inference server exited with IO error: {e}"))
-    })?;
-    Ok(())
+    let listener = TcpListener::bind(&bind_addr)
+        .await
+        .map_err(|e| {
+            rwkv::infer::Error::Internal(format!("failed to bind http listener {}: {e}", bind_addr))
+        })
+        .unwrap();
+    serve(listener, router)
+        .await
+        .map_err(|e| {
+            rwkv::infer::Error::Internal(format!("inference server exited with IO error: {e}"))
+        })
+        .unwrap();
 }
 
 #[cfg(feature = "wgpu")]
@@ -135,7 +146,7 @@ mod wgpu {
     use rwkv::custom::backend::Wgpu;
 
     pub async fn run() {
-        launch::<Wgpu<ElemType, i32>>().await.unwrap();
+        launch::<Wgpu<ElemType, i32>>().await;
     }
 }
 
@@ -145,7 +156,7 @@ mod vulkan {
     use rwkv::custom::backend::Vulkan;
 
     pub async fn run() {
-        launch::<Vulkan<ElemType, i32>>().await.unwrap();
+        launch::<Vulkan<ElemType, i32>>().await;
     }
 }
 
@@ -155,7 +166,7 @@ mod cuda {
     use rwkv::custom::backend::Cuda;
 
     pub async fn run() {
-        launch::<Cuda<ElemType, i32>>().await.unwrap();
+        launch::<Cuda<ElemType, i32>>().await;
     }
 }
 
@@ -165,7 +176,7 @@ mod rocm {
     use rwkv::custom::backend::Hip;
 
     pub async fn run() {
-        launch::<Hip<ElemType, i32>>().await.unwrap();
+        launch::<Hip<ElemType, i32>>().await;
     }
 }
 
@@ -175,7 +186,7 @@ mod metal {
     use rwkv::custom::backend::Metal;
 
     pub async fn run() {
-        launch::<Metal<ElemType, i32>>().await.unwrap();
+        launch::<Metal<ElemType, i32>>().await;
     }
 }
 

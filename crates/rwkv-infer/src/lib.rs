@@ -18,7 +18,7 @@ pub mod response_store;
 pub mod trace;
 
 pub use access::http_api::{AppState, HttpApiRouterBuilder, HttpApiState, RouterBuilder};
-#[cfg(feature = "ipc-iceoryx2")]
+#[cfg(feature = "ipc")]
 pub use access::ipc_api::{IpcClientConfig, IpcOpenAiClient, IpcServer, IpcServerConfig};
 pub use access::local_api::{LocalInferenceClient, RwkvInferClient};
 pub use error::{Error, Result};

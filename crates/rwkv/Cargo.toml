@@ -41,7 +41,7 @@ rocm = ["burn/rocm"]
 cpu = ["burn/cpu"]
 
 infer = ["dep:rwkv-infer", "rwkv-infer/http", "data"]
-infer-ipc = ["infer", "rwkv-infer/ipc-iceoryx2"]
+infer-ipc = ["infer", "rwkv-infer/ipc"]
 trace = ["rwkv-infer?/trace", "rwkv-train?/trace", "rwkv-nn?/trace"]
 nsys = ["rwkv-infer?/nsys", "rwkv-train?/nsys"]
 

@@ -75,7 +75,7 @@ pth2mpk = ["rwkv/store", "rwkv/cubecl", "nn", "std"]
 training = ["rwkv/train", "rwkv/cubecl", "metrics", "std"]
 trace = ["rwkv/trace", "dep:tracing"]
 nsys = ["rwkv/nsys", "dep:nvtx"]
-ipc-iceoryx2 = ["rwkv/infer-ipc"]
+ipc = ["rwkv/infer-ipc"]
 inferring = [
     "dep:tokio",
     "dep:axum",

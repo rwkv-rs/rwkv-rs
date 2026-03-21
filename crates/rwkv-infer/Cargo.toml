@@ -38,7 +38,7 @@ burn = { workspace = true, default-features = false, features = ["std", "autodif
 [features]
 default = ["http"]
 http = []
-ipc-iceoryx2 = ["dep:iceoryx2"]
+ipc = ["dep:iceoryx2"]
 trace = ["dep:tracing", "rwkv-bench/trace"]
 nsys = ["trace", "dep:nvtx"]
 
