@@ -128,16 +128,10 @@ where
     let bind_addr = loaded_model_registry.http_bind_addr();
     let listener = TcpListener::bind(&bind_addr)
         .await
-        .map_err(|e| {
-            rwkv::infer::Error::Internal(format!("failed to bind http listener {}: {e}", bind_addr))
-        })
-        .unwrap();
+        .unwrap_or_else(|e| panic!("failed to bind http listener {}: {e}", bind_addr));
     serve(listener, router)
         .await
-        .map_err(|e| {
-            rwkv::infer::Error::Internal(format!("inference server exited with IO error: {e}"))
-        })
-        .unwrap();
+        .unwrap_or_else(|e| panic!("inference server exited with IO error: {e}"));
 }
 
 #[cfg(feature = "wgpu")]
