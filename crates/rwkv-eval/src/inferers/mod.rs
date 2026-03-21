@@ -64,8 +64,8 @@ pub struct CompletionResponseChoice {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct CompletionLogprobs {
-    pub tokens: Vec<String>,
-    pub token_logprobs: Vec<Option<f32>>,
-    pub top_logprobs: Vec<BTreeMap<String, f32>>,
-    pub text_offset: Vec<usize>,
+    pub tokens: Option<Vec<String>>,
+    pub token_logprobs: Option<Vec<Option<f32>>>,
+    pub top_logprobs: Option<Vec<BTreeMap<String, f32>>>,
+    pub text_offset: Option<Vec<usize>>,
 }
