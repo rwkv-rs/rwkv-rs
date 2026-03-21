@@ -86,7 +86,8 @@ async fn get_final_answer(
     let choice_logprobs = resp.choices[0]
         .logprobs
         .as_ref()
-        .and_then(|logprobs| logprobs.top_logprobs.first())
+        .and_then(|logprobs| logprobs.top_logprobs.as_ref())
+        .and_then(|top_logprobs| top_logprobs.first())
         .unwrap();
 
     choice_token_texts
