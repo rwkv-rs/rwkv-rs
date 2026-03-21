@@ -217,7 +217,7 @@ impl IpcOpenAiClient {
     fn handshake(&self) -> crate::Result<()> {
         let payload = encode_json(&HandshakeRequest {
             version: IPC_PROTOCOL_VERSION,
-            client_name: Some("rwkv-infer-ipc-sdk".to_string()),
+            client_name: Some("rwkv-infer-old-ipc-sdk".to_string()),
         })?;
         let responses = self.send_request(RouteId::Handshake, false, payload)?;
         let handshake: HandshakeResponse = parse_single_data(responses, "handshake response")?;

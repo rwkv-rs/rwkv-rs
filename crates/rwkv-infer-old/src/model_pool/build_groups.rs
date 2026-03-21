@@ -4,8 +4,7 @@ use std::sync::Arc;
 use rwkv_config::raw::infer::GenerationConfig;
 
 use crate::inference_core::InferenceSubmitHandle;
-
-use super::LoadedModelGroup;
+use crate::model_pool::request_router::LoadedModelGroup;
 
 pub fn build_model_groups(
     model_group_engines: HashMap<String, Vec<Arc<InferenceSubmitHandle>>>,

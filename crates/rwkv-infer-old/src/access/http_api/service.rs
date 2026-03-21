@@ -18,18 +18,18 @@ use crate::access::http_api::{
 };
 use crate::inference_core::InferenceSubmitResult as SubmitOutput;
 use crate::inference_core::{EngineEvent, EntryId, FinishMetadata, InferenceOutput, StreamDelta};
-use crate::model_pool::LoadedModelRegistry as RuntimeManager;
+use crate::model_pool::loaded_model_registry::{LoadedModelRegistry, ModelsReloadPatch};
 use crate::response_store::{
     BackgroundTaskState, CachedResponse, GLOBAL_BACKGROUND_TASKS, GLOBAL_RESPONSE_CACHE,
 };
 
 #[derive(Clone)]
 pub struct HttpApiService {
-    runtime_manager: Arc<RuntimeManager>,
+    runtime_manager: Arc<LoadedModelRegistry>,
 }
 
 impl HttpApiService {
-    pub fn new(runtime_manager: Arc<RuntimeManager>) -> Self {
+    pub fn new(runtime_manager: Arc<LoadedModelRegistry>) -> Self {
         Self { runtime_manager }
     }
 
@@ -380,7 +380,7 @@ impl HttpApiService {
         &self,
         req: ReloadModelsRequest,
     ) -> crate::Result<ReloadModelsResponse> {
-        let patch = crate::model_pool::ModelsReloadPatch {
+        let patch = ModelsReloadPatch {
             upsert: req.upsert,
             remove_model_names: req.remove_model_names,
             dry_run: req.dry_run.unwrap_or(false),

@@ -43,7 +43,6 @@ trace = [
     "dep:rwkv-bench",
     "rwkv-bench/trace",
 ]
-nsys = ["trace", "dep:nvtx"]
 
 [dependencies]
 # === Deep Learning Core ===
@@ -87,7 +86,6 @@ derive-new = { workspace = true }
 # === Monitoring ===
 wandb = { workspace = true }
 indicatif = { workspace = true }
-nvtx = { workspace = true, optional = true }
 
 # === Local Dependencies ===
 rwkv-nn = { path = "../rwkv-nn", default-features = false, optional = true }

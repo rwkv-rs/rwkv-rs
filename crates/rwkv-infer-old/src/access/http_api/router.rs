@@ -12,7 +12,7 @@ use crate::access::http_api::HttpApiService;
 use crate::access::http_api::ModelListResponse;
 use crate::access::http_api::handlers;
 use crate::auth::AuthConfig;
-use crate::model_pool::LoadedModelRegistry;
+use crate::model_pool::loaded_model_registry::LoadedModelRegistry;
 
 #[derive(Clone)]
 pub struct HttpApiState {

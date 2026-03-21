@@ -111,8 +111,6 @@ impl MetricsRendererTraining for BarMetricsRenderer {
             train_kt_s = self.train_kilo_tokens_per_sec
         )
         .entered();
-        #[cfg(feature = "nsys")]
-        let _nvtx_step = nvtx::range!("rwkv.train.step");
 
         // Reset progress bar when epoch changes
         if epoch != self.epoch_index {

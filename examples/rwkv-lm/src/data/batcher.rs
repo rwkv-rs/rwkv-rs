@@ -47,8 +47,6 @@ impl<B: Backend, T: TokenUnit> Batcher<B, SlidingSample, AutoRegressiveBatch<B>>
 {
     fn batch(&self, items: Vec<SlidingSample>, device: &B::Device) -> AutoRegressiveBatch<B> {
         rwkv_bench::trace_lite_scope!("rwkv.train.data.batch");
-        #[cfg(feature = "nsys")]
-        let _nvtx_batch = nvtx::range!("rwkv.train.data.batch");
 
         let batch_size = items.len();
         let seq_len = self.context_length + 1;
