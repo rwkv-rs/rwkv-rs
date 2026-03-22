@@ -7,9 +7,7 @@ use burn_cubecl::{
 };
 
 use crate::kernels::backend::{BoolElement, CubeBackend, FloatElement, IntElement};
-use crate::kernels::token_shift_diff::{
-    TokenShiftDiffBackend, kernel::rwkv_token_shift_diff_kernel,
-};
+use crate::kernels::token_shift_diff::{TokenShiftDiffBackend, kernel::rwkv_token_shift_diff_kernel};
 
 const BLOCK_SIZE: u32 = 256;
 

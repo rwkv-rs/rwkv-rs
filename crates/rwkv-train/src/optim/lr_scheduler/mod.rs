@@ -1,6 +1,4 @@
-use burn::{
-    config::Config, lr_scheduler::LrScheduler, optim::LearningRate, tensor::backend::Backend,
-};
+use burn::{config::Config, lr_scheduler::LrScheduler, optim::LearningRate, tensor::backend::Backend};
 
 #[derive(Config, Debug)]
 

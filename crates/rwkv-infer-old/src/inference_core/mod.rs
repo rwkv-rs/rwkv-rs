@@ -14,9 +14,7 @@ pub mod tokenizer_loop;
 
 pub use batch_scheduler::{Scheduler, SchedulerStep};
 pub use constraint::{ConstraintSpec, ConstraintState, build_tokenizer_info_from_vocab};
-pub use execution_loop::{
-    InferenceExecutionConfig, InferenceExecutionLoop, LogitsOutput, ModelForward,
-};
+pub use execution_loop::{InferenceExecutionConfig, InferenceExecutionLoop, LogitsOutput, ModelForward};
 pub use logprobs::{
     RequestedTokenLogprobsConfig, SampledToken, SampledTokenLogprob, SampledTokenTopLogprob,
     TokenLogprobsConfig, build_sampled_token_logprob,

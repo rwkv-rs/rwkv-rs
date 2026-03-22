@@ -2,7 +2,7 @@ use crate::datasets::SamplingConfig;
 use crate::inferers::generate_text_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
-use microsandbox::{BaseSandbox, PythonSandbox, SandboxOptions, StartOptions};
+use microsandbox::sandbox::Sandbox;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static SANDBOX_COUNTER: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(1));
 
 const DEFAULT_MEMORY_MB: u32 = 512;
-const DEFAULT_CPUS: f32 = 1.0;
-const DEFAULT_START_TIMEOUT_SECS: f32 = 30.0;
+const DEFAULT_CPUS: u8 = 1;
+const PYTHON_IMAGE: &str = "python:3.12";
 
 #[derive(Debug, Clone)]
 pub struct SandboxVerdict {
@@ -71,38 +71,29 @@ print(json.dumps({"passed": True, "fail_reason": ""}))
 
 pub async fn run_python_verdict_script(script: &str) -> Result<SandboxVerdict, String> {
     let name = next_sandbox_name();
-    let options = SandboxOptions::builder().name(&name).build();
-    let mut sandbox = PythonSandbox::create_with_options(options)
+    let sandbox = Sandbox::builder(&name)
+        .image(PYTHON_IMAGE)
+        .memory(DEFAULT_MEMORY_MB)
+        .cpus(DEFAULT_CPUS)
+        .create()
         .await
         .map_err(|err| format!("create sandbox `{name}` failed: {err}"))?;
 
-    sandbox
-        .start(Some(StartOptions {
-            image: None,
-            memory: DEFAULT_MEMORY_MB,
-            cpus: DEFAULT_CPUS,
-            timeout: DEFAULT_START_TIMEOUT_SECS,
-        }))
-        .await
-        .map_err(|err| format!("start sandbox `{name}` failed: {err}"))?;
-
-    let execution = sandbox.run(script).await;
+    let execution = sandbox.exec("python", ["-c", script]).await;
     let stop_result = sandbox.stop().await;
+    let wait_result = sandbox.wait().await;
 
     if let Err(err) = stop_result {
         eprintln!("failed to stop microsandbox `{name}`: {err}");
     }
+    if let Err(err) = wait_result {
+        eprintln!("failed to wait microsandbox `{name}`: {err}");
+    }
 
     match execution {
         Ok(execution) => {
-            let stdout = execution
-                .output()
-                .await
-                .map_err(|err| format!("read stdout for sandbox `{name}` failed: {err}"))?;
-            let stderr = execution
-                .error()
-                .await
-                .map_err(|err| format!("read stderr for sandbox `{name}` failed: {err}"))?;
+            let stdout = String::from_utf8_lossy(&execution.stdout).into_owned();
+            let stderr = String::from_utf8_lossy(&execution.stderr).into_owned();
 
             if let Some(verdict) = parse_verdict_line(&stdout) {
                 return Ok(SandboxVerdict {
@@ -117,10 +108,10 @@ pub async fn run_python_verdict_script(script: &str) -> Result<SandboxVerdict, S
                 stderr.clone()
             } else if !stdout.trim().is_empty() {
                 format!("invalid sandbox verdict: {stdout}")
-            } else if execution.has_error() {
+            } else if !execution.status.success {
                 format!(
                     "sandbox execution failed with status {}",
-                    execution.status()
+                    execution.status.code
                 )
             } else {
                 "sandbox returned no verdict".to_string()

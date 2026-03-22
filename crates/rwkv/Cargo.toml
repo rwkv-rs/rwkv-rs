@@ -40,9 +40,9 @@ cuda = ["burn/cuda"]
 rocm = ["burn/rocm"]
 cpu = ["burn/cpu"]
 
-infer = ["dep:rwkv-infer", "rwkv-infer/http", "data"]
-infer-ipc = ["infer", "rwkv-infer/ipc"]
-trace = ["rwkv-infer?/trace", "rwkv-train?/trace", "rwkv-nn?/trace"]
+infer = ["dep:rwkv-infer-old", "rwkv-infer-old/http", "data"]
+infer-ipc = ["infer", "rwkv-infer-old/ipc"]
+trace = ["rwkv-infer-old?/trace", "rwkv-train?/trace", "rwkv-nn?/trace"]
 
 [dependencies]
 burn = { workspace = true, default-features = false, features = [] }
@@ -53,3 +53,4 @@ rwkv-data = { path = "../rwkv-data", optional = true }
 rwkv-nn = { path = "../rwkv-nn", default-features = false, optional = true }
 rwkv-train = { path = "../rwkv-train", default-features = false, optional = true }
 rwkv-infer = { path = "../rwkv-infer", default-features = false, optional = true }
+rwkv-infer-old = { path = "../rwkv-infer-old", default-features = false, optional = true }

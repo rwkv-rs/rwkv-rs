@@ -3,7 +3,7 @@ use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
-use crate::evaluators::instruction_following::{build_prompt, generate_response};
+use crate::evaluators::instruction_following::build_prompt;
 use crate::inferers::generate_text_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -19,26 +19,28 @@ const ARENA_HARD_V2_BASELINE_MODEL: &str = "o3-mini-2025-01-31";
 const ARENA_HARD_V2_SYSTEM_PROMPT: &str = concat!(
     "Please act as an impartial judge and evaluate the quality of the responses provided by two AI assistants to the user prompt displayed below. ",
     "You will be given assistant A's answer and assistant B's answer. Your job is to evaluate which assistant's answer is better.\n\n",
-    "Begin your evaluation by generating your own answer to the prompt. You must provide your answers before judging any answers.\n\n",
-    "When evaluating the assistants' answers, compare both assistants' answers with your answer. You must identify and correct any mistakes or inaccurate information.\n\n",
+    "Do not generate a full replacement answer to the user prompt. Do not write corrected code, a rewritten essay, or any long standalone solution. ",
+    "If you need a reference answer for comparison, keep it brief and internal to the evaluation.\n\n",
+    "When evaluating the assistants' answers, compare both assistants' answers carefully and identify any mistakes or inaccurate information.\n\n",
     "Then consider if the assistant's answers are helpful, relevant, and concise. Helpful means the answer correctly responds to the prompt or follows the instructions. ",
     "Note when user prompt has any ambiguity or more than one interpretation, it is more helpful and appropriate to ask for clarifications or more information from the user than providing an answer based on assumptions. ",
     "Relevant means all parts of the response closely connect or are appropriate to what is being asked. Concise means the response is clear and not verbose or excessive.\n\n",
     "Then consider the creativity and novelty of the assistant's answers when needed.\n\n",
     "Finally, identify any missing important information in the assistants' answers that would be beneficial to include when responding to the user prompt.\n\n",
-    "After providing your explanation, you must output only one of the following choices as your final verdict with a label:\n\n",
+    "Keep the evaluation concise. End with a final line that contains exactly one of the following verdict tags and nothing after it:\n\n",
     "1. Assistant A is significantly better: [[A>>B]]\n",
     "2. Assistant A is slightly better: [[A>B]]\n",
     "3. Tie, relatively the same: [[A=B]]\n",
     "4. Assistant B is slightly better: [[B>A]]\n",
     "5. Assistant B is significantly better: [[B>>A]]\n\n",
-    "Example output: \"My final verdict is tie: [[A=B]]\"."
+    "Example final line: [[A=B]]"
 );
 const ARENA_HARD_V2_PROMPT_TEMPLATE: &str = concat!(
     "<|User Prompt|>\n{QUESTION}\n\n",
     "<|The Start of Assistant A's Answer|>\n{ANSWER_A}\n<|The End of Assistant A's Answer|>\n\n",
     "<|The Start of Assistant B's Answer|>\n{ANSWER_B}\n<|The End of Assistant B's Answer|>"
 );
+const ARENA_HARD_V2_GENERATION_STOP_SUFFIXES: &[&str] = &["\n\nUser:", "\n\nAssistant:"];
 const ARENA_HARD_V2_JUDGE_SAMPLING_CONFIG: SamplingConfig = SamplingConfig {
     temperature: 0.001,
     top_k: 1,
@@ -172,6 +174,22 @@ fn build_judge_prompt(question: &str, answer_a: &str, answer_b: &str) -> String 
     build_prompt(&judge_prompt)
 }
 
+fn generation_stop_suffixes() -> Vec<String> {
+    ARENA_HARD_V2_GENERATION_STOP_SUFFIXES
+        .iter()
+        .map(|suffix| (*suffix).to_string())
+        .collect()
+}
+
+fn trim_transcript_contamination(text: &str) -> String {
+    let cutoff = ARENA_HARD_V2_GENERATION_STOP_SUFFIXES
+        .iter()
+        .filter_map(|suffix| text.find(suffix))
+        .min()
+        .unwrap_or(text.len());
+    text[..cutoff].trim().to_string()
+}
+
 fn extract_verdict(text: &str) -> Option<String> {
     for verdict in ["A>>B", "A>B", "A=B", "B>A", "B>>A"] {
         if text.contains(&format!("[[{verdict}]]")) {
@@ -209,7 +227,7 @@ async fn judge_once(
         judger_model_name,
         &prompt,
         vec![],
-        2048,
+        512,
         &ARENA_HARD_V2_JUDGE_SAMPLING_CONFIG,
     )
     .await
@@ -229,7 +247,7 @@ async fn judge_with_retry(
     question: &str,
     answer_a: &str,
     answer_b: &str,
-) -> ArenaJudgeOutcome {
+) -> Result<ArenaJudgeOutcome, String> {
     for attempt in 1..=3 {
         match judge_once(
             judger_client,
@@ -240,21 +258,67 @@ async fn judge_with_retry(
         )
         .await
         {
-            Ok(outcome) => return outcome,
+            Ok(outcome) => return Ok(outcome),
             Err(err) if attempt < 3 => {
                 eprintln!(
                     "arena-hard-v2 judge failed on attempt {attempt}/3, retrying: {err}; model={judger_model_name}"
                 );
             }
             Err(err) => {
-                panic!(
+                return Err(format!(
                     "arena-hard-v2 judge failed after 3 attempts: {err}; model={judger_model_name}; question={question}"
-                );
+                ));
             }
         }
     }
 
-    panic!("unreachable arena-hard-v2 judge retry loop")
+    Err("unreachable arena-hard-v2 judge retry loop".to_string())
+}
+
+fn build_context_with_judges(
+    base_context: &str,
+    baseline_answer: &str,
+    round_one: Option<&ArenaJudgeOutcome>,
+    round_two: Option<&ArenaJudgeOutcome>,
+    round_one_error: Option<&str>,
+    round_two_error: Option<&str>,
+) -> String {
+    let round_one_body = match (round_one, round_one_error) {
+        (Some(outcome), _) => format!("verdict={}\n{}", outcome.verdict, outcome.reason),
+        (None, Some(err)) => format!("error={err}"),
+        (None, None) => "missing".to_string(),
+    };
+    let round_two_body = match (round_two, round_two_error) {
+        (Some(outcome), _) => format!("verdict={}\n{}", outcome.verdict, outcome.reason),
+        (None, Some(err)) => format!("error={err}"),
+        (None, None) => "missing".to_string(),
+    };
+
+    format!(
+        concat!(
+            "{}\n\n",
+            "[baseline_answer]\n{}\n\n",
+            "[judge_round_1]\n{}\n\n",
+            "[judge_round_2]\n{}"
+        ),
+        base_context, baseline_answer, round_one_body, round_two_body,
+    )
+}
+
+fn build_judge_error_reason(round_one_error: Option<&str>, round_two_error: Option<&str>) -> String {
+    let mut parts = Vec::new();
+    if let Some(err) = round_one_error {
+        parts.push(format!("round1={err}"));
+    }
+    if let Some(err) = round_two_error {
+        parts.push(format!("round2={err}"));
+    }
+
+    if parts.is_empty() {
+        "arena judge_error".to_string()
+    } else {
+        format!("arena judge_error: {}", parts.join(" | "))
+    }
 }
 
 #[async_trait]
@@ -363,15 +427,19 @@ impl Benchmark for ArenaHardV2 {
     ) -> Record {
         let item = &self.test[index];
         let prompt = self.get_expected_context(index, cot_mode, n_shot);
-        let answer = generate_response(
+        let answer = generate_text_completion(
             model_client,
             model_name,
             &prompt,
+            generation_stop_suffixes(),
+            4096,
             &ARENA_HARD_V2_INFO.sampling_config,
         )
-        .await;
+        .await
+        .unwrap();
+        let answer = trim_transcript_contamination(&answer);
         let ref_answer = self.get_ref_answer(index);
-        let context = format!(
+        let base_context = format!(
             concat!(
                 "[uid]\n{}\n\n",
                 "[category]\n{}\n\n",
@@ -390,7 +458,7 @@ impl Benchmark for ArenaHardV2 {
 
         if answer.trim().is_empty() {
             return Record {
-                context,
+                context: base_context,
                 answer,
                 ref_answer,
                 is_passed: false,
@@ -420,27 +488,76 @@ impl Benchmark for ArenaHardV2 {
         )
         .await;
 
-        let round_one_score = target_score_from_verdict(&round_one.verdict, false)
-            .unwrap_or_else(|err| panic!("invalid Arena-Hard round one verdict: {err}"));
-        let round_two_score = target_score_from_verdict(&round_two.verdict, true)
-            .unwrap_or_else(|err| panic!("invalid Arena-Hard round two verdict: {err}"));
+        if round_one.is_err() || round_two.is_err() {
+            let round_one_error = round_one.as_ref().err().map(String::as_str);
+            let round_two_error = round_two.as_ref().err().map(String::as_str);
+            return Record {
+                context: build_context_with_judges(
+                    &base_context,
+                    &item.baseline_answer,
+                    round_one.as_ref().ok(),
+                    round_two.as_ref().ok(),
+                    round_one_error,
+                    round_two_error,
+                ),
+                answer,
+                ref_answer,
+                is_passed: false,
+                fail_reason: build_judge_error_reason(round_one_error, round_two_error),
+            };
+        }
+
+        let round_one = round_one.unwrap();
+        let round_two = round_two.unwrap();
+        let round_one_score = match target_score_from_verdict(&round_one.verdict, false) {
+            Ok(score) => score,
+            Err(err) => {
+                return Record {
+                    context: build_context_with_judges(
+                        &base_context,
+                        &item.baseline_answer,
+                        Some(&round_one),
+                        Some(&round_two),
+                        Some(err.as_str()),
+                        None,
+                    ),
+                    answer,
+                    ref_answer,
+                    is_passed: false,
+                    fail_reason: format!("arena judge_error: round1={err}"),
+                };
+            }
+        };
+        let round_two_score = match target_score_from_verdict(&round_two.verdict, true) {
+            Ok(score) => score,
+            Err(err) => {
+                return Record {
+                    context: build_context_with_judges(
+                        &base_context,
+                        &item.baseline_answer,
+                        Some(&round_one),
+                        Some(&round_two),
+                        None,
+                        Some(err.as_str()),
+                    ),
+                    answer,
+                    ref_answer,
+                    is_passed: false,
+                    fail_reason: format!("arena judge_error: round2={err}"),
+                };
+            }
+        };
         let mean_score = (round_one_score + round_two_score) / 2.0;
         let is_passed = mean_score > 0.5;
 
         Record {
-            context: format!(
-                concat!(
-                    "{}\n\n",
-                    "[baseline_answer]\n{}\n\n",
-                    "[judge_round_1]\nverdict={}\n{}\n\n",
-                    "[judge_round_2]\nverdict={}\n{}"
-                ),
-                context,
-                item.baseline_answer,
-                round_one.verdict,
-                round_one.reason,
-                round_two.verdict,
-                round_two.reason,
+            context: build_context_with_judges(
+                &base_context,
+                &item.baseline_answer,
+                Some(&round_one),
+                Some(&round_two),
+                None,
+                None,
             ),
             answer,
             ref_answer,
@@ -459,7 +576,17 @@ impl Benchmark for ArenaHardV2 {
 
 #[cfg(test)]
 mod tests {
-    use super::target_score_from_verdict;
+    use super::{
+        ARENA_HARD_V2_EXPECTED_LEN, ARENA_HARD_V2_SYSTEM_PROMPT, ArenaHardV2,
+        build_judge_error_reason, generation_stop_suffixes, target_score_from_verdict,
+        trim_transcript_contamination,
+    };
+    use crate::datasets::Benchmark;
+    use std::path::PathBuf;
+
+    fn local_dataset_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/rwkv-lm-eval/datasets")
+    }
 
     #[test]
     fn maps_verdicts_from_target_perspective() {
@@ -468,5 +595,51 @@ mod tests {
         assert_eq!(target_score_from_verdict("A=B", true).unwrap(), 0.5);
         assert_eq!(target_score_from_verdict("A>B", false).unwrap(), 0.0);
         assert_eq!(target_score_from_verdict("B>>A", false).unwrap(), 1.0);
+    }
+
+    #[test]
+    fn loads_local_dataset() {
+        let mut benchmark = ArenaHardV2::new(local_dataset_root());
+        assert!(!benchmark.load());
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build tokio runtime");
+        assert!(!runtime.block_on(benchmark.check()));
+        assert_eq!(benchmark.len(), ARENA_HARD_V2_EXPECTED_LEN);
+    }
+
+    #[test]
+    fn arena_judge_prompt_forbids_full_rewrites() {
+        assert!(ARENA_HARD_V2_SYSTEM_PROMPT.contains("Do not generate a full replacement answer"));
+        assert!(ARENA_HARD_V2_SYSTEM_PROMPT.contains("End with a final line"));
+        assert!(!ARENA_HARD_V2_SYSTEM_PROMPT.contains("Begin your evaluation by generating your own answer"));
+    }
+
+    #[test]
+    fn judge_error_reason_includes_failed_rounds() {
+        assert_eq!(
+            build_judge_error_reason(Some("r1"), Some("r2")),
+            "arena judge_error: round1=r1 | round2=r2"
+        );
+        assert_eq!(
+            build_judge_error_reason(Some("r1"), None),
+            "arena judge_error: round1=r1"
+        );
+    }
+
+    #[test]
+    fn arena_generation_uses_transcript_stop_suffixes() {
+        assert_eq!(
+            generation_stop_suffixes(),
+            vec!["\n\nUser:".to_string(), "\n\nAssistant:".to_string()]
+        );
+    }
+
+    #[test]
+    fn trims_arena_transcript_contamination() {
+        let answer = "Here is my answer.\n\nUser: next turn";
+        assert_eq!(trim_transcript_contamination(answer), "Here is my answer.");
     }
 }

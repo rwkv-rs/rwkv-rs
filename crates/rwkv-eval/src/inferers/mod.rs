@@ -14,6 +14,8 @@ pub struct CompletionRequest {
     top_k: i32,
     penalty_decay: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
+    repetition_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     candidate_token_texts: Option<Vec<String>>,
 }
 
@@ -42,6 +44,7 @@ impl CompletionRequest {
             },
             top_k: sampling_config.top_k,
             penalty_decay: sampling_config.penalty_decay,
+            repetition_penalty: Some(sampling_config.repetition_penalty),
             candidate_token_texts,
         }
     }
@@ -53,11 +56,13 @@ struct ChatCompletionFallbackRequest {
     messages: Vec<ChatCompletionFallbackMessage>,
     temperature: f32,
     top_p: f32,
+    max_tokens: u32,
     max_completion_tokens: u32,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     stop: Vec<String>,
     presence_penalty: f32,
     frequency_penalty: f32,
+    repetition_penalty: f32,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -171,10 +176,12 @@ pub async fn generate_text_completion(
             }],
             temperature: sampling_config.temperature,
             top_p: sampling_config.top_p,
+            max_tokens,
             max_completion_tokens: max_tokens,
             stop: stop_suffix.clone(),
             presence_penalty: sampling_config.presence_penalty,
             frequency_penalty: sampling_config.repetition_penalty,
+            repetition_penalty: sampling_config.repetition_penalty,
         };
         match model_client
             .chat()
@@ -213,7 +220,11 @@ pub async fn generate_text_completion(
 
 #[cfg(test)]
 mod tests {
-    use super::CompletionResponse;
+    use super::{
+        ChatCompletionFallbackMessage, ChatCompletionFallbackRequest, CompletionRequest,
+        CompletionResponse,
+    };
+    use crate::datasets::SamplingConfig;
 
     #[test]
     fn completion_response_accepts_text_choices() {
@@ -239,5 +250,56 @@ mod tests {
         }"#;
         let resp: CompletionResponse = sonic_rs::from_str(raw).unwrap();
         assert_eq!(resp.choices[0].output_text(), "hello");
+    }
+
+    #[test]
+    fn completion_request_serializes_repetition_penalty_compat_field() {
+        let sampling = SamplingConfig {
+            temperature: 0.3,
+            top_k: 66,
+            top_p: 0.79,
+            presence_penalty: 0.14,
+            repetition_penalty: 0.01,
+            penalty_decay: 0.997,
+        };
+        let req = CompletionRequest::new(
+            "demo".to_string(),
+            "prompt".to_string().into(),
+            vec!["</think>".to_string()],
+            128,
+            &sampling,
+            None,
+            None,
+        );
+
+        let json = sonic_rs::to_string(&req).unwrap();
+        assert!(json.contains("\"frequency_penalty\":0.01"));
+        assert!(json.contains("\"repetition_penalty\":0.01"));
+        assert!(json.contains("\"max_tokens\":128"));
+    }
+
+    #[test]
+    fn chat_fallback_serializes_max_tokens_and_repetition_penalty() {
+        let req = ChatCompletionFallbackRequest {
+            model: "demo".to_string(),
+            messages: vec![ChatCompletionFallbackMessage {
+                role: "user",
+                content: "prompt".to_string(),
+            }],
+            temperature: 0.3,
+            top_p: 0.79,
+            max_tokens: 64,
+            max_completion_tokens: 64,
+            stop: vec!["\n\nUser:".to_string()],
+            presence_penalty: 0.14,
+            frequency_penalty: 0.01,
+            repetition_penalty: 0.01,
+        };
+
+        let json = sonic_rs::to_string(&req).unwrap();
+        assert!(json.contains("\"max_tokens\":64"));
+        assert!(json.contains("\"max_completion_tokens\":64"));
+        assert!(json.contains("\"frequency_penalty\":0.01"));
+        assert!(json.contains("\"repetition_penalty\":0.01"));
     }
 }

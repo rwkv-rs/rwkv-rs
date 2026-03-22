@@ -12,7 +12,6 @@ use rwkv_config::validated::model::{FinalModelConfig, FinalModelConfigBuilder};
 
 use super::request_router::{LoadedModelGroup, ModelRequestRouter};
 
-
 pub struct LoadedModelRegistry {
     config_dir: PathBuf,
     infer_cfg_name: String,
@@ -36,12 +35,15 @@ impl LoadedModelRegistry {
 
         let raw_infer_cfg = load_raw_infer_cfg(&infer_cfg_path).unwrap();
         let runtime_models = resolve_runtime_models(infer_cfg_dir, &raw_infer_cfg.models);
-        let model_cfgs = load_model_cfgs(&config_dir, infer_cfg_dir, &raw_infer_cfg.models).unwrap();
+        let model_cfgs =
+            load_model_cfgs(&config_dir, infer_cfg_dir, &raw_infer_cfg.models).unwrap();
         let model_vocab_sizes: HashMap<String, usize> = model_cfgs
             .iter()
             .map(|(model_name, model_cfg)| (model_name.clone(), model_cfg.vocab_size))
             .collect();
-        let groups = factory.build_model_groups(&runtime_models, &model_cfgs).unwrap();
+        let groups = factory
+            .build_model_groups(&runtime_models, &model_cfgs)
+            .unwrap();
         let request_router = Arc::new(ModelRequestRouter::new(groups, model_vocab_sizes).unwrap());
 
         #[cfg(feature = "trace")]
@@ -298,7 +300,6 @@ impl LoadedModelRegistry {
         })
     }
 }
-
 
 fn is_path_like(s: &str) -> bool {
     s.contains('/') || s.contains('\\')

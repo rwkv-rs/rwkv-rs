@@ -1,5 +1,5 @@
 use crate::datasets::maths::{
-    get_expect_context, get_final_answer_with_cot_mode, judge_with_retry,
+    extract_last_boxed_answer, get_expect_context, get_final_answer_with_cot_mode, judge_with_retry,
 };
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
@@ -64,13 +64,6 @@ impl MinervaMath {
     }
 }
 
-fn extract_boxed_answer(solution: &str) -> Option<String> {
-    let start = solution.rfind(r"\boxed{")? + r"\boxed{".len();
-    let tail = &solution[start..];
-    let end = tail.find('}')?;
-    Some(tail[..end].trim().to_string())
-}
-
 #[async_trait]
 impl Benchmark for MinervaMath {
     fn load(&mut self) -> bool {
@@ -96,7 +89,7 @@ impl Benchmark for MinervaMath {
                 let answer = take(row, &["expected_answer", "answer"])
                     .or_else(|| {
                         take(row, &["solution"])
-                            .and_then(|solution| extract_boxed_answer(&solution))
+                            .and_then(|solution| extract_last_boxed_answer(&solution))
                     })
                     .unwrap_or_default();
                 let subject = take(row, &["subject", "category", "domain", "topic", "source"])

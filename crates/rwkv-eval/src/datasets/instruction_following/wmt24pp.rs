@@ -4,13 +4,12 @@ use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
-use crate::evaluators::instruction_following::{build_prompt, generate_response};
+use crate::evaluators::instruction_following::build_prompt;
 use crate::inferers::generate_text_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use regex::Regex;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -101,11 +100,14 @@ const WMT24PP_JUDGE_SAMPLING_CONFIG: SamplingConfig = SamplingConfig {
     repetition_penalty: 0.0,
     penalty_decay: 1.0,
 };
+const WMT24PP_GENERATION_STOP_SUFFIXES: &[&str] = &["\n\nUser:", "\n\nAssistant:"];
 const WMT24PP_REFERENCE_BASED_JUDGE_INSTRUCTION: &str = concat!(
     "You are a professional translation quality evaluator.\n",
     "Evaluate the machine translation using the source text and the human reference translation.\n",
     "Assign a continuous score from 0 to 100, where 100 means the translation is excellent.\n",
     "Consider adequacy, fluency, terminology, and faithfulness.\n",
+    "Reply with a single numeric score such as 83.5.\n",
+    "Do not translate, copy, or rewrite any of the provided text.\n",
     "Output only the numeric score and nothing else."
 );
 
@@ -121,7 +123,7 @@ pub struct Wmt24ppItem {
     segment_id: i64,
     source: String,
     target: String,
-    original_target: String,
+    original_target: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -133,7 +135,7 @@ struct RawWmt24ppItem {
     is_bad_source: bool,
     source: String,
     target: String,
-    original_target: String,
+    original_target: Option<String>,
 }
 
 #[derive(Debug)]
@@ -295,6 +297,28 @@ fn build_translation_instruction(item: &Wmt24ppItem) -> String {
     )
 }
 
+fn generation_stop_suffixes() -> Vec<String> {
+    WMT24PP_GENERATION_STOP_SUFFIXES
+        .iter()
+        .map(|suffix| (*suffix).to_string())
+        .collect()
+}
+
+fn trim_transcript_contamination(text: &str) -> String {
+    let cutoff = WMT24PP_GENERATION_STOP_SUFFIXES
+        .iter()
+        .filter_map(|suffix| text.find(suffix))
+        .min()
+        .unwrap_or(text.len());
+    text[..cutoff].trim().to_string()
+}
+
+fn translation_max_tokens(source: &str) -> u32 {
+    let source_word_count = source.split_whitespace().count();
+    let dynamic_limit = source_word_count.saturating_mul(3).saturating_add(64);
+    dynamic_limit.clamp(64, 1024) as u32
+}
+
 fn build_reference_based_judge_prompt(source: &str, reference: &str, translation: &str) -> String {
     format!(
         concat!(
@@ -318,9 +342,7 @@ fn build_reference_based_judge_request(source: &str, reference: &str, translatio
 }
 
 fn extract_score(text: &str) -> Option<f64> {
-    let regex = Regex::new(r"(?s)(\d+(?:\.\d+)?)").expect("valid wmt24pp score regex");
-    let capture = regex.captures(text)?;
-    capture.get(1)?.as_str().parse::<f64>().ok()
+    text.trim().parse::<f64>().ok()
 }
 
 async fn judge_once(
@@ -344,7 +366,9 @@ async fn judge_once(
     let score = extract_score(&content)
         .ok_or_else(|| format!("judge returned no numeric score: {content:?}"))?;
     if !(0.0..=100.0).contains(&score) {
-        return Err(format!("judge returned out-of-range score {score}: {content:?}"));
+        return Err(format!(
+            "judge returned out-of-range score {score}: {content:?}"
+        ));
     }
 
     Ok(WmtJudgeOutcome {
@@ -359,7 +383,7 @@ async fn judge_with_retry(
     source: &str,
     reference: &str,
     translation: &str,
-) -> WmtJudgeOutcome {
+) -> Result<WmtJudgeOutcome, String> {
     for attempt in 1..=3 {
         match judge_once(
             judger_client,
@@ -370,21 +394,21 @@ async fn judge_with_retry(
         )
         .await
         {
-            Ok(outcome) => return outcome,
+            Ok(outcome) => return Ok(outcome),
             Err(err) if attempt < 3 => {
                 eprintln!(
                     "wmt24pp judge failed on attempt {attempt}/3, retrying: {err}; model={judger_model_name}"
                 );
             }
             Err(err) => {
-                panic!(
+                return Err(format!(
                     "wmt24pp judge failed after 3 attempts: {err}; model={judger_model_name}; source={source}"
-                );
+                ));
             }
         }
     }
 
-    panic!("unreachable wmt24pp judge retry loop")
+    Err("unreachable wmt24pp judge retry loop".to_string())
 }
 
 #[async_trait]
@@ -473,15 +497,17 @@ impl Benchmark for Wmt24pp {
     ) -> Record {
         let item = &self.test[index];
         let prompt = self.get_expected_context(index, cot_mode, n_shot);
-        let answer = generate_response(
+        let answer = generate_text_completion(
             model_client,
             model_name,
             &prompt,
+            generation_stop_suffixes(),
+            translation_max_tokens(&item.source),
             &WMT24PP_INFO.sampling_config,
         )
         .await
-        .trim()
-        .to_string();
+        .unwrap();
+        let answer = trim_transcript_contamination(&answer);
         let ref_answer = self.get_ref_answer(index);
         let context = format!(
             concat!(
@@ -501,7 +527,7 @@ impl Benchmark for Wmt24pp {
             item.segment_id,
             item.source,
             item.target,
-            item.original_target,
+            item.original_target.as_deref().unwrap_or(""),
             build_translation_instruction(item),
             answer,
         );
@@ -520,14 +546,26 @@ impl Benchmark for Wmt24pp {
             judger_client.unwrap_or_else(|| panic!("wmt24pp requires judger_client but got None"));
         let judger_model_name = judger_model_name
             .unwrap_or_else(|| panic!("wmt24pp requires judger_model_name but got None"));
-        let outcome = judge_with_retry(
+        let outcome = match judge_with_retry(
             judger_client,
             judger_model_name,
             &item.source,
             &item.target,
             &answer,
         )
-        .await;
+        .await
+        {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                return Record {
+                    context: format!("{context}\n\n[judge_error]\n{err}"),
+                    answer,
+                    ref_answer,
+                    is_passed: false,
+                    fail_reason: err,
+                };
+            }
+        };
         let is_passed = outcome.score >= WMT24PP_PASS_THRESHOLD;
 
         Record {
@@ -552,12 +590,71 @@ impl Benchmark for Wmt24pp {
 
 #[cfg(test)]
 mod tests {
-    use super::{language_name_from_code, region_name_from_code, target_code_from_lp};
+    use super::{
+        RawWmt24ppItem, Wmt24pp, extract_score, generation_stop_suffixes,
+        language_name_from_code, region_name_from_code, target_code_from_lp,
+        translation_max_tokens, trim_transcript_contamination,
+    };
+    use crate::datasets::Benchmark;
+    use std::path::PathBuf;
+
+    fn local_dataset_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/rwkv-lm-eval/datasets")
+    }
 
     #[test]
     fn parses_language_pair_metadata() {
         assert_eq!(target_code_from_lp("en-de_DE"), "de_DE");
         assert_eq!(language_name_from_code("de_DE"), "German");
         assert_eq!(region_name_from_code("de_DE"), "Germany");
+    }
+
+    #[test]
+    fn deserializes_null_original_target() {
+        let line = r#"{"lp":"en-is_IS","domain":"news","document_id":"doc","segment_id":1,"is_bad_source":false,"source":"hello","target":"hallo","original_target":null}"#;
+        let item: RawWmt24ppItem = sonic_rs::from_str(line).expect("valid wmt24pp item");
+        assert_eq!(item.original_target, None);
+    }
+
+    #[test]
+    fn extracts_only_pure_numeric_judge_scores() {
+        assert_eq!(extract_score("85"), Some(85.0));
+        assert_eq!(extract_score(" 83.5\n"), Some(83.5));
+        assert_eq!(extract_score(r#""ناس بتعوم في حمام السباحة من سنة 2022""#), None);
+        assert_eq!(extract_score("score: 85"), None);
+    }
+
+    #[test]
+    fn wmt_generation_uses_transcript_stop_suffixes() {
+        assert_eq!(
+            generation_stop_suffixes(),
+            vec!["\n\nUser:".to_string(), "\n\nAssistant:".to_string()]
+        );
+    }
+
+    #[test]
+    fn trims_wmt_transcript_contamination() {
+        let translation = "Bonjour le monde.\n\nAssistant: extra turn";
+        assert_eq!(trim_transcript_contamination(translation), "Bonjour le monde.");
+    }
+
+    #[test]
+    fn translation_max_tokens_scales_with_source_length() {
+        assert_eq!(translation_max_tokens("short source"), 70);
+        assert_eq!(translation_max_tokens(""), 64);
+        assert_eq!(translation_max_tokens(&"word ".repeat(400)), 1024);
+    }
+
+    #[test]
+    fn loads_local_dataset() {
+        let mut benchmark = Wmt24pp::new(local_dataset_root());
+        assert!(!benchmark.load());
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build tokio runtime");
+        assert!(!runtime.block_on(benchmark.check()));
+        assert!(benchmark.len() > 0);
     }
 }

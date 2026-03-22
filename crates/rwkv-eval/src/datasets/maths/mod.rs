@@ -114,6 +114,34 @@ pub fn json_value_as_text(value: &Value) -> Option<String> {
     }
 }
 
+pub fn extract_last_boxed_answer(solution: &str) -> Option<String> {
+    let marker = r"\boxed{";
+    let mut search_end = solution.len();
+
+    while let Some(start) = solution[..search_end].rfind(marker) {
+        let content_start = start + marker.len();
+        let tail = &solution[content_start..];
+        let mut depth = 0usize;
+
+        for (idx, ch) in tail.char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    if depth == 0 {
+                        return Some(tail[..idx].trim().to_string());
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
+
+        search_end = start;
+    }
+
+    None
+}
+
 pub fn get_expect_context(subject: &str, question: &str, cot_mode: CoTMode) -> String {
     if cot_mode != CoTMode::CoT {
         panic!("maths only supports CoT mode, got {cot_mode:?}");
@@ -347,4 +375,27 @@ async fn judge_once(
 #[derive(Deserialize)]
 struct JudgeResult {
     is_passed: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_last_boxed_answer;
+
+    #[test]
+    fn extracts_nested_boxed_answer() {
+        let text = r"Therefore, the answer is \boxed{\frac{13}{4}}.";
+        assert_eq!(
+            extract_last_boxed_answer(text).as_deref(),
+            Some(r"\frac{13}{4}")
+        );
+    }
+
+    #[test]
+    fn extracts_last_boxed_answer_when_multiple_exist() {
+        let text = r"Scratch \boxed{wrong} and final \boxed{\sqrt{2}}";
+        assert_eq!(
+            extract_last_boxed_answer(text).as_deref(),
+            Some(r"\sqrt{2}")
+        );
+    }
 }

@@ -39,5 +39,5 @@ pub mod train {
 
 #[cfg(feature = "infer")]
 pub mod infer {
-    pub use rwkv_infer::*;
+    pub use rwkv_infer_old::*;
 }

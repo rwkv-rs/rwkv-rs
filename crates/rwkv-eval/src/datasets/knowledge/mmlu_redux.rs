@@ -5,9 +5,7 @@ use linkme::distributed_slice;
 use parquet::record::Row;
 use std::path::{Path, PathBuf};
 
-use crate::datasets::knowledge::{
-    get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
-};
+use crate::datasets::knowledge::{get_expect_context, get_final_answer_with_cot_mode, get_ref_answer};
 use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::hf::viewer::get_parquet_files;

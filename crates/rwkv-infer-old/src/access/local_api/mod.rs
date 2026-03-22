@@ -3,9 +3,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::access::http_api::collect_stream_output;
-use crate::inference_core::{
-    EngineEvent, InferenceSubmitHandle, InferenceSubmitResult, SamplingConfig,
-};
+use crate::inference_core::{EngineEvent, InferenceSubmitHandle, InferenceSubmitResult, SamplingConfig};
 
 #[derive(Clone)]
 pub struct LocalInferenceClient {

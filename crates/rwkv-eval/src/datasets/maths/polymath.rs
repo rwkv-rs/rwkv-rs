@@ -1,4 +1,6 @@
-use crate::datasets::maths::{get_final_answer_with_cot_mode, judge_with_retry};
+use crate::datasets::maths::{
+    extract_last_boxed_answer, get_final_answer_with_cot_mode, judge_with_retry,
+};
 use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::hf::viewer::get_parquet_files;
@@ -89,6 +91,30 @@ fn get_answer_note(language: &str) -> &'static str {
     }
 }
 
+fn get_solution_note(language: &str) -> &'static str {
+    match language {
+        "en" => "Solve the problem carefully step by step.",
+        "zh" => "请认真逐步求解此题。",
+        "ar" => "حل المسألة بعناية خطوة بخطوة.",
+        "bn" => "প্রশ্নটি ধাপে ধাপে সতর্কভাবে সমাধান করুন।",
+        "de" => "Losen Sie das Problem sorgfaltig Schritt fur Schritt.",
+        "es" => "Resuelve el problema con cuidado paso a paso.",
+        "fr" => "Resolvez le probleme soigneusement etape par etape.",
+        "id" => "Selesaikan soal ini dengan cermat langkah demi langkah.",
+        "it" => "Risolvi il problema con attenzione, passo dopo passo.",
+        "ja" => "問題を丁寧に一歩ずつ解いてください。",
+        "ko" => "문제를 차근차근 신중하게 풀어 주세요.",
+        "ms" => "Selesaikan masalah ini dengan teliti langkah demi langkah.",
+        "pt" => "Resolva o problema com cuidado, passo a passo.",
+        "ru" => "Решите задачу внимательно, шаг за шагом.",
+        "sw" => "Tatua tatizo hili kwa makini hatua kwa hatua.",
+        "te" => "ఈ సమస్యను జాగ్రత్తగా దశలవారీగా పరిష్కరించండి.",
+        "th" => "แก้โจทย์นี้อย่างรอบคอบทีละขั้นตอน",
+        "vi" => "Hãy giải bài toán cẩn thận từng bước một.",
+        _ => panic!("unsupported PolyMath language `{language}`"),
+    }
+}
+
 fn get_language_control(language: &str) -> &'static str {
     match language {
         "en" => "Use English to think and answer.",
@@ -113,11 +139,8 @@ fn get_language_control(language: &str) -> &'static str {
     }
 }
 
-fn extract_boxed_answer(solution: &str) -> Option<String> {
-    let start = solution.rfind(r"\boxed{")? + r"\boxed{".len();
-    let tail = &solution[start..];
-    let end = tail.find('}')?;
-    Some(tail[..end].trim().to_string())
+fn normalize_reference_answer(answer: &str) -> String {
+    extract_last_boxed_answer(answer).unwrap_or_else(|| answer.trim().to_string())
 }
 
 fn build_expected_context(item: &PolyMathItem, cot_mode: CoTMode) -> String {
@@ -126,11 +149,13 @@ fn build_expected_context(item: &PolyMathItem, cot_mode: CoTMode) -> String {
     }
 
     let user_part = format!(
-        "{}\n\n{}\n\n{}",
+        "{}\n\n{}\n{}\n{}",
         item.question.trim(),
         get_language_control(&item.language),
+        get_solution_note(&item.language),
         get_answer_note(&item.language),
     );
+
     let assistant_part = concat!(
         "<think><|completions_of_cot|></think>\n",
         "Therefore, the answer is \\(\\boxed{<|final_answer|>}\\)."
@@ -138,6 +163,115 @@ fn build_expected_context(item: &PolyMathItem, cot_mode: CoTMode) -> String {
     .to_string();
 
     apply_user_assistant_template(user_part, assistant_part)
+}
+
+const POLYMATH_ASSISTANT_MARKER: &str = "\n\nAssistant: ";
+const POLYMATH_BOXED_ANSWER_MARKER: &str = "\n\n[boxed_answer]\n";
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolyMathFailureBucket {
+    ReasoningWrongFormatOk,
+    BoxedPresentButWrong,
+    BoxedMissing,
+    BoxedPresentButExtractionMismatch,
+    PromptOrTranscriptContamination,
+    LanguageDrift,
+    OtherGenerationArtifact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolyMathAttemptDiagnostics {
+    pub generated_answer: String,
+    pub transcript_contamination: bool,
+    pub think_leakage: bool,
+    pub parsed_boxed_answer: Option<String>,
+    pub stored_answer_matches_parsed_boxed_answer: bool,
+    pub bucket: PolyMathFailureBucket,
+}
+
+pub fn extract_generated_answer_from_record_context(context: &str) -> Option<&str> {
+    if let Some((with_prompt, _)) = context.rsplit_once(POLYMATH_BOXED_ANSWER_MARKER) {
+        if let Some((_, generated_answer)) = with_prompt.split_once(POLYMATH_ASSISTANT_MARKER) {
+            return Some(generated_answer);
+        }
+    }
+
+    context
+        .split_once(POLYMATH_ASSISTANT_MARKER)
+        .map(|(_, generated_answer)| generated_answer)
+}
+
+pub fn contains_transcript_contamination(text: &str) -> bool {
+    text.contains("\nUser:")
+        || text.contains("\nAssistant:")
+        || text.trim_start().starts_with("User:")
+        || text.trim_start().starts_with("Assistant:")
+}
+
+pub fn contains_think_leakage(text: &str) -> bool {
+    let open = text.find("<think>");
+    let close = text.rfind("</think>");
+
+    match (open, close) {
+        (None, None) => false,
+        (Some(_), None) | (None, Some(_)) => true,
+        (Some(open), Some(close)) if close < open => true,
+        (Some(_), Some(close)) => match text.rfind(r"\boxed{") {
+            Some(boxed_pos) => close > boxed_pos,
+            None => false,
+        },
+    }
+}
+
+pub fn diagnose_failed_attempt(
+    context: &str,
+    stored_answer: &str,
+    ref_answer: &str,
+) -> PolyMathAttemptDiagnostics {
+    let generated_answer = extract_generated_answer_from_record_context(context)
+        .unwrap_or_default()
+        .to_string();
+    let transcript_contamination = contains_transcript_contamination(&generated_answer);
+    let think_leakage = contains_think_leakage(&generated_answer);
+    let parsed_boxed_answer = extract_last_boxed_answer(&generated_answer);
+    let stored_answer = stored_answer.trim();
+    let ref_answer = ref_answer.trim();
+    let stored_answer_matches_parsed_boxed_answer = parsed_boxed_answer
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|parsed| parsed == stored_answer);
+
+    let bucket = if generated_answer.is_empty() {
+        PolyMathFailureBucket::OtherGenerationArtifact
+    } else if transcript_contamination {
+        PolyMathFailureBucket::PromptOrTranscriptContamination
+    } else if let Some(parsed_boxed_answer) = parsed_boxed_answer.as_deref().map(str::trim) {
+        if stored_answer.is_empty() || parsed_boxed_answer != stored_answer {
+            PolyMathFailureBucket::BoxedPresentButExtractionMismatch
+        } else if stored_answer != ref_answer {
+            PolyMathFailureBucket::BoxedPresentButWrong
+        } else {
+            PolyMathFailureBucket::ReasoningWrongFormatOk
+        }
+    } else if think_leakage {
+        PolyMathFailureBucket::OtherGenerationArtifact
+    } else if stored_answer.is_empty() {
+        PolyMathFailureBucket::BoxedMissing
+    } else if stored_answer != ref_answer {
+        PolyMathFailureBucket::ReasoningWrongFormatOk
+    } else {
+        PolyMathFailureBucket::OtherGenerationArtifact
+    };
+
+    PolyMathAttemptDiagnostics {
+        generated_answer,
+        transcript_contamination,
+        think_leakage,
+        parsed_boxed_answer,
+        stored_answer_matches_parsed_boxed_answer,
+        bucket,
+    }
 }
 
 fn parse_language_and_difficulty(path: &Path) -> (String, String) {
@@ -223,7 +357,7 @@ impl Benchmark for PolyMath {
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
-        self.test[index].answer.clone()
+        normalize_reference_answer(&self.test[index].answer)
     }
 
     async fn answer_and_judge(
@@ -251,27 +385,170 @@ impl Benchmark for PolyMath {
             .unwrap_or_else(|| panic!("benchmark requires judger_model_name but got None"));
 
         let ref_answer = self.get_ref_answer(index);
-        let parsed_answer = extract_boxed_answer(&generated.context)
-            .or_else(|| extract_boxed_answer(&generated.answer))
-            .unwrap_or_else(|| generated.answer.trim().to_string());
+        let judge_answer = if generated.answer.trim().is_empty() {
+            extract_generated_answer_from_record_context(&generated.context)
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        } else {
+            generated.answer.trim().to_string()
+        };
         let outcome = judge_with_retry(
             judger_client,
             judger_model_name,
             &expected_context,
             &ref_answer,
-            &parsed_answer,
+            &judge_answer,
         )
         .await;
 
         Record {
-            context: format!(
-                "{}\n\n[boxed_answer]\n{}",
-                generated.context, parsed_answer
-            ),
-            answer: parsed_answer,
+            context: generated.context,
+            answer: generated.answer,
             ref_answer,
             is_passed: outcome.is_passed,
             fail_reason: outcome.fail_reason,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        PolyMathFailureBucket, PolyMathItem, build_expected_context, contains_think_leakage,
+        contains_transcript_contamination, diagnose_failed_attempt,
+        extract_generated_answer_from_record_context, normalize_reference_answer,
+    };
+    use crate::datasets::CoTMode;
+
+    #[test]
+    fn normalizes_boxed_reference_answer() {
+        let raw = "### الشرح:\n...\nإذًا الجواب هو \\boxed{117}.";
+        assert_eq!(normalize_reference_answer(raw), "117");
+    }
+
+    #[test]
+    fn preserves_plain_reference_answer() {
+        assert_eq!(normalize_reference_answer("588"), "588");
+    }
+
+    #[test]
+    fn normalizes_nested_boxed_reference_answer() {
+        let raw = r"Final: \boxed{\frac{13}{4}}";
+        assert_eq!(normalize_reference_answer(raw), r"\frac{13}{4}");
+    }
+
+    #[test]
+    fn builds_two_stage_prompt_with_language_control_and_boxed_answer() {
+        let item = PolyMathItem {
+            id: "1".to_string(),
+            question: "Q".to_string(),
+            answer: "A".to_string(),
+            language: "ar".to_string(),
+            difficulty: "medium".to_string(),
+        };
+        let prompt = build_expected_context(&item, CoTMode::CoT);
+
+        assert!(prompt.starts_with("User: Q"));
+        assert!(prompt.contains("استخدم العربية في التفكير والإجابة."));
+        assert!(prompt.contains("حل المسألة بعناية خطوة بخطوة."));
+        assert!(prompt.contains("ضع الإجابة النهائية داخل \\boxed{}."));
+        assert!(prompt.contains("<think><|completions_of_cot|></think>"));
+        assert!(prompt.contains(r"\boxed{<|final_answer|>}"));
+    }
+
+    #[test]
+    fn extracts_generated_answer_from_two_stage_context() {
+        let context =
+            "User: Q\n\nAssistant: <think>step 1</think>\nTherefore, the answer is \\(\\boxed{42}\\).";
+        assert_eq!(
+            extract_generated_answer_from_record_context(context),
+            Some("<think>step 1</think>\nTherefore, the answer is \\(\\boxed{42}\\).")
+        );
+    }
+
+    #[test]
+    fn detects_transcript_contamination_in_generated_answer() {
+        let generated = "Reasoning...\nUser: new prompt";
+        assert!(contains_transcript_contamination(generated));
+    }
+
+    #[test]
+    fn detects_think_leakage_in_generated_answer() {
+        let generated = "<think>hidden chain";
+        assert!(contains_think_leakage(generated));
+    }
+
+    #[test]
+    fn classifies_transcript_contamination_before_other_failures() {
+        let context = concat!(
+            "User: Q\n\nAssistant: final is \\boxed{41}\nUser: new prompt",
+            "\n\n[boxed_answer]\n41"
+        );
+        let diagnostics = diagnose_failed_attempt(context, "41", "42");
+        assert_eq!(
+            diagnostics.bucket,
+            PolyMathFailureBucket::PromptOrTranscriptContamination
+        );
+        assert!(diagnostics.transcript_contamination);
+    }
+
+    #[test]
+    fn classifies_unfinished_think_without_boxed_answer_as_generation_artifact() {
+        let context = "User: Q\n\nAssistant: <think>draft";
+        let diagnostics = diagnose_failed_attempt(context, "", "42");
+        assert_eq!(
+            diagnostics.bucket,
+            PolyMathFailureBucket::OtherGenerationArtifact
+        );
+        assert!(diagnostics.think_leakage);
+    }
+
+    #[test]
+    fn classifies_boxed_answer_extraction_mismatch() {
+        let context =
+            "User: Q\n\nAssistant: <think>draft</think>\nTherefore, the answer is \\(\\boxed{\\frac{13}{4}}\\).";
+        let diagnostics = diagnose_failed_attempt(context, "13/4", r"\frac{13}{4}");
+        assert_eq!(
+            diagnostics.bucket,
+            PolyMathFailureBucket::BoxedPresentButExtractionMismatch
+        );
+        assert_eq!(
+            diagnostics.parsed_boxed_answer.as_deref(),
+            Some(r"\frac{13}{4}")
+        );
+        assert!(!diagnostics.stored_answer_matches_parsed_boxed_answer);
+    }
+
+    #[test]
+    fn classifies_boxed_present_but_wrong() {
+        let context =
+            "User: Q\n\nAssistant: <think>draft</think>\nTherefore, the answer is \\(\\boxed{41}\\).";
+        let diagnostics = diagnose_failed_attempt(context, "41", "42");
+        assert_eq!(
+            diagnostics.bucket,
+            PolyMathFailureBucket::BoxedPresentButWrong
+        );
+        assert!(diagnostics.stored_answer_matches_parsed_boxed_answer);
+        assert!(!diagnostics.think_leakage);
+    }
+
+    #[test]
+    fn classifies_boxed_missing_when_stored_answer_is_empty() {
+        let context = "User: Q\n\nAssistant: <think>draft</think>\nThe answer is 41.";
+        let diagnostics = diagnose_failed_attempt(context, "", "42");
+        assert_eq!(diagnostics.bucket, PolyMathFailureBucket::BoxedMissing);
+        assert_eq!(diagnostics.parsed_boxed_answer, None);
+    }
+
+    #[test]
+    fn classifies_reasoning_wrong_when_format_is_otherwise_ok() {
+        let context = "User: Q\n\nAssistant: The answer is 41.";
+        let diagnostics = diagnose_failed_attempt(context, "41", "42");
+        assert_eq!(
+            diagnostics.bucket,
+            PolyMathFailureBucket::ReasoningWrongFormatOk
+        );
+        assert_eq!(diagnostics.parsed_boxed_answer, None);
     }
 }

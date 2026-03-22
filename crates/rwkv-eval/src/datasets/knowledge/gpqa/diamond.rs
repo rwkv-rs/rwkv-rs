@@ -6,9 +6,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 use super::{download_gpqa_csv, gpqa_csv_path, join_subject_parts, ordered_gpqa_choices};
-use crate::datasets::knowledge::{
-    get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
-};
+use crate::datasets::knowledge::{get_expect_context, get_final_answer_with_cot_mode, get_ref_answer};
 use crate::datasets::utils::csv::read_csv_items;
 use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
