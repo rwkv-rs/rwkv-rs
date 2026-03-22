@@ -45,6 +45,16 @@ pub struct Mmmlu {
     test: Vec<MmmluItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&MMMLU_INFO).await;
+    }
+}
+
 #[allow(dead_code)]
 pub struct MmmluItem {
     unnamed_0: i64,

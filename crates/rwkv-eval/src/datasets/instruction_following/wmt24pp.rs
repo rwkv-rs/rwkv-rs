@@ -5,12 +5,13 @@ use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use crate::evaluators::instruction_following::{build_prompt, generate_response};
+use crate::inferers::generate_text_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use serde::{Deserialize, Serialize};
-use sonic_rs::{Value, json};
+use regex::Regex;
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 const WMT24PP_PASS_THRESHOLD: f64 = 70.0;
@@ -79,7 +80,7 @@ static WMT24PP_INFO: BenchmarkInfo = BenchmarkInfo {
     display_name: "WMT24++",
     cot_mode: &[CoTMode::NoCoT],
     sampling_config: SamplingConfig {
-        temperature: 0.0,
+        temperature: 0.001,
         top_k: 1,
         top_p: 1.0,
         presence_penalty: 0.0,
@@ -92,6 +93,21 @@ static WMT24PP_INFO: BenchmarkInfo = BenchmarkInfo {
     with_llm_judger: true,
     create: |dataset_root| Box::new(Wmt24pp::new(dataset_root)),
 };
+const WMT24PP_JUDGE_SAMPLING_CONFIG: SamplingConfig = SamplingConfig {
+    temperature: 0.001,
+    top_k: 1,
+    top_p: 1.0,
+    presence_penalty: 0.0,
+    repetition_penalty: 0.0,
+    penalty_decay: 1.0,
+};
+const WMT24PP_REFERENCE_BASED_JUDGE_INSTRUCTION: &str = concat!(
+    "You are a professional translation quality evaluator.\n",
+    "Evaluate the machine translation using the source text and the human reference translation.\n",
+    "Assign a continuous score from 0 to 100, where 100 means the translation is excellent.\n",
+    "Consider adequacy, fluency, terminology, and faithfulness.\n",
+    "Output only the numeric score and nothing else."
+);
 
 pub struct Wmt24pp {
     dataset_root: PathBuf,
@@ -118,60 +134,6 @@ struct RawWmt24ppItem {
     source: String,
     target: String,
     original_target: String,
-}
-
-#[derive(Debug, Serialize)]
-struct WmtJudgeRequest<'a> {
-    model: &'a str,
-    messages: Vec<WmtJudgeMessage<'a>>,
-    temperature: f32,
-    top_p: f32,
-    max_completion_tokens: u32,
-    response_format: WmtJudgeResponseFormat,
-}
-
-#[derive(Debug, Serialize)]
-struct WmtJudgeMessage<'a> {
-    role: &'static str,
-    content: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-struct WmtJudgeResponseFormat {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    json_schema: WmtJudgeJsonSchema,
-}
-
-#[derive(Debug, Serialize)]
-struct WmtJudgeJsonSchema {
-    description: Option<String>,
-    name: String,
-    schema: Value,
-    strict: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct WmtJudgeResponse {
-    choices: Vec<WmtJudgeChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WmtJudgeChoice {
-    finish_reason: Option<String>,
-    message: WmtJudgeChoiceMessage,
-}
-
-#[derive(Debug, Deserialize)]
-struct WmtJudgeChoiceMessage {
-    content: Option<String>,
-    refusal: Option<Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WmtJudgeWire {
-    score: f64,
-    reason: String,
 }
 
 #[derive(Debug)]
@@ -346,6 +308,21 @@ fn build_reference_based_judge_prompt(source: &str, reference: &str, translation
     )
 }
 
+fn build_reference_based_judge_request(source: &str, reference: &str, translation: &str) -> String {
+    let prompt = format!(
+        "{}\n\n{}",
+        WMT24PP_REFERENCE_BASED_JUDGE_INSTRUCTION,
+        build_reference_based_judge_prompt(source, reference, translation)
+    );
+    build_prompt(&prompt)
+}
+
+fn extract_score(text: &str) -> Option<f64> {
+    let regex = Regex::new(r"(?s)(\d+(?:\.\d+)?)").expect("valid wmt24pp score regex");
+    let capture = regex.captures(text)?;
+    capture.get(1)?.as_str().parse::<f64>().ok()
+}
+
 async fn judge_once(
     judger_client: &Client<OpenAIConfig>,
     judger_model_name: &str,
@@ -353,72 +330,26 @@ async fn judge_once(
     reference: &str,
     translation: &str,
 ) -> Result<WmtJudgeOutcome, String> {
-    let user_prompt = build_reference_based_judge_prompt(source, reference, translation);
-    let req = WmtJudgeRequest {
-        model: judger_model_name,
-        messages: vec![
-            WmtJudgeMessage {
-                role: "system",
-                content: concat!(
-                    "You are a professional translation quality evaluator.\n",
-                    "Evaluate the machine translation using the source text and the human reference translation.\n",
-                    "Assign a continuous score from 0 to 100, where 100 means the translation is excellent.\n",
-                    "Consider adequacy, fluency, terminology, and faithfulness.\n",
-                    "Return only JSON matching the provided schema."
-                ),
-            },
-            WmtJudgeMessage {
-                role: "user",
-                content: &user_prompt,
-            },
-        ],
-        temperature: 0.0,
-        top_p: 1.0,
-        max_completion_tokens: 256,
-        response_format: WmtJudgeResponseFormat {
-            kind: "json_schema",
-            json_schema: WmtJudgeJsonSchema {
-                description: None,
-                name: "wmt24pp_reference_based_judge".to_string(),
-                schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "score": {
-                            "type": "number",
-                            "minimum": 0.0,
-                            "maximum": 100.0
-                        },
-                        "reason": { "type": "string" }
-                    },
-                    "required": ["score", "reason"],
-                    "additionalProperties": false
-                }),
-                strict: true,
-            },
-        },
-    };
-
-    let resp: WmtJudgeResponse = judger_client
-        .chat()
-        .create_byot(&req)
-        .await
-        .map_err(|err| format!("judge request failed: {err}"))?;
-    let choice = resp
-        .choices
-        .first()
-        .ok_or_else(|| "judge returned no choices".to_string())?;
-    let content = choice.message.content.clone().ok_or_else(|| {
-        format!(
-            "judge returned no content; refusal={:?}; finish_reason={:?}",
-            choice.message.refusal, choice.finish_reason
-        )
-    })?;
-    let parsed = sonic_rs::from_str::<WmtJudgeWire>(&content)
-        .map_err(|err| format!("invalid judge json: {err}; content={content:?}"))?;
+    let prompt = build_reference_based_judge_request(source, reference, translation);
+    let content = generate_text_completion(
+        judger_client,
+        judger_model_name,
+        &prompt,
+        vec![],
+        64,
+        &WMT24PP_JUDGE_SAMPLING_CONFIG,
+    )
+    .await
+    .map_err(|err| format!("judge request failed: {err}"))?;
+    let score = extract_score(&content)
+        .ok_or_else(|| format!("judge returned no numeric score: {content:?}"))?;
+    if !(0.0..=100.0).contains(&score) {
+        return Err(format!("judge returned out-of-range score {score}: {content:?}"));
+    }
 
     Ok(WmtJudgeOutcome {
-        score: parsed.score,
-        reason: parsed.reason.trim().to_string(),
+        score,
+        reason: content.trim().to_string(),
     })
 }
 

@@ -49,6 +49,16 @@ pub struct Ceval {
     test: Vec<CevalItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&CEVAL_INFO).await;
+    }
+}
+
 #[allow(dead_code)]
 pub struct CevalItem {
     id: i64,

@@ -42,6 +42,16 @@ pub struct BrowseComp {
     test: Vec<BrowseCompItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&BROWSECOMP_INFO).await;
+    }
+}
+
 pub struct BrowseCompItem {
     question: String,
     answer: String,

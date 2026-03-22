@@ -46,6 +46,16 @@ pub struct SuperGpqa {
     test: Vec<SuperGpqaItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&SUPERGPQA_INFO).await;
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 pub struct SuperGpqaItem {

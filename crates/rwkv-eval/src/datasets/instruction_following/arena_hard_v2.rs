@@ -4,12 +4,13 @@ use crate::datasets::{
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use crate::evaluators::instruction_following::{build_prompt, generate_response};
+use crate::inferers::generate_text_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use serde::{Deserialize, Serialize};
-use sonic_rs::{Value, json, prelude::*};
+use serde::Deserialize;
+use sonic_rs::{Value, prelude::*};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -38,6 +39,14 @@ const ARENA_HARD_V2_PROMPT_TEMPLATE: &str = concat!(
     "<|The Start of Assistant A's Answer|>\n{ANSWER_A}\n<|The End of Assistant A's Answer|>\n\n",
     "<|The Start of Assistant B's Answer|>\n{ANSWER_B}\n<|The End of Assistant B's Answer|>"
 );
+const ARENA_HARD_V2_JUDGE_SAMPLING_CONFIG: SamplingConfig = SamplingConfig {
+    temperature: 0.001,
+    top_k: 1,
+    top_p: 1.0,
+    presence_penalty: 0.0,
+    repetition_penalty: 0.0,
+    penalty_decay: 1.0,
+};
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static ARENA_HARD_V2_INFO: BenchmarkInfo = BenchmarkInfo {
@@ -47,10 +56,10 @@ static ARENA_HARD_V2_INFO: BenchmarkInfo = BenchmarkInfo {
     cot_mode: &[CoTMode::NoCoT],
     sampling_config: SamplingConfig {
         temperature: 0.3,
-        top_k: 50,
-        top_p: 0.3,
+        top_k: 500,
+        top_p: 0.4,
         presence_penalty: 0.5,
-        repetition_penalty: 0.5,
+        repetition_penalty: 0.1,
         penalty_decay: 0.99,
     },
     n_shots: &[0],
@@ -93,60 +102,6 @@ struct RawArenaAnswer {
 struct RawArenaMessage {
     role: String,
     content: Value,
-}
-
-#[derive(Debug, Serialize)]
-struct ArenaJudgeRequest<'a> {
-    model: &'a str,
-    messages: Vec<ArenaJudgeMessage<'a>>,
-    temperature: f32,
-    top_p: f32,
-    max_completion_tokens: u32,
-    response_format: ArenaJudgeResponseFormat,
-}
-
-#[derive(Debug, Serialize)]
-struct ArenaJudgeMessage<'a> {
-    role: &'static str,
-    content: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-struct ArenaJudgeResponseFormat {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    json_schema: ArenaJudgeJsonSchema,
-}
-
-#[derive(Debug, Serialize)]
-struct ArenaJudgeJsonSchema {
-    description: Option<String>,
-    name: String,
-    schema: Value,
-    strict: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct ArenaJudgeResponse {
-    choices: Vec<ArenaJudgeChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ArenaJudgeChoice {
-    finish_reason: Option<String>,
-    message: ArenaJudgeChoiceMessage,
-}
-
-#[derive(Debug, Deserialize)]
-struct ArenaJudgeChoiceMessage {
-    content: Option<String>,
-    refusal: Option<Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ArenaJudgeWire {
-    verdict: String,
-    reason: String,
 }
 
 #[derive(Debug)]
@@ -208,6 +163,24 @@ fn build_judge_user_prompt(question: &str, answer_a: &str, answer_b: &str) -> St
         .replace("{ANSWER_B}", answer_b)
 }
 
+fn build_judge_prompt(question: &str, answer_a: &str, answer_b: &str) -> String {
+    let judge_prompt = format!(
+        "{}\n\n{}",
+        ARENA_HARD_V2_SYSTEM_PROMPT,
+        build_judge_user_prompt(question, answer_a, answer_b)
+    );
+    build_prompt(&judge_prompt)
+}
+
+fn extract_verdict(text: &str) -> Option<String> {
+    for verdict in ["A>>B", "A>B", "A=B", "B>A", "B>>A"] {
+        if text.contains(&format!("[[{verdict}]]")) {
+            return Some(verdict.to_string());
+        }
+    }
+    None
+}
+
 fn verdict_to_a_score(verdict: &str) -> Option<f64> {
     match verdict {
         "A>>B" | "A>B" => Some(1.0),
@@ -230,65 +203,23 @@ async fn judge_once(
     answer_a: &str,
     answer_b: &str,
 ) -> Result<ArenaJudgeOutcome, String> {
-    let user_prompt = build_judge_user_prompt(question, answer_a, answer_b);
-    let req = ArenaJudgeRequest {
-        model: judger_model_name,
-        messages: vec![
-            ArenaJudgeMessage {
-                role: "system",
-                content: ARENA_HARD_V2_SYSTEM_PROMPT,
-            },
-            ArenaJudgeMessage {
-                role: "user",
-                content: &user_prompt,
-            },
-        ],
-        temperature: 0.0,
-        top_p: 1.0,
-        max_completion_tokens: 4096,
-        response_format: ArenaJudgeResponseFormat {
-            kind: "json_schema",
-            json_schema: ArenaJudgeJsonSchema {
-                description: None,
-                name: "arena_hard_v2_judge".to_string(),
-                schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "verdict": {
-                            "type": "string",
-                            "enum": ["A>>B", "A>B", "A=B", "B>A", "B>>A"]
-                        },
-                        "reason": { "type": "string" }
-                    },
-                    "required": ["verdict", "reason"],
-                    "additionalProperties": false
-                }),
-                strict: true,
-            },
-        },
-    };
-
-    let resp: ArenaJudgeResponse = judger_client
-        .chat()
-        .create_byot(&req)
-        .await
-        .map_err(|err| format!("judge request failed: {err}"))?;
-    let choice = resp
-        .choices
-        .first()
-        .ok_or_else(|| "judge returned no choices".to_string())?;
-    let content = choice.message.content.clone().ok_or_else(|| {
-        format!(
-            "judge returned no content; refusal={:?}; finish_reason={:?}",
-            choice.message.refusal, choice.finish_reason
-        )
-    })?;
-    let parsed = sonic_rs::from_str::<ArenaJudgeWire>(&content)
-        .map_err(|err| format!("invalid judge json: {err}; content={content:?}"))?;
+    let prompt = build_judge_prompt(question, answer_a, answer_b);
+    let content = generate_text_completion(
+        judger_client,
+        judger_model_name,
+        &prompt,
+        vec![],
+        2048,
+        &ARENA_HARD_V2_JUDGE_SAMPLING_CONFIG,
+    )
+    .await
+    .map_err(|err| format!("judge request failed: {err}"))?;
+    let verdict = extract_verdict(&content)
+        .ok_or_else(|| format!("judge returned no Arena-Hard verdict tag: {content:?}"))?;
 
     Ok(ArenaJudgeOutcome {
-        verdict: parsed.verdict,
-        reason: parsed.reason.trim().to_string(),
+        verdict,
+        reason: content.trim().to_string(),
     })
 }
 

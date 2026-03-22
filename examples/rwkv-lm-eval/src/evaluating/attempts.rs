@@ -292,6 +292,29 @@ fn spawn_pending_checker(
     });
 }
 
+fn is_content_filter_checker_error(err: &str) -> bool {
+    let lowered = err.to_ascii_lowercase();
+    lowered.contains("content_filter")
+        || lowered.contains("content management policy")
+        || lowered.contains("prompt was filtered")
+        || lowered.contains("response was filtered")
+}
+
+fn build_content_filter_checker_insert(completions_id: i32, err: &str) -> CheckerInsert {
+    let _ = err;
+    CheckerInsert {
+        completions_id,
+        answer_correct: false,
+        instruction_following_error: false,
+        world_knowledge_error: false,
+        math_error: false,
+        reasoning_logic_error: false,
+        thought_contains_correct_answer: false,
+        needs_human_review: true,
+        reason: "content_filter".to_string(),
+    }
+}
+
 async fn run_and_store_checker(
     db: &Db,
     pending_check: PendingChecker,
@@ -301,14 +324,29 @@ async fn run_and_store_checker(
         .acquire_owned()
         .await
         .map_err(|err| format!("acquire checker semaphore failed: {err}"))?;
-    let checker = run_checker(
+    let checker = match run_checker(
         checker_runtime.client.as_ref(),
         &checker_runtime.model_name,
         &pending_check.context,
         &pending_check.answer,
         &pending_check.ref_answer,
     )
-    .await?;
+    .await
+    {
+        Ok(checker) => checker,
+        Err(err) if is_content_filter_checker_error(&err) => {
+            println!(
+                "checker content filter for completions_id={}: marking for human review",
+                pending_check.completions_id
+            );
+            return insert_checker(
+                db,
+                &build_content_filter_checker_insert(pending_check.completions_id, &err),
+            )
+            .await;
+        }
+        Err(err) => return Err(err),
+    };
 
     insert_checker(
         db,
@@ -325,4 +363,25 @@ async fn run_and_store_checker(
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_content_filter_checker_insert, is_content_filter_checker_error};
+
+    #[test]
+    fn detects_azure_content_filter_errors() {
+        let err = "checker request failed: new_api_error: The response was filtered due to the prompt triggering Azure OpenAI's content management policy. (code: content_filter)";
+        assert!(is_content_filter_checker_error(err));
+    }
+
+    #[test]
+    fn content_filter_checker_insert_requires_human_review() {
+        let insert = build_content_filter_checker_insert(42, "content_filter");
+        assert_eq!(insert.completions_id, 42);
+        assert!(insert.needs_human_review);
+        assert_eq!(insert.reason, "content_filter");
+        assert!(!insert.answer_correct);
+        assert!(!insert.thought_contains_correct_answer);
+    }
 }

@@ -40,6 +40,16 @@ pub struct HumanEvalCn {
     test: Vec<HumanEvalCnItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&HUMAN_EVAL_CN_INFO).await;
+    }
+}
+
 pub struct HumanEvalCnItem {
     task_id: String,
     prompt: String,

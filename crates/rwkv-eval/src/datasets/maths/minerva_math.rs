@@ -39,6 +39,16 @@ pub struct MinervaMath {
     test: Vec<MinervaMathItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&MINERVA_MATH_INFO).await;
+    }
+}
+
 pub struct MinervaMathItem {
     question: String,
     answer: String,

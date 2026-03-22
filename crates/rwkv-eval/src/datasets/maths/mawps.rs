@@ -58,6 +58,16 @@ pub struct Mawps {
     test: Vec<MawpsItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&MAWPS_INFO).await;
+    }
+}
+
 pub struct MawpsItem {
     question: String,
     answer: String,

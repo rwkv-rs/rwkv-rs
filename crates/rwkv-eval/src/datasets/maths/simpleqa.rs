@@ -40,6 +40,16 @@ pub struct Simpleqa {
     test: Vec<SimpleqaItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&SIMPLEQA_INFO).await;
+    }
+}
+
 pub struct SimpleqaItem {
     question: String,
     answer: String,

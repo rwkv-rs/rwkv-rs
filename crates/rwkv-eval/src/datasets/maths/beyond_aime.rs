@@ -40,6 +40,16 @@ pub struct BeyondAime {
     test: Vec<BeyondAimeItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&BEYOND_AIME_INFO).await;
+    }
+}
+
 pub struct BeyondAimeItem {
     question: String,
     answer: String,

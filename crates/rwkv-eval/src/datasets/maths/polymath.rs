@@ -67,54 +67,57 @@ impl PolyMath {
 
 fn get_answer_note(language: &str) -> &'static str {
     match language {
-        "en" => r"Note: Please put the final answer in the $\boxed{}$.",
-        "zh" => r"注意：请将最终答案放在 $\boxed{}$ 中。",
-        "ar" => r"ملاحظة: يُرجى وضع الإجابة النهائية في $\boxed{}$.",
-        "bn" => r"বিঃদ্রঃ: অনুগ্রহ করে চূড়ান্ত উত্তরটি $\boxed{}$ এর মধ্যে রাখুন।",
-        "de" => r"Hinweis: Bitte setzen Sie die endgültige Antwort in die $\boxed{}$.",
-        "es" => r"Nota: Por favor, coloque la respuesta final en la $\boxed{}$.",
-        "fr" => r"Remarque : Veuillez mettre la réponse finale dans la $\boxed{}$.",
-        "id" => r"Catatan: Silakan letakkan jawaban akhir di dalam $\boxed{}$.",
-        "it" => r"Nota: Per favore, metti la risposta finale nella $\boxed{}$.",
-        "ja" => r"注意：最終的な答えを $\boxed{}$ に入れてください。",
-        "ko" => r"참고: 최종 답안을 $\boxed{}$ 안에 넣어 주세요.",
-        "ms" => r"Nota: Sila letakkan jawapan akhir dalam $\boxed{}$.",
-        "pt" => r"Nota: Por favor, coloque a resposta final na $\boxed{}$.",
-        "ru" => r"Примечание: Пожалуйста, поместите окончательный ответ в $\boxed{}$.",
-        "sw" => r"Kumbuka: Tafadhali weka jibu la mwisho katika $\boxed{}$.",
-        "te" => r"గమనిక: దయచేసి తుది జవాబును $\boxed{}$ లో ఉంచండి.",
-        "th" => r"หมายเหตุ: กรุณาใส่คำตอบสุดท้ายใน $\boxed{}$.",
-        "vi" => r"Lưu ý: Vui lòng đặt câu trả lời cuối cùng trong $\boxed{}$.",
+        "en" => r"Put the final answer in \boxed{}.",
+        "zh" => r"请将最终答案放在 \boxed{} 中。",
+        "ar" => r"ضع الإجابة النهائية داخل \boxed{}.",
+        "bn" => r"চূড়ান্ত উত্তরটি \boxed{} এর মধ্যে দিন।",
+        "de" => r"Setzen Sie die endgültige Antwort in \boxed{}.",
+        "es" => r"Coloque la respuesta final en \boxed{}.",
+        "fr" => r"Veuillez mettre la réponse finale dans \boxed{}.",
+        "id" => r"Letakkan jawaban akhir di dalam \boxed{}.",
+        "it" => r"Metti la risposta finale in \boxed{}.",
+        "ja" => r"最終的な答えを \boxed{} に入れてください。",
+        "ko" => r"최종 답안을 \boxed{} 안에 넣어 주세요.",
+        "ms" => r"Letakkan jawapan akhir dalam \boxed{}.",
+        "pt" => r"Coloque a resposta final em \boxed{}.",
+        "ru" => r"Поместите окончательный ответ в \boxed{}.",
+        "sw" => r"Weka jibu la mwisho katika \boxed{}.",
+        "te" => r"తుది జవాబును \boxed{} లో ఉంచండి.",
+        "th" => r"ใส่คำตอบสุดท้ายใน \boxed{}.",
+        "vi" => r"Đặt câu trả lời cuối cùng trong \boxed{}.",
         _ => panic!("unsupported PolyMath language `{language}`"),
     }
 }
 
 fn get_language_control(language: &str) -> &'static str {
     match language {
-        "en" => "Choose the language you are most proficient in to think and answer.",
-        "zh" => "自选一种你最擅长的语言进行思考和回答。",
-        "ar" => "اختر اللغة التي تجيدها أكثر للتفكير والإجابة.",
-        "bn" => "আপনি যে ভাষাটি সবচেয়ে পারদর্শী সেটি বেছে নিয়ে চিন্তা এবং উত্তর দিন।",
-        "de" => {
-            "Wählen Sie die Sprache, in der Sie am kompetentesten sind, um zu denken und zu antworten."
-        }
-        "es" => "Elige el idioma en el que eres más competente para pensar y responder.",
-        "fr" => {
-            "Choisissez la langue dans laquelle vous êtes le plus compétent pour penser et répondre."
-        }
-        "id" => "Pilih bahasa yang paling Anda kuasai untuk berpikir dan menjawab.",
-        "it" => "Scegli la lingua in cui sei più competente per pensare e rispondere.",
-        "ja" => "最も得意な言語を選んで考え、回答してください。",
-        "ko" => "가장 능숙한 언어를 선택하여 생각하고 답변하세요.",
-        "ms" => "Pilih bahasa yang paling anda mahir untuk berfikir dan menjawab.",
-        "pt" => "Escolha o idioma em que você é mais competente para pensar e responder.",
-        "ru" => "Выберите язык, в котором вы наиболее компетентны, чтобы думать и отвечать.",
-        "sw" => "Chagua lugha ambayo unamudu zaidi kufikiri na kujibu.",
-        "te" => "మీరు అత్యంత ప్రావీణ్యం కలిగిన భాషను ఎంచుకుని ఆలోచించి సమాధానం ఇవ్వండి.",
-        "th" => "เลือกภาษาที่คุณมีความสามารถมากที่สุดในการคิดและตอบคำถาม.",
-        "vi" => "Chọn ngôn ngữ mà bạn thành thạo nhất để suy nghĩ và trả lời.",
+        "en" => "Use English to think and answer.",
+        "zh" => "使用中文进行思考和回答。",
+        "ar" => "استخدم العربية في التفكير والإجابة.",
+        "bn" => "চিন্তা ও উত্তরের জন্য বাংলা ব্যবহার করুন।",
+        "de" => "Verwenden Sie Deutsch zum Denken und Antworten.",
+        "es" => "Use español para pensar y responder.",
+        "fr" => "Utilisez le français pour réfléchir et répondre.",
+        "id" => "Gunakan bahasa Indonesia untuk berpikir dan menjawab.",
+        "it" => "Usa l'italiano per pensare e rispondere.",
+        "ja" => "日本語で考え、日本語で回答してください。",
+        "ko" => "한국어로 생각하고 한국어로 답하세요.",
+        "ms" => "Gunakan bahasa Melayu untuk berfikir dan menjawab.",
+        "pt" => "Use português para pensar e responder.",
+        "ru" => "Используйте русский язык для размышления и ответа.",
+        "sw" => "Tumia Kiswahili kufikiri na kujibu.",
+        "te" => "ఆలోచించడానికి మరియు సమాధానం ఇవ్వడానికి తెలుగు ఉపయోగించండి.",
+        "th" => "ใช้ภาษาไทยในการคิดและตอบคำถาม",
+        "vi" => "Sử dụng tiếng Việt để suy nghĩ và trả lời.",
         _ => panic!("unsupported PolyMath language `{language}`"),
     }
+}
+
+fn extract_boxed_answer(solution: &str) -> Option<String> {
+    let start = solution.rfind(r"\boxed{")? + r"\boxed{".len();
+    let tail = &solution[start..];
+    let end = tail.find('}')?;
+    Some(tail[..end].trim().to_string())
 }
 
 fn build_expected_context(item: &PolyMathItem, cot_mode: CoTMode) -> String {
@@ -248,18 +251,24 @@ impl Benchmark for PolyMath {
             .unwrap_or_else(|| panic!("benchmark requires judger_model_name but got None"));
 
         let ref_answer = self.get_ref_answer(index);
+        let parsed_answer = extract_boxed_answer(&generated.context)
+            .or_else(|| extract_boxed_answer(&generated.answer))
+            .unwrap_or_else(|| generated.answer.trim().to_string());
         let outcome = judge_with_retry(
             judger_client,
             judger_model_name,
             &expected_context,
             &ref_answer,
-            &generated.answer,
+            &parsed_answer,
         )
         .await;
 
         Record {
-            context: generated.context,
-            answer: generated.answer,
+            context: format!(
+                "{}\n\n[boxed_answer]\n{}",
+                generated.context, parsed_answer
+            ),
+            answer: parsed_answer,
             ref_answer,
             is_passed: outcome.is_passed,
             fail_reason: outcome.fail_reason,

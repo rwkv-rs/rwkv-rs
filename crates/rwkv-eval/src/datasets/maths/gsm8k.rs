@@ -39,6 +39,16 @@ pub struct Gsm8k {
     test: Vec<Gsm8kItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&GSM8K_INFO).await;
+    }
+}
+
 pub struct Gsm8kItem {
     question: String,
     answer: String,

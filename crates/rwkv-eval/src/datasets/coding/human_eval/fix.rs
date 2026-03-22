@@ -41,6 +41,16 @@ pub struct HumanEvalFix {
     test: Vec<HumanEvalFixItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&HUMAN_EVAL_FIX_INFO).await;
+    }
+}
+
 pub struct HumanEvalFixItem {
     task_id: String,
     prompt: String,

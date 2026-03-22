@@ -39,6 +39,16 @@ pub struct Aime24 {
     test: Vec<Aime24Item>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&AIME24_INFO).await;
+    }
+}
+
 pub struct Aime24Item {
     question: String,
     answer: String,

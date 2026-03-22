@@ -37,6 +37,16 @@ pub struct Asdiv {
     test: Vec<AsdivItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&ASDIV_INFO).await;
+    }
+}
+
 pub struct AsdivItem {
     question: String,
     answer: String,

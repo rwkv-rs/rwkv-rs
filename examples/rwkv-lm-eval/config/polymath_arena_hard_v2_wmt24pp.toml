@@ -13,7 +13,7 @@ model_num_params = ["7.2b"]
 benchmark_field = []
 extra_benchmark_name = ["polymath", "arena_hard_v2", "wmt24pp"]
 
-upload_to_space = false
+upload_to_space = true
 git_hash = "70c421f865fec0d41b446d58800b7123c91f3050"
 
 [[models]]

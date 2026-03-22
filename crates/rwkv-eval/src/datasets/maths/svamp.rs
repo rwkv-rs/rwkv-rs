@@ -38,6 +38,16 @@ pub struct Svamp {
     test: Vec<SvampItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&SVAMP_INFO).await;
+    }
+}
+
 pub struct SvampItem {
     question: String,
     answer: String,

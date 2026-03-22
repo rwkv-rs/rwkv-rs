@@ -7,7 +7,7 @@ retries = 0
 benchmark-downloads = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'package(test-unit)'
+filter = 'package(rwkv-eval)'
 test-group = 'benchmark-downloads'
 retries = { backoff = "fixed", count = 1, delay = "2s" }
 slow-timeout = { period = "5m", terminate-after = 2 }

@@ -302,7 +302,7 @@ async fn judge_once(
                 content: &user_prompt,
             },
         ],
-        temperature: 0.0,
+        temperature: 0.001,
         top_p: 1.0,
         max_completion_tokens: 32,
         response_format: MathsJudgeResponseFormat {

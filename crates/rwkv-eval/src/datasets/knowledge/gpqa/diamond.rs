@@ -40,6 +40,16 @@ pub struct GpqaDiamond {
     test: Vec<GpqaDiamondItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&GPQA_DIAMOND_INFO).await;
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 pub struct GpqaDiamondItem {

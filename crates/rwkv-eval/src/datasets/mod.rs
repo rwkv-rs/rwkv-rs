@@ -165,3 +165,47 @@ pub fn render_context(expected_context: &str, replacements: &[(&str, &str)]) -> 
     }
     context
 }
+
+#[cfg(test)]
+pub(crate) async fn assert_benchmark_download_load_and_read(info: &'static BenchmarkInfo) {
+    let tempdir = tempfile::tempdir()
+        .unwrap_or_else(|err| panic!("create tempdir failed for `{}`: {err}", info.name.0));
+    let mut benchmark = (info.create)(tempdir.path().to_path_buf());
+
+    benchmark.download().await;
+
+    assert!(
+        !benchmark.load(),
+        "load() returned invalid after download for `{}`",
+        info.name.0
+    );
+    assert!(
+        !benchmark.check().await,
+        "check() returned invalid after download for `{}`",
+        info.name.0
+    );
+    assert!(benchmark.len() > 0, "len() == 0 for `{}`", info.name.0);
+
+    let cot_mode = *info
+        .cot_mode
+        .first()
+        .unwrap_or_else(|| panic!("benchmark `{}` has empty cot_mode", info.name.0));
+    let n_shot = *info
+        .n_shots
+        .first()
+        .unwrap_or_else(|| panic!("benchmark `{}` has empty n_shots", info.name.0));
+
+    let expected_context = benchmark.get_expected_context(0, cot_mode, n_shot);
+    assert!(
+        !expected_context.trim().is_empty(),
+        "get_expected_context(0, ..) returned empty text for `{}`",
+        info.name.0
+    );
+
+    let ref_answer = benchmark.get_ref_answer(0);
+    assert!(
+        !ref_answer.trim().is_empty(),
+        "get_ref_answer(0) returned empty text for `{}`",
+        info.name.0
+    );
+}

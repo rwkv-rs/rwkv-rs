@@ -39,6 +39,16 @@ pub struct Gaokao2023En {
     test: Vec<Gaokao2023EnItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&GAOKAO2023EN_INFO).await;
+    }
+}
+
 pub struct Gaokao2023EnItem {
     question: String,
     answer: String,

@@ -29,3 +29,6 @@ microsandbox = { workspace = true }
 base64 = "0.22.1"
 sha2 = "0.10.9"
 zip = "0.6.6"
+
+[dev-dependencies]
+tempfile = { workspace = true }
