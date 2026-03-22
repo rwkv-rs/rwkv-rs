@@ -37,7 +37,6 @@ pub(crate) fn build_metrics_json(
     benchmark_info: &BenchmarkInfo,
     avg_k_plan: &AvgKExecutionPlan,
     max_pass_k: u8,
-    raw_success_counts: &[Vec<u8>],
     pass_at_k_hits: &BTreeMap<u8, usize>,
     passed: usize,
     total: usize,
@@ -63,7 +62,6 @@ pub(crate) fn build_metrics_json(
         "sample_size": avg_k_plan.indices.len(),
         "avg_repeat_count": avg_k_plan.repeat_count,
         "max_pass_k": max_pass_k,
-        "raw_success_counts": raw_success_counts,
         "pass_at_k": pass_at_k,
     }))
     .unwrap()

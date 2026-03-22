@@ -37,6 +37,7 @@ impl RunMode {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct EvaluatingOptions {
     pub run_mode: RunMode,
+    pub skip_checker: bool,
     pub attempt_concurrency: usize,
     pub judger_concurrency: usize,
     pub checker_concurrency: usize,
@@ -47,6 +48,7 @@ impl Default for EvaluatingOptions {
     fn default() -> Self {
         Self {
             run_mode: RunMode::New,
+            skip_checker: false,
             attempt_concurrency: DEFAULT_ATTEMPT_CONCURRENCY,
             judger_concurrency: DEFAULT_JUDGER_CONCURRENCY,
             checker_concurrency: DEFAULT_CHECKER_CONCURRENCY,
@@ -66,10 +68,12 @@ pub(crate) fn build_evaluating_options(eval_cfg: &FinalEvalConfig) -> Evaluating
         eval_cfg.judger_concurrency > 0,
         "`judger_concurrency` must be > 0"
     );
-    assert!(
-        eval_cfg.checker_concurrency > 0,
-        "`checker_concurrency` must be > 0"
-    );
+    if !eval_cfg.skip_checker {
+        assert!(
+            eval_cfg.checker_concurrency > 0,
+            "`checker_concurrency` must be > 0 when checker is enabled"
+        );
+    }
     assert!(
         eval_cfg.db_pool_max_connections > 0,
         "`db_pool_max_connections` must be > 0"
@@ -77,6 +81,7 @@ pub(crate) fn build_evaluating_options(eval_cfg: &FinalEvalConfig) -> Evaluating
 
     EvaluatingOptions {
         run_mode,
+        skip_checker: eval_cfg.skip_checker,
         attempt_concurrency: eval_cfg.attempt_concurrency,
         judger_concurrency: eval_cfg.judger_concurrency,
         checker_concurrency: eval_cfg.checker_concurrency,

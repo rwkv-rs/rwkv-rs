@@ -86,7 +86,7 @@ impl IpcServer {
         let config = self.config.clone();
         let (started_tx, started_rx) = std::sync::mpsc::sync_channel::<crate::Result<()>>(1);
         let handle = thread::Builder::new()
-            .name(format!("rwkv-infer-ipc-{}", config.service_name))
+            .name(format!("rwkv-infer-old-ipc-{}", config.service_name))
             .spawn(move || self.run_loop(started_tx))
             .map_err(|e| {
                 crate::Error::internal_with_source("failed to spawn ipc server thread", e)

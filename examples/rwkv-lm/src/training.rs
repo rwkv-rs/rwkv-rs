@@ -50,7 +50,7 @@ pub fn train<B: AutodiffBackend>(
     devices: Vec<B::Device>, // Device on which to perform computation (e.g., CPU or CUDA device)
     model_cfg_builder: FinalModelConfigBuilder,
     mut train_cfg_builder: FinalTrainConfigBuilder,
-    exp_log_path: &Path, // Experiment log directory (also used for artifacts)
+    experiment_log_path: &Path, // Experiment log directory (also used for artifacts)
 ) where
     B: TokenShiftDiffBackend + AddcmulBackend + Wkv7Backend + L2WrapBackend,
     B::InnerBackend: TokenShiftDiffBackend + AddcmulBackend + Wkv7Backend + L2WrapBackend,
@@ -178,7 +178,7 @@ pub fn train<B: AutodiffBackend>(
 
     let mut training = {
         rwkv_bench::trace_scope!("rwkv.train.learner.build");
-        SupervisedTraining::new(exp_log_path, dataloader_train, dataloader_valid)
+        SupervisedTraining::new(experiment_log_path, dataloader_train, dataloader_valid)
             .metric_train(CudaMetric::new())
             .metric_train_numeric(IterationSpeedMetric::new())
             .metric_train_numeric(LossMetric::new())
@@ -190,7 +190,7 @@ pub fn train<B: AutodiffBackend>(
             .with_application_logger(None)
     };
 
-    training = training.with_metric_logger(FileMetricLogger::new(exp_log_path));
+    training = training.with_metric_logger(FileMetricLogger::new(experiment_log_path));
 
     if let Some(wandb_logger) = init_wandb_metric_logger() {
         training = training.with_metric_logger(wandb_logger);
@@ -238,8 +238,6 @@ pub fn train<B: AutodiffBackend>(
     // Train the model
     let result = {
         rwkv_bench::trace_scope!("rwkv.train.step");
-        #[cfg(feature = "nsys")]
-        let _nvtx_step = nvtx::range!("rwkv.train.step");
         training.launch(Learner::new(model, optim, lr_scheduler))
     };
 
@@ -249,17 +247,15 @@ pub fn train<B: AutodiffBackend>(
         "train": TRAIN_CFG.get().unwrap().as_ref(),
     });
     fs::write(
-        exp_log_path.join("config.json"),
+        experiment_log_path.join("config.json"),
         sonic_rs::to_string_pretty(&config_json).unwrap(),
     )
     .unwrap();
 
     {
         rwkv_bench::trace_scope!("rwkv.train.checkpoint.save");
-        #[cfg(feature = "nsys")]
-        let _nvtx_ckpt = nvtx::range!("rwkv.train.checkpoint.save");
         CompactRecorder::new()
-            .record(result.model.into_record(), exp_log_path.join("model"))
+            .record(result.model.into_record(), experiment_log_path.join("model"))
             .unwrap();
     }
 }

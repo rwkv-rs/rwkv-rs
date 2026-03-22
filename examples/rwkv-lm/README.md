@@ -176,8 +176,7 @@ Use layered benchmarking:
 
 1. `rwkv-nn` kernel microbench (Divan)
 2. runtime stage profiling (Tracy)
-3. system GPU timeline (nsys)
-4. serving pressure benchmark + report
+3. serving pressure benchmark + report
 
 ### 1) Kernel microbench (`crates/rwkv-nn/benches`)
 
@@ -199,7 +198,7 @@ Available targets:
 - `wkv7_infer_forward`
 - `rapid_sample_forward`
 
-### 2/3/4) Scenario benches (`examples/rwkv-lm/benches/`)
+### 2/3) Scenario benches (`examples/rwkv-lm/benches/`)
 
 ```bash
 # Serving pressure benchmark
@@ -211,10 +210,6 @@ cargo bench --bench serve_bench -- \
 cargo bench --bench sweep_bench -- \
   --model rwkv-lm-7.2b --base-url http://127.0.0.1:8080 \
   --request-counts 64,128,256,512,1024,2048
-
-# nsys profiling wrapper
-cargo bench --bench profile_nsys_bench -- \
-  cargo run --example rwkv-lm-infer --features cuda,trace,nsys
 
 # tracy passthrough (trace feature => tracy enabled)
 cargo bench --bench profile_tracy_bench -- \
@@ -259,7 +254,7 @@ Sweep reports now draw request-count scaling charts:
 - request_count vs output token/s
 - request_count vs TTFT p99
 
-### Tracy / nsys quickstart
+### Tracy quickstart
 
 With `--features trace`, Tracy is enabled by default (no extra env vars required).
 
@@ -271,10 +266,6 @@ cargo run --example rwkv-lm-infer --features cuda,trace
 cargo bench --bench serve_bench -- \
   --model rwkv-lm-7.2b --base-url http://127.0.0.1:8080 \
   --num-requests 1000 --concurrency 960 --stream true
-
-# 3) nsys full GPU timeline
-cargo bench --bench profile_nsys_bench -- \
-  cargo run --example rwkv-lm-infer --features cuda,trace,nsys
 ```
 
 ### Metric glossary and quick checks

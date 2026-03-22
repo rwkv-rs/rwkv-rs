@@ -35,7 +35,8 @@ pub(crate) fn parse_score_summary(record: &TaskRecord) -> Result<Option<ScoreSum
         .metrics_json
         .as_deref()
         .ok_or_else(|| ApiError::internal("score row missing metrics_json"))?;
-    let metrics = parse_json_value(raw_metrics, "metrics")?;
+    let mut metrics = parse_json_value(raw_metrics, "metrics")?;
+    sanitize_score_metrics(&mut metrics);
 
     Ok(Some(ScoreSummary {
         score_id,
@@ -52,6 +53,12 @@ pub(crate) fn parse_score_summary(record: &TaskRecord) -> Result<Option<ScoreSum
         pass_at_k: parse_pass_at_k(&metrics),
         metrics,
     }))
+}
+
+fn sanitize_score_metrics(metrics: &mut Value) {
+    if let Some(object) = metrics.as_object_mut() {
+        object.remove(&"raw_success_counts");
+    }
 }
 
 fn parse_json_value(raw: &str, field_name: &str) -> Result<Value, ApiError> {
@@ -104,6 +111,7 @@ mod tests {
     use super::{parse_sampling_summary, parse_score_summary};
     use crate::db::{TaskRecord, TaskStatus};
     use crate::http_api::schema::ApiCotMode;
+    use sonic_rs::JsonValueTrait;
 
     #[test]
     fn parses_sampling_summary_with_sonic() {
@@ -160,6 +168,7 @@ mod tests {
                     "sample_size":10,
                     "avg_repeat_count":1,
                     "max_pass_k":3,
+                    "raw_success_counts":[[0,1,1]],
                     "pass_at_k":{"pass@1":0.4,"pass@3":0.6}
                 }"#
                 .to_string(),
@@ -170,5 +179,6 @@ mod tests {
         assert_eq!(summary.cot_mode, Some(ApiCotMode::NoCot));
         assert_eq!(summary.passed, Some(6));
         assert_eq!(summary.pass_at_k.get("pass@3"), Some(&0.6));
+        assert!(summary.metrics.get(&"raw_success_counts").is_none());
     }
 }

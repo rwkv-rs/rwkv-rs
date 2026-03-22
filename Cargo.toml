@@ -70,7 +70,7 @@ itertools = { version = "0.14.0" }
 walkdir = { version = "2.5.0" }
 derive-new = { version = "0.7.0" }
 flate2 = { version = "1.1.9" }
-microsandbox = { version = "0.1.2" }
+microsandbox = { version = "0.3.0" }
 
 unicode-segmentation = "1.12.0"
 unicode-script = "0.5.8"
@@ -92,7 +92,6 @@ chrono = { version = "0.4.44", features = ["clock"] }
 clia-tracing-config = "0.2.7"
 indicatif = { version = "0.18.4", features = ["tokio"] }
 thiserror = "2.0.18"
-nvtx = "1.3.0"
 wandb = { git = "https://github.com/rwkv-rs/wandb-rs", rev = "1633ca27afb4e09caca2e00d148ea239bc639a69" }
 plotters = { version = "0.3.7", default-features = false }
 
