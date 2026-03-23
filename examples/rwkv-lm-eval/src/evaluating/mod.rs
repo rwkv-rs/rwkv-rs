@@ -19,6 +19,7 @@ use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfigBuilder};
 use rwkv_eval::datasets::Benchmark;
 use rwkv_eval::datasets::maths::set_llm_judger_semaphore;
 use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 use crate::db::{
     BenchmarkInsert, Db, ModelInsert, ScoreInsert, TaskInsert, TaskStatus, insert_score,
@@ -191,27 +192,53 @@ pub async fn evaluating(
             .as_ref()
             .map(|runtime| runtime.model_name.clone());
 
+        let mut model_runs = JoinSet::new();
         for target_model in &clients_with_cfg {
-            run_target_model(
-                benchmark_info,
-                Arc::clone(&benchmark),
-                benchmark_id,
-                max_pass_k,
-                judger_model_name.as_deref(),
-                judger_client.clone(),
-                checker_model_name.as_deref(),
-                checker_runtime.clone(),
-                target_model,
-                &model_ids,
-                &db,
-                &options,
-                &config_path,
-                &logs_path,
-                &experiment_name,
-                &experiment_desc,
-                &git_hash,
-            )
-            .await;
+            let benchmark = Arc::clone(&benchmark);
+            let judger_model_name = judger_model_name.clone();
+            let judger_client = judger_client.clone();
+            let checker_model_name = checker_model_name.clone();
+            let checker_runtime = checker_runtime.clone();
+            let target_model = Arc::clone(target_model);
+            let model_ids = model_ids.clone();
+            let db = db.clone();
+            let config_path = config_path.clone();
+            let logs_path = logs_path.clone();
+            let experiment_name = experiment_name.clone();
+            let experiment_desc = experiment_desc.clone();
+            let git_hash = git_hash.clone();
+
+            model_runs.spawn(async move {
+                run_target_model(
+                    benchmark_info,
+                    benchmark,
+                    benchmark_id,
+                    max_pass_k,
+                    judger_model_name.as_deref(),
+                    judger_client,
+                    checker_model_name.as_deref(),
+                    checker_runtime,
+                    &target_model,
+                    &model_ids,
+                    &db,
+                    &options,
+                    &config_path,
+                    &logs_path,
+                    &experiment_name,
+                    &experiment_desc,
+                    &git_hash,
+                )
+                .await;
+            });
+        }
+
+        while let Some(result) = model_runs.join_next().await {
+            if let Err(join_err) = result {
+                if join_err.is_panic() {
+                    panic!("model evaluation task panicked");
+                }
+                panic!("model evaluation task join failed: {join_err}");
+            }
         }
     }
 }
