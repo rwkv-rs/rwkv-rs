@@ -52,15 +52,12 @@ pub struct FunctionInContext {
     pub arguments: String,
 }
 
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseFormat {
     Text,
     JsonObject,
-    JsonSchema {
-        json_schema: JsonSchema,
-    },
+    JsonSchema { json_schema: JsonSchema },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

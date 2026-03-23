@@ -1,9 +1,7 @@
 pub mod logprobs;
 pub mod sampling;
 
-use crate::cores::forward::{
-    sampling::SamplingConfig,
-};
+use crate::cores::forward::{sampling::SamplingConfig};
 
 pub trait ModelForward: Send + 'static {
     fn forward(&mut self, batch_ids: &[usize], contexts: &[&[i32]], masks: &[&[u8]])
@@ -11,10 +9,10 @@ pub trait ModelForward: Send + 'static {
 
     fn sample(
         &mut self,
-        batch_ids: &[usize],
         logits: Vec<Logits>,
         sampling_configs: &[SamplingConfig],
         token_logprobs_configs: &[Option<TokenIdLogprobsConfig>],
+        guided_token_masks: &[Option<&[i32]>],
     ) -> Vec<TokenId>;
 
     fn reset(&mut self, batch_index: usize);

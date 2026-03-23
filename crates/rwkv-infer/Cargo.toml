@@ -31,6 +31,7 @@ rwkv-bench = { path = "../rwkv-bench", default-features = false }
 clia-tracing-config = { workspace = true }
 iceoryx2 = { workspace = true, optional = true }
 itertools = { workspace = true }
+indexmap = { workspace = true }
 
 burn = { workspace = true, default-features = false, features = ["std", "autodiff", "cubecl"] }
 

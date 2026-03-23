@@ -8431,6 +8431,7 @@ dependencies = [
  "burn",
  "clia-tracing-config",
  "iceoryx2",
+ "indexmap 2.13.0",
  "itertools 0.14.0",
  "log",
  "once_cell",
