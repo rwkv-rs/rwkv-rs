@@ -12,6 +12,7 @@ pub struct RawEvalConfig {
     pub judger_concurrency: Option<usize>,
     pub checker_concurrency: Option<usize>,
     pub db_pool_max_connections: Option<u32>,
+    pub sample_limit: Option<usize>,
     pub browsecomp_cot_max_tokens: Option<u32>,
     pub browsecomp_answer_max_tokens: Option<u32>,
     pub model_arch_versions: Vec<String>,

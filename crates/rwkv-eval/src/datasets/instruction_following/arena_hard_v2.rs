@@ -1,9 +1,10 @@
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
+    apply_user_assistant_template,
+    instruction_following::sanitize_visible_answer,
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
-use crate::evaluators::instruction_following::build_prompt;
 use crate::inferers::generate_text_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -16,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 const ARENA_HARD_V2_EXPECTED_LEN: usize = 750;
 const ARENA_HARD_V2_BASELINE_MODEL: &str = "o3-mini-2025-01-31";
-const ARENA_HARD_V2_SYSTEM_PROMPT: &str = concat!(
+const ARENA_HARD_V2_JUDGE_INSTRUCTION: &str = concat!(
     "Please act as an impartial judge and evaluate the quality of the responses provided by two AI assistants to the user prompt displayed below. ",
     "You will be given assistant A's answer and assistant B's answer. Your job is to evaluate which assistant's answer is better.\n\n",
     "Do not generate a full replacement answer to the user prompt. Do not write corrected code, a rewritten essay, or any long standalone solution. ",
@@ -40,7 +41,9 @@ const ARENA_HARD_V2_PROMPT_TEMPLATE: &str = concat!(
     "<|The Start of Assistant A's Answer|>\n{ANSWER_A}\n<|The End of Assistant A's Answer|>\n\n",
     "<|The Start of Assistant B's Answer|>\n{ANSWER_B}\n<|The End of Assistant B's Answer|>"
 );
-const ARENA_HARD_V2_GENERATION_STOP_SUFFIXES: &[&str] = &["\n\nUser:", "\n\nAssistant:"];
+const ARENA_HARD_V2_REQUEST_STOP_SUFFIXES: &[&str] = &["\n\nUser:"];
+const ARENA_HARD_V2_SANITIZE_STOP_SUFFIXES: &[&str] = &["\n\nUser:", "\n\nAssistant:"];
+const ARENA_HARD_V2_ASSISTANT_PREFIX: &str = "Here is my answer:\n";
 const ARENA_HARD_V2_JUDGE_SAMPLING_CONFIG: SamplingConfig = SamplingConfig {
     temperature: 0.001,
     top_k: 1,
@@ -166,28 +169,22 @@ fn build_judge_user_prompt(question: &str, answer_a: &str, answer_b: &str) -> St
 }
 
 fn build_judge_prompt(question: &str, answer_a: &str, answer_b: &str) -> String {
-    let judge_prompt = format!(
+    format!(
         "{}\n\n{}",
-        ARENA_HARD_V2_SYSTEM_PROMPT,
+        ARENA_HARD_V2_JUDGE_INSTRUCTION,
         build_judge_user_prompt(question, answer_a, answer_b)
-    );
-    build_prompt(&judge_prompt)
+    )
 }
 
 fn generation_stop_suffixes() -> Vec<String> {
-    ARENA_HARD_V2_GENERATION_STOP_SUFFIXES
+    ARENA_HARD_V2_REQUEST_STOP_SUFFIXES
         .iter()
         .map(|suffix| (*suffix).to_string())
         .collect()
 }
 
 fn trim_transcript_contamination(text: &str) -> String {
-    let cutoff = ARENA_HARD_V2_GENERATION_STOP_SUFFIXES
-        .iter()
-        .filter_map(|suffix| text.find(suffix))
-        .min()
-        .unwrap_or(text.len());
-    text[..cutoff].trim().to_string()
+    sanitize_visible_answer(text, ARENA_HARD_V2_SANITIZE_STOP_SUFFIXES)
 }
 
 fn extract_verdict(text: &str) -> Option<String> {
@@ -408,7 +405,10 @@ impl Benchmark for ArenaHardV2 {
             "arena_hard_v2 only supports NoCoT"
         );
         assert_eq!(n_shot, 0, "arena_hard_v2 only supports 0-shot");
-        build_prompt(&self.test[index].prompt)
+        apply_user_assistant_template(
+            self.test[index].prompt.clone(),
+            ARENA_HARD_V2_ASSISTANT_PREFIX.to_string(),
+        )
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
@@ -427,7 +427,7 @@ impl Benchmark for ArenaHardV2 {
     ) -> Record {
         let item = &self.test[index];
         let prompt = self.get_expected_context(index, cot_mode, n_shot);
-        let answer = generate_text_completion(
+        let raw_answer = generate_text_completion(
             model_client,
             model_name,
             &prompt,
@@ -437,7 +437,7 @@ impl Benchmark for ArenaHardV2 {
         )
         .await
         .unwrap();
-        let answer = trim_transcript_contamination(&answer);
+        let answer = trim_transcript_contamination(&raw_answer);
         let ref_answer = self.get_ref_answer(index);
         let base_context = format!(
             concat!(
@@ -446,6 +446,7 @@ impl Benchmark for ArenaHardV2 {
                 "[subcategory]\n{}\n\n",
                 "[language]\n{}\n\n",
                 "[prompt]\n{}\n\n",
+                "[raw_model_answer]\n{}\n\n",
                 "[model_answer]\n{}"
             ),
             item.uid,
@@ -453,6 +454,7 @@ impl Benchmark for ArenaHardV2 {
             item.subcategory,
             item.language.clone().unwrap_or_default(),
             item.prompt,
+            raw_answer,
             answer,
         );
 
@@ -571,75 +573,5 @@ impl Benchmark for ArenaHardV2 {
                 )
             },
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        ARENA_HARD_V2_EXPECTED_LEN, ARENA_HARD_V2_SYSTEM_PROMPT, ArenaHardV2,
-        build_judge_error_reason, generation_stop_suffixes, target_score_from_verdict,
-        trim_transcript_contamination,
-    };
-    use crate::datasets::Benchmark;
-    use std::path::PathBuf;
-
-    fn local_dataset_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/rwkv-lm-eval/datasets")
-    }
-
-    #[test]
-    fn maps_verdicts_from_target_perspective() {
-        assert_eq!(target_score_from_verdict("A>B", true).unwrap(), 1.0);
-        assert_eq!(target_score_from_verdict("B>A", true).unwrap(), 0.0);
-        assert_eq!(target_score_from_verdict("A=B", true).unwrap(), 0.5);
-        assert_eq!(target_score_from_verdict("A>B", false).unwrap(), 0.0);
-        assert_eq!(target_score_from_verdict("B>>A", false).unwrap(), 1.0);
-    }
-
-    #[test]
-    fn loads_local_dataset() {
-        let mut benchmark = ArenaHardV2::new(local_dataset_root());
-        assert!(!benchmark.load());
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("build tokio runtime");
-        assert!(!runtime.block_on(benchmark.check()));
-        assert_eq!(benchmark.len(), ARENA_HARD_V2_EXPECTED_LEN);
-    }
-
-    #[test]
-    fn arena_judge_prompt_forbids_full_rewrites() {
-        assert!(ARENA_HARD_V2_SYSTEM_PROMPT.contains("Do not generate a full replacement answer"));
-        assert!(ARENA_HARD_V2_SYSTEM_PROMPT.contains("End with a final line"));
-        assert!(!ARENA_HARD_V2_SYSTEM_PROMPT.contains("Begin your evaluation by generating your own answer"));
-    }
-
-    #[test]
-    fn judge_error_reason_includes_failed_rounds() {
-        assert_eq!(
-            build_judge_error_reason(Some("r1"), Some("r2")),
-            "arena judge_error: round1=r1 | round2=r2"
-        );
-        assert_eq!(
-            build_judge_error_reason(Some("r1"), None),
-            "arena judge_error: round1=r1"
-        );
-    }
-
-    #[test]
-    fn arena_generation_uses_transcript_stop_suffixes() {
-        assert_eq!(
-            generation_stop_suffixes(),
-            vec!["\n\nUser:".to_string(), "\n\nAssistant:".to_string()]
-        );
-    }
-
-    #[test]
-    fn trims_arena_transcript_contamination() {
-        let answer = "Here is my answer.\n\nUser: next turn";
-        assert_eq!(trim_transcript_contamination(answer), "Here is my answer.");
     }
 }

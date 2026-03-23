@@ -8505,7 +8505,6 @@ dependencies = [
  "async-openai",
  "axum",
  "clap",
- "dotenvy",
  "rwkv-config",
  "rwkv-eval",
  "serde",

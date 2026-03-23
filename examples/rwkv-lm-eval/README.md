@@ -113,8 +113,7 @@ Model config types:
 - `[[models]]` must provide `model_arch_version`, `model_data_version`, `model_num_params`
 - `[llm_judger]` and `[llm_checker]` use `ExtApiConfig`
 - `ExtApiConfig` only requires `base_url`, `api_key`, `model`
-- `.env` also supports `RWKV_EVAL_EXT_MODELS` plus role-specific `RWKV_EVAL_LLM_JUDGER_MODELS` / `RWKV_EVAL_LLM_CHECKER_MODELS`
-- Fallback model lists are tried in order against the same `base_url` and `api_key`; the first healthy OpenAI-compatible chat model is selected at runtime
+- All runtime configuration is read from TOML.
 
 ## Config Notes
 
@@ -155,3 +154,35 @@ git_hash = "a8dc285c786fc425c9effee232453213b4b5ce8e"
 - If persistence is disabled, the evaluator does not connect to PostgreSQL and does not persist checker results.
 
 Logs are written under `examples/rwkv-lm-eval/logs/`.
+
+## Legacy Score Migration
+
+If you have an older PostgreSQL database that already contains `scores`, you can
+copy them into a newer database with:
+
+```bash
+cargo run -p rwkv-lm-eval --example migrate_scores -- \
+  --source-db-url postgres://username:password@old-host:5432/old_db \
+  --target-db-url postgres://username:password@new-host:5432/new_db
+```
+
+Apply the migration after checking the dry-run output:
+
+```bash
+cargo run -p rwkv-lm-eval --example migrate_scores -- \
+  --source-db-url postgres://username:password@old-host:5432/old_db \
+  --target-db-url postgres://username:password@new-host:5432/new_db \
+  --apply
+```
+
+Useful flags:
+
+- `--overwrite-existing` updates target rows when a score already exists.
+- `--prefer-latest-match` uses the highest `task_id` when multiple target tasks match.
+- `--ignore-config-path` relaxes matching when old and new task `config_path` values differ.
+- `--ignore-git-hash` relaxes matching when the task `git_hash` changed.
+- `--keep-legacy-metrics` preserves legacy `metrics.raw_success_counts` instead of removing it.
+
+The migration assumes the legacy database still has compatible `model`,
+`benchmark`, `task`, and `scores` tables. It maps rows by task identity instead
+of copying `task_id` directly.

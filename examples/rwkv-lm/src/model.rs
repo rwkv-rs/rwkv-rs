@@ -1,9 +1,7 @@
 use rwkv::custom::Tensor;
 use rwkv::custom::config::Config;
 use rwkv::custom::module::Module;
-use rwkv::custom::nn::{
-    Embedding, EmbeddingConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig,
-};
+use rwkv::custom::nn::{Embedding, EmbeddingConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig};
 use rwkv::custom::prelude::Int;
 use rwkv::custom::tensor::backend::Backend;
 use rwkv::nn::cells::causal::{MultiCausalCells, MultiCausalCellsConfig, MultiCausalCellsIO};

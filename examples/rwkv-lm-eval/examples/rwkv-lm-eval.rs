@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::Parser;
 use rwkv_config::raw::eval::SpaceDbConfig;
@@ -42,30 +42,10 @@ fn validate_space_db_config(cfg: &SpaceDbConfig) -> Result<(), String> {
     Ok(())
 }
 
-fn load_eval_dotenv(config_dir: &Path) -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    candidates.push(config_dir.join(".env"));
-    if let Some(parent) = config_dir.parent() {
-        candidates.push(parent.join(".env"));
-    }
-    candidates.push(paths::crate_root().join(".env"));
-    candidates.push(PathBuf::from(".env"));
-
-    candidates.into_iter().find_map(|path| {
-        if !path.is_file() {
-            return None;
-        }
-        dotenvy::from_path(&path)
-            .unwrap_or_else(|err| panic!("failed to load .env from {}: {err}", path.display()));
-        Some(path)
-    })
-}
-
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
     let config_path = resolve_eval_cfg_path(&args.config_dir, &args.eval_config);
-    let dotenv_path = load_eval_dotenv(&args.config_dir);
     let eval_cfg_builder = init_cfg(&args.config_dir, &args.eval_config);
     eval_cfg_builder.build();
 
@@ -93,13 +73,6 @@ async fn main() {
         args.bind,
         config_path.display(),
         max_connections
-    );
-    println!(
-        ".env: {}",
-        dotenv_path
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "<not found>".to_string())
     );
     println!("config path: {}", config_path.display());
     println!("openapi: http://{}/openapi.json", args.bind);

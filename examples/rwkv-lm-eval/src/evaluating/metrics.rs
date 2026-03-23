@@ -66,9 +66,7 @@ mod tests {
     use super::compute_metrics;
     use crate::evaluating::runtime::AttemptKey;
     use crate::evaluating::sampling::AvgKExecutionPlan;
-    use rwkv_eval::datasets::{
-        Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
-    };
+    use rwkv_eval::datasets::{Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig};
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 

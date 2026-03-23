@@ -8,7 +8,7 @@ fn main() {
     );
 }
 
-use std::{fs::create_dir_all, path::PathBuf, sync::Arc};
+use std::{fs::create_dir_all, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::serve;
 use tokio::net::TcpListener;
@@ -18,13 +18,11 @@ use rwkv::{
     infer::{
         access::http_api::{HttpApiRouterBuilder, HttpApiState},
         auth::AuthConfig,
-        model_pool::LoadedModelRegistry,
+        model_pool::loaded_model_registry::LoadedModelRegistry,
     },
     nn::kernels::{
-        addcmul::AddcmulBackend,
-        rapid_sample::RapidSampleBackend,
-        token_shift_diff::TokenShiftDiffBackend,
-        wkv7_common::Wkv7Backend,
+        addcmul::AddcmulBackend, rapid_sample::RapidSampleBackend,
+        token_shift_diff::TokenShiftDiffBackend, wkv7_common::Wkv7Backend,
     },
 };
 use rwkv_lm::{inferring::RwkvLmEngineFactory, paths};
@@ -93,14 +91,11 @@ where
     #[cfg(feature = "trace")]
     println!("trace mode: {trace_mode:?}");
 
-    let loaded_model_registry = Arc::new(
-        LoadedModelRegistry::bootstrap(
-            config_dir,
-            infer_cfg,
-            Arc::new(RwkvLmEngineFactory::<B>::new()),
-        )
-        .unwrap(),
-    );
+    let loaded_model_registry = Arc::new(LoadedModelRegistry::bootstrap(
+        config_dir,
+        infer_cfg,
+        Arc::new(RwkvLmEngineFactory::<B>::new()),
+    ));
 
     let app = HttpApiState {
         auth_cfg: AuthConfig {
@@ -125,14 +120,17 @@ where
 
     #[cfg(not(feature = "ipc"))]
     assert!(
-        loaded_model_registry.ipc_enabled(),
+        !loaded_model_registry.ipc_enabled(),
         "ipc is enabled in infer config but feature `ipc` is not enabled"
     );
 
     let router = HttpApiRouterBuilder::new(app).build().await.unwrap();
 
-    let bind_addr = loaded_model_registry.http_bind_addr();
-    let listener = TcpListener::bind(&bind_addr)
+    let bind_addr: SocketAddr = loaded_model_registry
+        .http_bind_addr()
+        .parse()
+        .unwrap_or_else(|e| panic!("invalid http bind addr: {e}"));
+    let listener = TcpListener::bind(bind_addr)
         .await
         .unwrap_or_else(|e| panic!("failed to bind http listener {}: {e}", bind_addr));
     serve(listener, router)

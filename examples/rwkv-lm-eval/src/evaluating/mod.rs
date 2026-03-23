@@ -18,7 +18,6 @@ use std::sync::Arc;
 use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfigBuilder};
 use rwkv_eval::datasets::Benchmark;
 use rwkv_eval::datasets::maths::set_llm_judger_semaphore;
-use rwkv_eval::init::set_runtime_ext_api_config_overrides;
 use tokio::sync::Semaphore;
 
 use crate::db::{
@@ -31,9 +30,7 @@ use self::benchmark::{
     collect_benchmarks, ensure_microsandbox_for_coding_benchmarks, prepare_benchmark,
     validate_benchmark_info,
 };
-use self::client::{
-    ClientWithConfig, build_client, check_completion_client, resolve_chat_ext_api_config,
-};
+use self::client::{ClientWithConfig, build_client, check_client};
 use self::db::connect_db_if_configured;
 use self::metrics::compute_metrics;
 use self::models::{collect_models, model_cache_key};
@@ -58,6 +55,7 @@ pub async fn evaluating(
 
     let eval_cfg = EVAL_CFG.get().unwrap();
     let options = build_evaluating_options(eval_cfg);
+    let sample_limit = eval_cfg.sample_limit;
     let experiment_name = eval_cfg.experiment_name.clone();
     let experiment_desc = eval_cfg.experiment_desc.clone();
     let git_hash = eval_cfg.git_hash.clone();
@@ -87,28 +85,8 @@ pub async fn evaluating(
             })
         })
         .collect::<Vec<_>>();
-    let llm_judger_cfg = resolve_chat_ext_api_config(
-        "llm_judger",
-        &eval_cfg.llm_judger,
-        "RWKV_EVAL_LLM_JUDGER_MODELS",
-        "RWKV_EVAL_EXT_MODELS",
-    )
-    .await;
-    let llm_checker_cfg = if db.is_some() {
-        resolve_chat_ext_api_config(
-            "llm_checker",
-            &eval_cfg.llm_checker,
-            "RWKV_EVAL_LLM_CHECKER_MODELS",
-            "RWKV_EVAL_EXT_MODELS",
-        )
-        .await
-    } else {
-        eval_cfg.llm_checker.clone()
-    };
-    set_runtime_ext_api_config_overrides(
-        Some(llm_judger_cfg.clone()),
-        db.as_ref().map(|_| llm_checker_cfg.clone()),
-    );
+    let llm_judger_cfg = eval_cfg.llm_judger.clone();
+    let llm_checker_cfg = eval_cfg.llm_checker.clone();
     let judger_semaphore = Arc::new(Semaphore::new(options.judger_concurrency));
     set_llm_judger_semaphore(Arc::clone(&judger_semaphore));
     let checker_runtime = if options.skip_checker {
@@ -141,13 +119,13 @@ pub async fn evaluating(
         options.db_pool_max_connections
     );
     println!("target models: {}", clients_with_cfg.len());
-    println!("llm judger model: {}", llm_judger_cfg.model);
-    if db.is_some() {
-        println!("llm checker model: {}", llm_checker_cfg.model);
-    }
 
     for target_model in &clients_with_cfg {
-        check_completion_client(&target_model.client, &target_model.api_cfg.model).await;
+        check_client(&target_model.client, &target_model.api_cfg.model).await;
+    }
+    check_client(&llm_judger_client, &llm_judger_cfg.model).await;
+    if let Some(checker_runtime) = checker_runtime.as_ref() {
+        check_client(checker_runtime.client.as_ref(), &llm_checker_cfg.model).await;
     }
 
     let mut model_ids = BTreeMap::new();
@@ -181,6 +159,9 @@ pub async fn evaluating(
         let benchmark: Arc<dyn Benchmark> = Arc::from(benchmark_box);
 
         let benchmark_id = if let Some(db) = db.as_ref() {
+            let effective_benchmark_len = sample_limit
+                .map(|limit| limit.min(benchmark.len()))
+                .unwrap_or_else(|| benchmark.len());
             let benchmark_id = upsert_benchmark(
                 db,
                 &BenchmarkInsert {
@@ -188,7 +169,7 @@ pub async fn evaluating(
                     benchmark_split: "test".to_string(),
                     url: None,
                     status: "Completed".to_string(),
-                    num_samples: benchmark.len() as i32,
+                    num_samples: effective_benchmark_len as i32,
                 },
             )
             .await
@@ -228,6 +209,7 @@ pub async fn evaluating(
                 &model_ids,
                 &db,
                 &options,
+                sample_limit,
                 &config_path,
                 &logs_path,
                 &experiment_name,
@@ -253,6 +235,7 @@ async fn run_target_model(
     model_ids: &BTreeMap<String, i32>,
     db: &Option<Db>,
     options: &options::EvaluatingOptions,
+    sample_limit: Option<usize>,
     config_path: &std::path::Path,
     logs_path: &std::path::Path,
     experiment_name: &str,
@@ -263,6 +246,9 @@ async fn run_target_model(
         "run benchmark={} model={}",
         benchmark_info.name.0, target_model.api_cfg.model,
     );
+    let effective_benchmark_len = sample_limit
+        .map(|limit| limit.min(benchmark.len()))
+        .unwrap_or_else(|| benchmark.len());
 
     let model_id = model_ids
         .get(&model_cache_key(&target_model.api_cfg))
@@ -272,7 +258,11 @@ async fn run_target_model(
         for &n_shot in benchmark_info.n_shots {
             for &avg_k in benchmark_info.avg_ks {
                 let avg_k_plan =
-                    build_avg_k_execution_plan(benchmark_info.name.0, benchmark.len(), avg_k);
+                    build_avg_k_execution_plan(
+                        benchmark_info.name.0,
+                        effective_benchmark_len,
+                        avg_k,
+                    );
                 let sampling_config_json = build_task_sampling_config_json(
                     benchmark_info,
                     cot_mode,

@@ -255,7 +255,10 @@ pub fn train<B: AutodiffBackend>(
     {
         rwkv_bench::trace_scope!("rwkv.train.checkpoint.save");
         CompactRecorder::new()
-            .record(result.model.into_record(), experiment_log_path.join("model"))
+            .record(
+                result.model.into_record(),
+                experiment_log_path.join("model"),
+            )
             .unwrap();
     }
 }

@@ -13,9 +13,7 @@ use rwkv::{
     config::{default_cfg_dir, get_arg_value},
     custom::tensor::backend::AutodiffBackend,
     nn::kernels::{
-        addcmul::AddcmulBackend,
-        l2wrap::L2WrapBackend,
-        token_shift_diff::TokenShiftDiffBackend,
+        addcmul::AddcmulBackend, l2wrap::L2WrapBackend, token_shift_diff::TokenShiftDiffBackend,
         wkv7_common::Wkv7Backend,
     },
     train::learner::init::{BackendDeviceInit, init_cfg, init_devices, init_log},
@@ -88,9 +86,7 @@ mod wgpu {
 #[cfg(feature = "vulkan")]
 mod vulkan {
     use rwkv::custom::backend::{
-        Autodiff,
-        Vulkan,
-        autodiff::checkpoint::strategy::BalancedCheckpointing,
+        Autodiff, Vulkan, autodiff::checkpoint::strategy::BalancedCheckpointing,
     };
 
     use crate::{ElemType, launch};
@@ -113,11 +109,7 @@ mod metal {
 
 #[cfg(feature = "cuda")]
 mod cuda {
-    use rwkv::custom::backend::{
-        Autodiff,
-        Cuda,
-        autodiff::checkpoint::strategy::BalancedCheckpointing,
-    };
+    use rwkv::custom::backend::{Autodiff, Cuda, autodiff::checkpoint::strategy::BalancedCheckpointing};
 
     use crate::{ElemType, launch};
 
@@ -128,11 +120,7 @@ mod cuda {
 
 #[cfg(feature = "rocm")]
 mod rocm {
-    use rwkv::custom::backend::{
-        Autodiff,
-        Rocm,
-        autodiff::checkpoint::strategy::BalancedCheckpointing,
-    };
+    use rwkv::custom::backend::{Autodiff, Rocm, autodiff::checkpoint::strategy::BalancedCheckpointing};
 
     use crate::{ElemType, launch};
 

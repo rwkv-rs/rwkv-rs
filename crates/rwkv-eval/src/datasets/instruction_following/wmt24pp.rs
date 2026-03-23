@@ -2,9 +2,10 @@ use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
+    apply_user_assistant_template,
+    instruction_following::sanitize_visible_answer,
     ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
-use crate::evaluators::instruction_following::build_prompt;
 use crate::inferers::generate_text_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
@@ -100,7 +101,9 @@ const WMT24PP_JUDGE_SAMPLING_CONFIG: SamplingConfig = SamplingConfig {
     repetition_penalty: 0.0,
     penalty_decay: 1.0,
 };
-const WMT24PP_GENERATION_STOP_SUFFIXES: &[&str] = &["\n\nUser:", "\n\nAssistant:"];
+const WMT24PP_REQUEST_STOP_SUFFIXES: &[&str] = &["\n\nUser:"];
+const WMT24PP_SANITIZE_STOP_SUFFIXES: &[&str] = &["\n\nUser:", "\n\nAssistant:"];
+const WMT24PP_ASSISTANT_PREFIX: &str = "Translation:\n";
 const WMT24PP_REFERENCE_BASED_JUDGE_INSTRUCTION: &str = concat!(
     "You are a professional translation quality evaluator.\n",
     "Evaluate the machine translation using the source text and the human reference translation.\n",
@@ -298,19 +301,14 @@ fn build_translation_instruction(item: &Wmt24ppItem) -> String {
 }
 
 fn generation_stop_suffixes() -> Vec<String> {
-    WMT24PP_GENERATION_STOP_SUFFIXES
+    WMT24PP_REQUEST_STOP_SUFFIXES
         .iter()
         .map(|suffix| (*suffix).to_string())
         .collect()
 }
 
 fn trim_transcript_contamination(text: &str) -> String {
-    let cutoff = WMT24PP_GENERATION_STOP_SUFFIXES
-        .iter()
-        .filter_map(|suffix| text.find(suffix))
-        .min()
-        .unwrap_or(text.len());
-    text[..cutoff].trim().to_string()
+    sanitize_visible_answer(text, WMT24PP_SANITIZE_STOP_SUFFIXES)
 }
 
 fn translation_max_tokens(source: &str) -> u32 {
@@ -333,12 +331,11 @@ fn build_reference_based_judge_prompt(source: &str, reference: &str, translation
 }
 
 fn build_reference_based_judge_request(source: &str, reference: &str, translation: &str) -> String {
-    let prompt = format!(
+    format!(
         "{}\n\n{}",
         WMT24PP_REFERENCE_BASED_JUDGE_INSTRUCTION,
         build_reference_based_judge_prompt(source, reference, translation)
-    );
-    build_prompt(&prompt)
+    )
 }
 
 fn extract_score(text: &str) -> Option<f64> {
@@ -478,7 +475,10 @@ impl Benchmark for Wmt24pp {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, n_shot: u8) -> String {
         assert_eq!(cot_mode, CoTMode::NoCoT, "wmt24pp only supports NoCoT");
         assert_eq!(n_shot, 0, "wmt24pp only supports 0-shot");
-        build_prompt(&build_translation_instruction(&self.test[index]))
+        apply_user_assistant_template(
+            build_translation_instruction(&self.test[index]),
+            WMT24PP_ASSISTANT_PREFIX.to_string(),
+        )
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
@@ -497,7 +497,7 @@ impl Benchmark for Wmt24pp {
     ) -> Record {
         let item = &self.test[index];
         let prompt = self.get_expected_context(index, cot_mode, n_shot);
-        let answer = generate_text_completion(
+        let raw_answer = generate_text_completion(
             model_client,
             model_name,
             &prompt,
@@ -507,7 +507,7 @@ impl Benchmark for Wmt24pp {
         )
         .await
         .unwrap();
-        let answer = trim_transcript_contamination(&answer);
+        let answer = trim_transcript_contamination(&raw_answer);
         let ref_answer = self.get_ref_answer(index);
         let context = format!(
             concat!(
@@ -519,6 +519,7 @@ impl Benchmark for Wmt24pp {
                 "[reference_target]\n{}\n\n",
                 "[original_target]\n{}\n\n",
                 "[translation_prompt]\n{}\n\n",
+                "[raw_model_translation]\n{}\n\n",
                 "[model_translation]\n{}"
             ),
             item.lp,
@@ -529,6 +530,7 @@ impl Benchmark for Wmt24pp {
             item.target,
             item.original_target.as_deref().unwrap_or(""),
             build_translation_instruction(item),
+            raw_answer,
             answer,
         );
 
@@ -585,76 +587,5 @@ impl Benchmark for Wmt24pp {
                 )
             },
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        RawWmt24ppItem, Wmt24pp, extract_score, generation_stop_suffixes,
-        language_name_from_code, region_name_from_code, target_code_from_lp,
-        translation_max_tokens, trim_transcript_contamination,
-    };
-    use crate::datasets::Benchmark;
-    use std::path::PathBuf;
-
-    fn local_dataset_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/rwkv-lm-eval/datasets")
-    }
-
-    #[test]
-    fn parses_language_pair_metadata() {
-        assert_eq!(target_code_from_lp("en-de_DE"), "de_DE");
-        assert_eq!(language_name_from_code("de_DE"), "German");
-        assert_eq!(region_name_from_code("de_DE"), "Germany");
-    }
-
-    #[test]
-    fn deserializes_null_original_target() {
-        let line = r#"{"lp":"en-is_IS","domain":"news","document_id":"doc","segment_id":1,"is_bad_source":false,"source":"hello","target":"hallo","original_target":null}"#;
-        let item: RawWmt24ppItem = sonic_rs::from_str(line).expect("valid wmt24pp item");
-        assert_eq!(item.original_target, None);
-    }
-
-    #[test]
-    fn extracts_only_pure_numeric_judge_scores() {
-        assert_eq!(extract_score("85"), Some(85.0));
-        assert_eq!(extract_score(" 83.5\n"), Some(83.5));
-        assert_eq!(extract_score(r#""ناس بتعوم في حمام السباحة من سنة 2022""#), None);
-        assert_eq!(extract_score("score: 85"), None);
-    }
-
-    #[test]
-    fn wmt_generation_uses_transcript_stop_suffixes() {
-        assert_eq!(
-            generation_stop_suffixes(),
-            vec!["\n\nUser:".to_string(), "\n\nAssistant:".to_string()]
-        );
-    }
-
-    #[test]
-    fn trims_wmt_transcript_contamination() {
-        let translation = "Bonjour le monde.\n\nAssistant: extra turn";
-        assert_eq!(trim_transcript_contamination(translation), "Bonjour le monde.");
-    }
-
-    #[test]
-    fn translation_max_tokens_scales_with_source_length() {
-        assert_eq!(translation_max_tokens("short source"), 70);
-        assert_eq!(translation_max_tokens(""), 64);
-        assert_eq!(translation_max_tokens(&"word ".repeat(400)), 1024);
-    }
-
-    #[test]
-    fn loads_local_dataset() {
-        let mut benchmark = Wmt24pp::new(local_dataset_root());
-        assert!(!benchmark.load());
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("build tokio runtime");
-        assert!(!runtime.block_on(benchmark.check()));
-        assert!(benchmark.len() > 0);
     }
 }

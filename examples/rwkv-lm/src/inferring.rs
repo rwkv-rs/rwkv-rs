@@ -19,7 +19,10 @@ use rwkv::{
             SampledToken, SamplingConfig, SamplingConfigsTensor, TokenLogprobsConfig,
             build_sampled_token_logprob, sampling_configs_to_tensor,
         },
-        model_pool::{LoadedModelGroup, ModelEngineFactory, build_model_group_engines},
+        model_pool::{
+            build_groups::build_model_group_engines, loaded_model_registry::ModelEngineFactory,
+            request_router::LoadedModelGroup,
+        },
     },
     nn::kernels::{
         rapid_sample::{RapidSampleBackend, rapid_sample},
