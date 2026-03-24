@@ -35,6 +35,9 @@ indexmap = { workspace = true }
 
 burn = { workspace = true, default-features = false, features = ["std", "autodiff", "cubecl"] }
 
+[dev-dependencies]
+tower = { workspace = true }
+
 [features]
 default = ["http"]
 http = []

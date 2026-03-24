@@ -18,8 +18,8 @@ use axum::{Router, routing::delete};
 use tokio::sync::RwLock;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
+use crate::cores::queue::queue_worker::QueueHandle;
 use crate::handlers::auth::{AuthConfig, auth};
-use crate::services::QueueHandle;
 
 #[cfg(feature = "trace")]
 use tower_http::trace::TraceLayer;
@@ -70,7 +70,11 @@ impl HttpApiRouterBuilder {
         };
 
         let cors_layer = CorsLayer::new()
-            .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+            .allow_methods([
+                axum::http::Method::GET,
+                axum::http::Method::POST,
+                axum::http::Method::DELETE,
+            ])
             .allow_headers([
                 axum::http::header::CONTENT_TYPE,
                 axum::http::header::AUTHORIZATION,
@@ -78,7 +82,10 @@ impl HttpApiRouterBuilder {
             .allow_origin(allow_origin);
 
         let protected = Router::new()
-            .route("/v1/chat/completions", post(chat::completions::chat_completions))
+            .route(
+                "/v1/chat/completions",
+                post(chat::completions::chat_completions),
+            )
             .route("/v1/completions", post(completions::completions))
             .route("/v1/embeddings", post(embeddings::embeddings))
             .route("/v1/responses", post(responses::responses_create))
@@ -93,10 +100,19 @@ impl HttpApiRouterBuilder {
                 "/v1/responses/{response_id}",
                 delete(responses::responses_delete),
             )
-            .route("/v1/responses/{response_id}/cancel", post(responses::cancel::responses_cancel))
+            .route(
+                "/v1/responses/{response_id}/cancel",
+                post(responses::cancel::responses_cancel),
+            )
             .route("/v1/models", get(models::models))
-            .route("/admin/models/reload", post(admin::models::reload::admin_models_reload))
-            .route("/v1/images/generations", post(images::generations::images_generations))
+            .route(
+                "/admin/models/reload",
+                post(admin::models::reload::admin_models_reload),
+            )
+            .route(
+                "/v1/images/generations",
+                post(images::generations::images_generations),
+            )
             .route("/v1/audio/speech", post(audio::speech::audio_speech))
             .route_layer(middleware::from_fn_with_state(
                 self.app_state.auth_cfg.clone(),
@@ -107,7 +123,9 @@ impl HttpApiRouterBuilder {
             .route("/health", get(health::health))
             .merge(protected)
             .layer(cors_layer)
-            .layer(DefaultBodyLimit::max(self.app_state.request_body_limit_bytes))
+            .layer(DefaultBodyLimit::max(
+                self.app_state.request_body_limit_bytes,
+            ))
             .with_state(self.app_state);
 
         #[cfg(feature = "trace")]
@@ -141,5 +159,52 @@ impl HttpApiRouterBuilder {
         );
 
         router
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use axum::body::Body;
+    use axum::http::header::{ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_REQUEST_METHOD, ORIGIN};
+    use axum::http::{Method, Request};
+    use tower::ServiceExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn delete_preflight_is_allowed_by_cors() {
+        let app = HttpApiRouterBuilder::new(AppState::new(
+            AuthConfig::default(),
+            1024,
+            1000,
+            None,
+            HashMap::<String, Vec<QueueHandle>>::new(),
+        ))
+        .build()
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/v1/responses/resp_123")
+                    .header(ORIGIN, "https://example.com")
+                    .header(ACCESS_CONTROL_REQUEST_METHOD, "DELETE")
+                    .body(Body::empty())
+                    .expect("build request"),
+            )
+            .await
+            .expect("router response");
+
+        assert!(response.status().is_success());
+        let allow_methods = response
+            .headers()
+            .get(ACCESS_CONTROL_ALLOW_METHODS)
+            .expect("cors allow methods header")
+            .to_str()
+            .expect("allow methods header");
+        assert!(allow_methods.contains("DELETE"));
     }
 }

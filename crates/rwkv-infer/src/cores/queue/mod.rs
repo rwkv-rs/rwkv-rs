@@ -1,8 +1,8 @@
 mod detokenize;
 mod guided_decode;
+pub mod queue_worker;
 mod schedule;
 mod step;
-pub mod queue_worker;
 #[cfg(test)]
 mod tests;
 
@@ -193,35 +193,49 @@ impl Queue {
         self.update_batch_status();
     }
 
+    pub(crate) fn run_once(&mut self) -> usize {
+        let items_before = self.items.len();
+        if items_before == 0 {
+            return 0;
+        }
+
+        self.drain_async_results();
+        if self.items.is_empty() {
+            self.update_batch_status();
+            return items_before;
+        }
+
+        if self
+            .items
+            .values()
+            .all(|item| item.status == QueueItemStatus::Finished)
+        {
+            thread::sleep(Duration::from_millis(1));
+            return items_before.saturating_sub(self.items.len());
+        }
+
+        let item_ids = self.collect_step_item_ids();
+        if item_ids.is_empty() {
+            if self.has_pending_async_work() {
+                thread::sleep(Duration::from_millis(1));
+            }
+            self.update_batch_status();
+            return items_before.saturating_sub(self.items.len());
+        }
+
+        match self.step(&item_ids) {
+            None => self.advance_prefill_items(&item_ids),
+            Some(new_tokens) => self.apply_output_tokens(&item_ids, new_tokens),
+        }
+
+        self.drain_async_results();
+        self.update_batch_status();
+        items_before.saturating_sub(self.items.len())
+    }
+
     pub fn run(&mut self) {
         while !self.items.is_empty() {
-            self.drain_async_results();
-
-            if self
-                .items
-                .values()
-                .all(|item| item.status == QueueItemStatus::Finished)
-            {
-                thread::sleep(Duration::from_millis(1));
-                continue;
-            }
-
-            let item_ids = self.collect_step_item_ids();
-            if item_ids.is_empty() {
-                if self.has_pending_async_work() {
-                    thread::sleep(Duration::from_millis(1));
-                }
-                self.update_batch_status();
-                continue;
-            }
-
-            match self.step(&item_ids) {
-                None => self.advance_prefill_items(&item_ids),
-                Some(new_tokens) => self.apply_output_tokens(&item_ids, new_tokens),
-            }
-
-            self.drain_async_results();
-            self.update_batch_status();
+            self.run_once();
         }
     }
 

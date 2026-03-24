@@ -1,51 +1,21 @@
 use serde::{Deserialize, Serialize};
-use sonic_rs::{
-    JsonContainerTrait,
-    JsonValueTrait,
-    Value,
-    from_str,
-    json,
-    to_string,
-    to_string_pretty,
-};
+use sonic_rs::{JsonContainerTrait, JsonValueTrait, Value, from_str, json, to_string, to_string_pretty};
 use tokio::sync::mpsc;
 
 use crate::cores::queue::{
-    GuidedDecodingConfig,
-    QueueEvent,
-    QueueFinishMeta,
-    QueueOutput,
-    QueueOutputCandidate,
+    GuidedDecodingConfig, QueueEvent, QueueFinishMeta, QueueOutput, QueueOutputCandidate,
     QueueOutputToken,
 };
 use crate::cores::queue::queue_worker::QueueSubmitRequest;
 use crate::dtos::chat::completions::{
-    ChatCompletionResp,
-    ChatCompletionsChunkResponse,
-    ChatCompletionsReq,
-    Choices,
-    ChunkChoice,
-    ChunkToolCall,
-    ChunkToolCallFunction,
-    Content,
-    Delta,
-    Logprobs,
-    Message,
-    ResponseFormat,
-    Tool,
-    ToolCall,
-    ToolChoice,
-    TopLogprobs,
+    ChatCompletionResp, ChatCompletionsChunkResponse, ChatCompletionsReq, Choices, ChunkChoice,
+    ChunkToolCall, ChunkToolCallFunction, Content, Delta, Logprobs, Message, ResponseFormat, Tool,
+    ToolCall, ToolChoice, TopLogprobs,
 };
 use crate::routes::AppState;
 use crate::services::{
-    ServiceError,
-    ServiceResult,
-    current_unix_seconds,
-    next_id,
-    select_queue,
-    validate_chat_logprobs,
-    validate_sampling_config,
+    ServiceError, ServiceResult, current_unix_seconds, next_id, select_queue,
+    validate_chat_logprobs, validate_sampling_config,
 };
 
 pub struct ChatCompletionRun {
@@ -310,7 +280,10 @@ impl ChatCompletionRun {
         }
     }
 
-    fn structured_stream_chunks(&self, parsed: ToolModelOutput) -> Vec<ChatCompletionsChunkResponse> {
+    fn structured_stream_chunks(
+        &self,
+        parsed: ToolModelOutput,
+    ) -> Vec<ChatCompletionsChunkResponse> {
         match parsed {
             ToolModelOutput::Message { content } => vec![ChatCompletionsChunkResponse {
                 id: self.id.clone(),
@@ -688,8 +661,7 @@ fn build_tool_prompt_preamble(
     match tool_choice {
         ValidatedToolChoice::Auto => {
             lines.push(
-                "For a direct answer, emit {\"type\":\"message\",\"content\":\"...\"}."
-                    .to_string(),
+                "For a direct answer, emit {\"type\":\"message\",\"content\":\"...\"}.".to_string(),
             );
         }
         ValidatedToolChoice::Required => {
@@ -812,7 +784,7 @@ fn render_prompt_message(message: &Message) -> ServiceResult<String> {
 
             Ok(format!(
                 "Assistant: <think>\n<|completions_of_cot|></think>```json\n{}\n```",
-                render_tool_call_history_json(message.tool_calls.as_ref().expect("tool calls"))
+                render_tool_call_history_json(message.tool_calls.as_ref().expect("tool calls"))?
             ))
         }
         "assistant" => Ok(format!(
@@ -835,17 +807,25 @@ fn normalize_chat_role(role: &str) -> ServiceResult<&'static str> {
     }
 }
 
-fn render_tool_call_history_json(tool_calls: &[ToolCall]) -> String {
+fn render_tool_call_history_json(tool_calls: &[ToolCall]) -> ServiceResult<String> {
     let tool_calls = tool_calls
         .iter()
-        .map(|tool_call| ToolModelCall {
-            name: tool_call.function.name.clone(),
-            arguments: from_str::<Value>(&tool_call.function.arguments)
-                .expect("tool call arguments must be valid json"),
+        .enumerate()
+        .map(|(index, tool_call)| {
+            let arguments = from_str::<Value>(&tool_call.function.arguments).map_err(|err| {
+                ServiceError::bad_request(format!(
+                    "assistant tool_calls[{index}].function.arguments for function {:?} must be valid JSON: {err}",
+                    tool_call.function.name
+                ))
+            })?;
+            Ok(ToolModelCall {
+                name: tool_call.function.name.clone(),
+                arguments,
+            })
         })
-        .collect();
+        .collect::<ServiceResult<Vec<_>>>()?;
 
-    to_string(&ToolModelOutput::ToolCalls { tool_calls }).expect("tool call history json")
+    Ok(to_string(&ToolModelOutput::ToolCalls { tool_calls }).expect("tool call history json"))
 }
 
 fn parse_tool_model_output(text: &str) -> ToolModelOutput {
@@ -942,4 +922,3 @@ fn build_chat_top_logprob(candidate: &QueueOutputCandidate) -> TopLogprobs {
         logprob: candidate.logprob,
     }
 }
-

@@ -55,7 +55,11 @@ impl QueueHandle {
     }
 
     pub async fn submit(&self, request: QueueSubmitRequest) -> mpsc::Receiver<QueueEvent> {
-        assert!(self.is_accepting(), "queue {} is not accepting", self.device_id);
+        assert!(
+            self.is_accepting(),
+            "queue {} is not accepting",
+            self.device_id
+        );
         self.pending.fetch_add(1, Ordering::Relaxed);
 
         let (reply_tx, reply_rx) = oneshot::channel();
@@ -102,28 +106,34 @@ pub fn spawn_queue_worker(
             max_batch_size,
             paragraph_len,
         );
+        let mut active_items = 0usize;
         let mut next_item_id = 1usize;
+        let mut shutdown_reply = None;
 
         loop {
-            let message = rx.blocking_recv();
-            let Some(message) = message else {
-                break;
-            };
-
-            let mut submits = Vec::new();
-            let mut shutdown_reply = None;
-
-            match message {
-                QueueCommand::Submit { request, reply } => submits.push((request, reply)),
-                QueueCommand::Shutdown { reply } => {
-                    accepting_for_thread.store(false, Ordering::Release);
-                    shutdown_reply = Some(reply);
-                }
-            }
-
-            while let Ok(message) = rx.try_recv() {
+            if active_items == 0 {
+                let message = rx.blocking_recv();
+                let Some(message) = message else {
+                    break;
+                };
                 match message {
-                    QueueCommand::Submit { request, reply } => submits.push((request, reply)),
+                    QueueCommand::Submit { request, reply } => {
+                        let (completions_tx, completions_rx) = mpsc::channel(64);
+                        let context_tokens_for_step =
+                            tokenize_prompt(&worker_tokenizer, &request.prompt, paragraph_len);
+                        let item = QueueItem::new(
+                            context_tokens_for_step,
+                            request.sampling_config,
+                            request.token_logprobs_config,
+                            request.stop_suffixes,
+                            completions_tx,
+                            request.guided_decoding_config,
+                        );
+                        queue.push(next_item_id, item).unwrap();
+                        next_item_id += 1;
+                        active_items += 1;
+                        let _ = reply.send(completions_rx);
+                    }
                     QueueCommand::Shutdown { reply } => {
                         accepting_for_thread.store(false, Ordering::Release);
                         shutdown_reply = Some(reply);
@@ -131,32 +141,46 @@ pub fn spawn_queue_worker(
                 }
             }
 
-            let batch_len = submits.len();
-            for (request, reply) in submits {
-                let (completions_tx, completions_rx) = mpsc::channel(64);
-                let context_tokens_for_step =
-                    tokenize_prompt(&worker_tokenizer, &request.prompt, paragraph_len);
-                let item = QueueItem::new(
-                    context_tokens_for_step,
-                    request.sampling_config,
-                    request.token_logprobs_config,
-                    request.stop_suffixes,
-                    completions_tx,
-                    request.guided_decoding_config,
-                );
-                queue.push(next_item_id, item).unwrap();
-                next_item_id += 1;
-                let _ = reply.send(completions_rx);
+            while let Ok(message) = rx.try_recv() {
+                match message {
+                    QueueCommand::Submit { request, reply } => {
+                        let (completions_tx, completions_rx) = mpsc::channel(64);
+                        let context_tokens_for_step =
+                            tokenize_prompt(&worker_tokenizer, &request.prompt, paragraph_len);
+                        let item = QueueItem::new(
+                            context_tokens_for_step,
+                            request.sampling_config,
+                            request.token_logprobs_config,
+                            request.stop_suffixes,
+                            completions_tx,
+                            request.guided_decoding_config,
+                        );
+                        queue.push(next_item_id, item).unwrap();
+                        next_item_id += 1;
+                        active_items += 1;
+                        let _ = reply.send(completions_rx);
+                    }
+                    QueueCommand::Shutdown { reply } => {
+                        accepting_for_thread.store(false, Ordering::Release);
+                        shutdown_reply = Some(reply);
+                    }
+                }
             }
 
-            if batch_len > 0 {
-                queue.run();
-                pending_for_thread.fetch_sub(batch_len, Ordering::Relaxed);
+            if active_items > 0 {
+                let finished_items = queue.run_once();
+                if finished_items > 0 {
+                    debug_assert!(finished_items <= active_items);
+                    active_items -= finished_items;
+                    pending_for_thread.fetch_sub(finished_items, Ordering::Relaxed);
+                }
             }
 
-            if let Some(reply) = shutdown_reply {
-                let _ = reply.send(());
-                break;
+            if active_items == 0 {
+                if let Some(reply) = shutdown_reply.take() {
+                    let _ = reply.send(());
+                    break;
+                }
             }
         }
     });
