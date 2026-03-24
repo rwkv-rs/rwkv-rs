@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sonic_rs::Value;
 
+use crate::dtos::stop::StopField;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatCompletionsReq {
     pub model: String,
@@ -13,7 +15,7 @@ pub struct ChatCompletionsReq {
     pub presence_penalty: Option<f32>,
     pub repetition_penalty: Option<f32>,
     pub penalty_decay: Option<f32>,
-    pub stop: Option<Vec<String>>,
+    pub stop: Option<StopField>,
     pub logprobs: Option<bool>,
     pub top_logprobs: Option<u8>,
     pub candidate_token_texts: Option<Vec<String>>,
@@ -171,5 +173,24 @@ pub struct Delta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ToolCall>>,
+    pub tool_calls: Option<Vec<ChunkToolCall>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChunkToolCall {
+    pub index: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub ty: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function: Option<ChunkToolCallFunction>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ChunkToolCallFunction {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<String>,
 }

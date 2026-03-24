@@ -2,6 +2,7 @@ mod detokenize;
 mod guided_decode;
 mod schedule;
 mod step;
+pub mod queue_worker;
 #[cfg(test)]
 mod tests;
 
@@ -16,7 +17,9 @@ use self::detokenize::{DetokenizeResult, DetokenizeTask, spawn_detokenize_worker
 use self::guided_decode::{GuidedDecodeResult, GuidedDecodeTask, spawn_guided_decode_worker};
 use crate::cores::forward::sampling::SamplingConfig;
 use crate::cores::forward::{ModelForward, TokenId, TokenIdLogprobsConfig};
-use crate::cores::guided_decoding::{GuidedDecodingConfig, GuidedDecodingState, build_tokenizer_info_from_vocab};
+use crate::cores::queue::guided_decode::{build_tokenizer_info_from_vocab, GuidedDecodingState};
+
+pub use self::guided_decode::GuidedDecodingConfig;
 
 pub(super) const END_TOKEN_ID: i32 = 0;
 
@@ -32,6 +35,56 @@ pub struct Queue {
     detokenize_receiver: mpsc::UnboundedReceiver<DetokenizeResult>,
     guided_decode_sender: mpsc::UnboundedSender<GuidedDecodeTask>,
     guided_decode_receiver: mpsc::UnboundedReceiver<GuidedDecodeResult>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueueOutputCandidate {
+    pub token: String,
+    pub bytes: Vec<u8>,
+    pub logprob: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueueOutputToken {
+    pub token: String,
+    pub bytes: Vec<u8>,
+    pub logprob: Option<f32>,
+    pub top_logprobs: Vec<QueueOutputCandidate>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct QueueOutput {
+    pub text: String,
+    pub tokens: Vec<QueueOutputToken>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueueFinishReason {
+    Stop,
+    Length,
+}
+
+impl QueueFinishReason {
+    pub fn as_openai_str(self) -> &'static str {
+        match self {
+            Self::Stop => "stop",
+            Self::Length => "length",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueueFinishMeta {
+    pub reason: QueueFinishReason,
+    pub matched_stop_suffix: Option<String>,
+    pub matched_stop_suffix_index: Option<usize>,
+    pub generated_tokens: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum QueueEvent {
+    Delta(QueueOutput),
+    Done(QueueFinishMeta),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,26 +163,20 @@ impl Queue {
         self.assign_batch_ids(item_ids);
         let step_inputs = self.build_step_inputs(item_ids);
         let contexts: Vec<&[i32]> = step_inputs.contexts.iter().map(Vec::as_slice).collect();
-        let context_masks: Vec<&[u8]> = step_inputs.context_masks.iter().map(Vec::as_slice).collect();
+        let context_masks: Vec<&[u8]> = step_inputs
+            .context_masks
+            .iter()
+            .map(Vec::as_slice)
+            .collect();
         let guided_token_masks: Vec<Option<&[i32]>> = step_inputs
             .guided_token_masks
             .iter()
             .map(Option::as_deref)
             .collect();
-        let logits = self
-            .model_forward
-            .forward(&step_inputs.batch_ids, &contexts, &context_masks);
+        let step_mode = self.build_step_mode(&step_inputs, &guided_token_masks);
 
-        if self.batch_status == BatchStatus::PrefillWithoutOutput {
-            return None;
-        }
-
-        Some(self.model_forward.sample(
-            logits,
-            &step_inputs.sampling_configs,
-            &step_inputs.token_logprobs_configs,
-            &guided_token_masks,
-        ))
+        self.model_forward
+            .step(&step_inputs.batch_ids, &contexts, &context_masks, step_mode)
     }
 
     pub fn remove(&mut self, item_ids: &[usize]) {
@@ -184,9 +231,9 @@ impl Queue {
     }
 
     fn has_pending_async_work(&self) -> bool {
-        self.items.values().any(|item| {
-            item.pending_detokenize_tasks > 0 || item.guided_decoding_pending
-        })
+        self.items
+            .values()
+            .any(|item| item.pending_detokenize_tasks > 0 || item.guided_decoding_pending)
     }
 }
 
@@ -197,16 +244,19 @@ pub struct QueueItem {
 
     sampling_config: SamplingConfig,
     token_logprobs_config: Option<TokenIdLogprobsConfig>,
-    stop_suffixes: Vec<String>,
     guided_decoding_config: Option<GuidedDecodingConfig>,
     guided_decoding_state: Option<GuidedDecodingState>,
     guided_token_mask: Option<Box<[i32]>>,
     guided_decoding_pending: bool,
     status: QueueItemStatus,
-    detokenize_buffer: Vec<u8>,
-    completions_text: String,
-    completions_tx: mpsc::Sender<String>,
+
+    tokens_in_buffer: Vec<QueueOutputToken>,
+    stop_suffixes: Vec<(String, Vec<u8>)>,
+    max_stop_suffix_len: usize,
+    pending_stop_tokens: Vec<QueueOutputToken>,
+    completions_tx: mpsc::Sender<QueueEvent>,
     pending_detokenize_tasks: usize,
+    finish_meta: Option<QueueFinishMeta>,
 }
 
 impl QueueItem {
@@ -215,25 +265,52 @@ impl QueueItem {
         sampling_config: SamplingConfig,
         token_logprobs_config: Option<TokenIdLogprobsConfig>,
         stop_suffixes: Vec<String>,
-        completions_tx: mpsc::Sender<String>,
+        completions_tx: mpsc::Sender<QueueEvent>,
         guided_decoding_config: Option<GuidedDecodingConfig>,
     ) -> Self {
+        let stop_suffixes: Vec<_> = stop_suffixes
+            .into_iter()
+            .filter(|suffix| !suffix.is_empty())
+            .map(|text| {
+                let bytes = text.as_bytes().to_vec();
+                (text, bytes)
+            })
+            .collect();
+        let max_stop_suffix_len = stop_suffixes
+            .iter()
+            .map(|(_, bytes)| bytes.len())
+            .max()
+            .unwrap_or(0);
         Self {
             batch_id: None,
             num_paragraphs: 0,
             context_tokens_for_step,
             sampling_config,
             token_logprobs_config,
-            stop_suffixes,
             guided_decoding_config,
             guided_decoding_state: None,
             guided_token_mask: None,
             guided_decoding_pending: false,
             status: QueueItemStatus::Waiting,
-            detokenize_buffer: Vec::new(),
-            completions_text: String::new(),
+            tokens_in_buffer: Vec::new(),
+            stop_suffixes,
+            max_stop_suffix_len,
+            pending_stop_tokens: Vec::new(),
             completions_tx,
             pending_detokenize_tasks: 0,
+            finish_meta: None,
+        }
+    }
+
+    fn generated_tokens(&self) -> usize {
+        match self.status {
+            QueueItemStatus::Waiting | QueueItemStatus::Prefill(_) => 0,
+            QueueItemStatus::Decode(new_tokens_len) => new_tokens_len,
+            QueueItemStatus::Finished => self
+                .finish_meta
+                .as_ref()
+                .map(|meta| meta.generated_tokens)
+                .unwrap_or(0),
         }
     }
 }

@@ -67,7 +67,9 @@ impl Queue {
             item_ids.extend(
                 self.items
                     .iter()
-                    .filter(|(_, item)| ready_step_group(item) == Some((self.batch_status, priority)))
+                    .filter(|(_, item)| {
+                        ready_step_group(item) == Some((self.batch_status, priority))
+                    })
                     .take(self.max_batch_size - item_ids.len())
                     .map(|(item_id, _)| *item_id),
             );

@@ -1,5 +1,4 @@
 //! 核心模块负责推理过程中的底层能力，并按排队和前向执行拆分阶段。
 
 pub mod forward;
-pub mod guided_decoding;
 pub mod queue;

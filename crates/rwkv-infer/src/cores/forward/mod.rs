@@ -1,27 +1,27 @@
 pub mod logprobs;
 pub mod sampling;
 
-use crate::cores::forward::{sampling::SamplingConfig};
+use crate::cores::forward::sampling::SamplingConfig;
 
-pub trait ModelForward: Send + 'static {
-    fn forward(&mut self, batch_ids: &[usize], contexts: &[&[i32]], masks: &[&[u8]])
-    -> Vec<Logits>;
-
-    fn sample(
-        &mut self,
-        logits: Vec<Logits>,
-        sampling_configs: &[SamplingConfig],
-        token_logprobs_configs: &[Option<TokenIdLogprobsConfig>],
-        guided_token_masks: &[Option<&[i32]>],
-    ) -> Vec<TokenId>;
-
-    fn reset(&mut self, batch_index: usize);
+pub enum StepMode<'a> {
+    PrefillNoOutput,
+    Sample {
+        sampling_configs: &'a [SamplingConfig],
+        token_logprobs_configs: &'a [Option<TokenIdLogprobsConfig>],
+        guided_token_masks: &'a [Option<&'a [i32]>],
+    },
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Logits {
-    pub batch_index: usize,
-    pub logits: Vec<f32>,
+pub trait ModelForward: Send + 'static {
+    fn step(
+        &mut self,
+        batch_ids: &[usize],
+        contexts: &[&[i32]],
+        masks: &[&[u8]],
+        mode: StepMode<'_>,
+    ) -> Option<Vec<TokenId>>;
+
+    fn reset(&mut self, batch_index: usize);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

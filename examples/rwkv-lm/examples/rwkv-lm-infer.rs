@@ -8,18 +8,13 @@ fn main() {
     );
 }
 
-use std::{fs::create_dir_all, path::PathBuf, sync::Arc};
+use std::{fs::create_dir_all, path::PathBuf};
 
 use axum::serve;
-use tokio::net::TcpListener;
 use rwkv::{
     config::{default_cfg_dir, get_arg_value},
     custom::prelude::Backend,
-    infer::{
-        access::http_api::{HttpApiRouterBuilder, HttpApiState},
-        auth::AuthConfig,
-        model_pool::LoadedModelRegistry,
-    },
+    infer::routes::HttpApiRouterBuilder,
     nn::kernels::{
         addcmul::AddcmulBackend,
         rapid_sample::RapidSampleBackend,
@@ -27,13 +22,10 @@ use rwkv::{
         wkv7_common::Wkv7Backend,
     },
 };
-use rwkv_lm::{inferring::RwkvLmEngineFactory, paths};
-#[cfg(feature = "trace")]
-use log::info;
-#[cfg(feature = "ipc")]
-use rwkv::infer::access::ipc_api::IpcServer;
+use rwkv_lm::{inferring::build_http_runtime, paths};
 #[cfg(feature = "trace")]
 use rwkv_bench::trace::init_tracing;
+use tokio::net::TcpListener;
 
 #[cfg(not(any(feature = "f32", feature = "flex32", feature = "f16")))]
 type ElemType = rwkv::custom::tensor::bf16;
@@ -93,45 +85,12 @@ where
     #[cfg(feature = "trace")]
     println!("trace mode: {trace_mode:?}");
 
-    let loaded_model_registry = Arc::new(
-        LoadedModelRegistry::bootstrap(
-            config_dir,
-            infer_cfg,
-            Arc::new(RwkvLmEngineFactory::<B>::new()),
-        )
-        .unwrap(),
-    );
-
-    let app = HttpApiState {
-        auth_cfg: AuthConfig {
-            api_key: loaded_model_registry.api_key(),
-        },
-        runtime_manager: loaded_model_registry.clone(),
-    };
-
     #[cfg(feature = "ipc")]
-    let _ipc_server_thread = if loaded_model_registry.ipc_enabled() {
-        let server =
-            IpcServer::from_runtime_manager(loaded_model_registry.clone(), app.auth_cfg.clone())
-                .unwrap();
-        info!(
-            "starting ipc service: {}",
-            loaded_model_registry.ipc_service_name()
-        );
-        Some(server.spawn().unwrap())
-    } else {
-        None
-    };
+    panic!("ipc is not migrated to the new infer implementation yet");
 
-    #[cfg(not(feature = "ipc"))]
-    assert!(
-        loaded_model_registry.ipc_enabled(),
-        "ipc is enabled in infer config but feature `ipc` is not enabled"
-    );
+    let (app_state, bind_addr) = build_http_runtime::<B>(config_dir, &infer_cfg);
+    let router = HttpApiRouterBuilder::new(app_state).build().await;
 
-    let router = HttpApiRouterBuilder::new(app).build().await.unwrap();
-
-    let bind_addr = loaded_model_registry.http_bind_addr();
     let listener = TcpListener::bind(&bind_addr)
         .await
         .unwrap_or_else(|e| panic!("failed to bind http listener {}: {e}", bind_addr));

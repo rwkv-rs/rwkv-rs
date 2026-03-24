@@ -3,16 +3,8 @@ use std::thread;
 use sonic_rs::{json, to_string};
 use tokio::sync::mpsc;
 use xgrammar::{
-    DLDataType,
-    DLDataTypeCode,
-    DLDevice,
-    DLDeviceType,
-    DLTensor,
-    GrammarCompiler,
-    GrammarMatcher,
-    TokenizerInfo,
-    get_bitmask_shape,
-    reset_token_bitmask,
+    DLDataType, DLDataTypeCode, DLDevice, DLDeviceType, DLTensor, GrammarCompiler, GrammarMatcher,
+    TokenizerInfo, get_bitmask_shape, reset_token_bitmask,
 };
 
 use super::Queue;
@@ -78,7 +70,7 @@ impl Queue {
         token_id: i32,
         should_finish: &mut bool,
     ) -> Result<(), String> {
-        let guided_decoding_state = {
+        let mut guided_decoding_state = {
             let item = self
                 .items
                 .get_mut(&item_id)
@@ -90,7 +82,6 @@ impl Queue {
             item.guided_token_mask = None;
             guided_decoding_state
         };
-        let mut guided_decoding_state = guided_decoding_state;
 
         *should_finish |= guided_decoding_state.accept_token(token_id)?;
 

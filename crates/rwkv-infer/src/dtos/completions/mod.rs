@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
+use crate::dtos::stop::StopField;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompletionsReq {
     pub model: String,
@@ -13,7 +15,7 @@ pub struct CompletionsReq {
     pub presence_penalty: Option<f32>,
     pub repetition_penalty: Option<f32>,
     pub penalty_decay: Option<f32>,
-    pub stop: Option<Vec<String>>,
+    pub stop: Option<StopField>,
     pub logprobs: Option<u8>,
     pub candidate_token_texts: Option<Vec<String>>,
 }

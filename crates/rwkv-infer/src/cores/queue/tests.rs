@@ -9,9 +9,11 @@ use rwkv_data::tokenizer::Tokenizer;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use super::{END_TOKEN_ID, Queue, QueueItem};
-use crate::cores::forward::{Logits, ModelForward, TokenId, TokenIdLogprobsConfig};
-use crate::cores::guided_decoding::GuidedDecodingConfig;
+use super::{
+    END_TOKEN_ID, Queue, QueueEvent, QueueFinishMeta, QueueFinishReason, QueueItem, QueueItemStatus,
+};
+use crate::cores::forward::{ModelForward, StepMode, TokenId};
+use crate::cores::queue::guided_decode::GuidedDecodingConfig;
 
 #[derive(Default)]
 struct DummyModelForward {
@@ -21,58 +23,54 @@ struct DummyModelForward {
 }
 
 impl ModelForward for DummyModelForward {
-    fn forward(
+    fn step(
         &mut self,
         batch_ids: &[usize],
         _contexts: &[&[i32]],
         _context_masks: &[&[u8]],
-    ) -> Vec<Logits> {
-        batch_ids
-            .iter()
-            .map(|&batch_index| Logits {
-                batch_index,
-                logits: vec![0.0; 8],
-            })
-            .collect()
-    }
+        mode: StepMode<'_>,
+    ) -> Option<Vec<TokenId>> {
+        match mode {
+            StepMode::PrefillNoOutput => None,
+            StepMode::Sample {
+                guided_token_masks, ..
+            } => {
+                self.sample_guided_token_masks.lock().unwrap().push(
+                    guided_token_masks
+                        .iter()
+                        .map(|guided_token_mask| guided_token_mask.map(|mask| mask.to_vec()))
+                        .collect(),
+                );
 
-    fn sample(
-        &mut self,
-        logits: Vec<Logits>,
-        _sampling_configs: &[crate::cores::forward::sampling::SamplingConfig],
-        _token_logprobs_configs: &[Option<TokenIdLogprobsConfig>],
-        guided_token_masks: &[Option<&[i32]>],
-    ) -> Vec<TokenId> {
-        self.sample_guided_token_masks.lock().unwrap().push(
-            guided_token_masks
-                .iter()
-                .map(|guided_token_mask| guided_token_mask.map(|mask| mask.to_vec()))
-                .collect(),
-        );
+                Some(
+                    batch_ids
+                        .iter()
+                        .copied()
+                        .zip(guided_token_masks.iter())
+                        .map(|(batch_index, guided_token_mask)| {
+                            let token_id = if self.choose_first_allowed_token {
+                                guided_token_mask
+                                    .and_then(bitmask_first_allowed_token_id)
+                                    .unwrap_or(END_TOKEN_ID)
+                            } else {
+                                self.fixed_token_id
+                            };
 
-        logits
-            .into_iter()
-            .zip(guided_token_masks.iter())
-            .map(|(logits, guided_token_mask)| {
-                let token_id = if self.choose_first_allowed_token {
-                    guided_token_mask
-                        .and_then(bitmask_first_allowed_token_id)
-                        .unwrap_or(END_TOKEN_ID)
-                } else {
-                    self.fixed_token_id
-                };
-
-                TokenId {
-                    batch_index: logits.batch_index,
-                    token_id,
-                    logprob: None,
-                    finish_after_token: false,
-                }
-            })
-            .collect()
+                            TokenId {
+                                batch_index,
+                                token_id,
+                                logprob: None,
+                                finish_after_token: false,
+                            }
+                        })
+                        .collect(),
+                )
+            }
+        }
     }
 
     fn reset(&mut self, _batch_index: usize) {}
+
 }
 
 #[test]
@@ -143,12 +141,10 @@ fn prefill_waits_for_guided_token_mask() {
         thread::sleep(Duration::from_millis(1));
     }
 
-    assert!(
-        queue
-            .items
-            .get(&1)
-            .is_some_and(|item| item.guided_token_mask.is_some())
-    );
+    assert!(queue
+        .items
+        .get(&1)
+        .is_some_and(|item| item.guided_token_mask.is_some()));
     assert_eq!(queue.collect_step_item_ids(), vec![1]);
 }
 
@@ -226,11 +222,16 @@ fn run_guided_item_end_to_end() {
     queue.run();
 
     let mut completions_text = String::new();
-    while let Ok(delta) = completions_rx.try_recv() {
-        completions_text.push_str(&delta);
+    let mut saw_done = false;
+    while let Ok(event) = completions_rx.try_recv() {
+        match event {
+            QueueEvent::Delta(delta) => completions_text.push_str(&delta.text),
+            QueueEvent::Done(_) => saw_done = true,
+        }
     }
 
     assert_eq!(completions_text, "{}");
+    assert!(saw_done);
     assert!(queue.items.is_empty());
 }
 
@@ -267,6 +268,196 @@ fn late_guided_result_is_ignored_after_remove() {
     assert!(queue.items.is_empty());
 }
 
+#[test]
+fn stop_suffix_inside_token_emits_text_without_partial_token() {
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward::default()),
+        test_tokenizer_with_vocab("1 \"helloUser:\" 10\n"),
+        4,
+        1,
+    );
+    let (completions_tx, mut completions_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(
+                vec![0],
+                Default::default(),
+                None,
+                vec!["User:".to_string()],
+                completions_tx,
+                None,
+            ),
+        )
+        .expect("push item");
+    queue.items.get_mut(&1).expect("queue item").status = QueueItemStatus::Decode(1);
+
+    queue
+        .queue_detokenize_token(
+            1,
+            TokenId {
+                batch_index: 0,
+                token_id: 1,
+                logprob: None,
+                finish_after_token: false,
+            },
+        )
+        .expect("queue detokenize");
+    wait_for_detokenize(&mut queue, 1);
+
+    match completions_rx.try_recv().expect("delta event") {
+        QueueEvent::Delta(delta) => {
+            assert_eq!(delta.text, "hello");
+            assert!(delta.tokens.is_empty());
+        }
+        event => panic!("unexpected event: {event:?}"),
+    }
+    match completions_rx.try_recv().expect("done event") {
+        QueueEvent::Done(meta) => {
+            assert_eq!(
+                meta,
+                QueueFinishMeta {
+                    reason: QueueFinishReason::Stop,
+                    matched_stop_suffix: Some("User:".to_string()),
+                    matched_stop_suffix_index: Some(0),
+                    generated_tokens: 1,
+                }
+            );
+        }
+        event => panic!("unexpected event: {event:?}"),
+    }
+    assert!(queue.items.is_empty());
+}
+
+#[test]
+fn utf8_multibyte_sequence_waits_until_complete() {
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward::default()),
+        test_tokenizer_with_vocab("1 b\"\\xE4\" 1\n2 b\"\\xB8\" 1\n3 b\"\\x96\" 1\n"),
+        4,
+        1,
+    );
+    let (completions_tx, mut completions_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(
+                vec![0],
+                Default::default(),
+                None,
+                vec![],
+                completions_tx,
+                None,
+            ),
+        )
+        .expect("push item");
+
+    for token_id in [1, 2] {
+        queue
+            .queue_detokenize_token(
+                1,
+                TokenId {
+                    batch_index: 0,
+                    token_id,
+                    logprob: None,
+                    finish_after_token: false,
+                },
+            )
+            .expect("queue detokenize");
+        wait_for_detokenize(&mut queue, 1);
+        assert!(completions_rx.try_recv().is_err());
+    }
+
+    queue
+        .queue_detokenize_token(
+            1,
+            TokenId {
+                batch_index: 0,
+                token_id: 3,
+                logprob: None,
+                finish_after_token: false,
+            },
+        )
+        .expect("queue detokenize");
+    wait_for_detokenize(&mut queue, 1);
+
+    match completions_rx.try_recv().expect("delta event") {
+        QueueEvent::Delta(delta) => {
+            assert_eq!(delta.text, "世");
+            assert_eq!(delta.tokens.len(), 3);
+        }
+        event => panic!("unexpected event: {event:?}"),
+    }
+}
+
+#[test]
+fn finish_item_flushes_stop_tail_without_new_detokenize_result() {
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward::default()),
+        test_tokenizer_with_vocab("1 \"abc\" 3\n"),
+        4,
+        1,
+    );
+    let (completions_tx, mut completions_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(
+                vec![0],
+                Default::default(),
+                None,
+                vec!["abcd".to_string()],
+                completions_tx,
+                None,
+            ),
+        )
+        .expect("push item");
+    queue.items.get_mut(&1).expect("queue item").status = QueueItemStatus::Decode(1);
+
+    queue
+        .queue_detokenize_token(
+            1,
+            TokenId {
+                batch_index: 0,
+                token_id: 1,
+                logprob: None,
+                finish_after_token: false,
+            },
+        )
+        .expect("queue detokenize");
+    wait_for_detokenize(&mut queue, 1);
+    assert!(completions_rx.try_recv().is_err());
+
+    let item = queue.items.get_mut(&1).expect("queue item");
+    item.finish_meta = Some(QueueFinishMeta {
+        reason: QueueFinishReason::Length,
+        matched_stop_suffix: None,
+        matched_stop_suffix_index: None,
+        generated_tokens: 1,
+    });
+    item.status = QueueItemStatus::Finished;
+
+    assert!(queue.finish_item_if_ready(1));
+
+    match completions_rx.try_recv().expect("delta event") {
+        QueueEvent::Delta(delta) => {
+            assert_eq!(delta.text, "abc");
+            assert_eq!(delta.tokens.len(), 1);
+        }
+        event => panic!("unexpected event: {event:?}"),
+    }
+    match completions_rx.try_recv().expect("done event") {
+        QueueEvent::Done(meta) => {
+            assert_eq!(meta.reason, QueueFinishReason::Length);
+            assert_eq!(meta.generated_tokens, 1);
+        }
+        event => panic!("unexpected event: {event:?}"),
+    }
+}
+
 fn test_guided_decoding_config() -> GuidedDecodingConfig {
     GuidedDecodingConfig {
         schema_json: r#"{"type":"object","properties":{},"additionalProperties":false}"#
@@ -276,14 +467,29 @@ fn test_guided_decoding_config() -> GuidedDecodingConfig {
 }
 
 fn test_tokenizer() -> Arc<Tokenizer> {
+    test_tokenizer_with_vocab("1 \"{\" 1\n2 \"}\" 1\n3 \"a\" 1\n4 \":\" 1\n5 \"1\" 1\n")
+}
+
+fn test_tokenizer_with_vocab(vocab: &str) -> Arc<Tokenizer> {
     let vocab_path = std::env::temp_dir().join(format!("rwkv-infer-{}.txt", Uuid::new_v4()));
-    fs::write(
-        &vocab_path,
-        "1 \"{\" 1\n2 \"}\" 1\n3 \"a\" 1\n4 \":\" 1\n5 \"1\" 1\n",
-    )
-    .expect("write test vocab");
+    fs::write(&vocab_path, vocab).expect("write test vocab");
 
     Arc::new(Tokenizer::new(vocab_path.to_str().expect("vocab path")).expect("tokenizer"))
+}
+
+fn wait_for_detokenize(queue: &mut Queue, item_id: usize) {
+    for _ in 0..100 {
+        queue.drain_detokenize_results();
+        if queue
+            .items
+            .get(&item_id)
+            .is_none_or(|item| item.pending_detokenize_tasks == 0)
+        {
+            return;
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+    panic!("timed out waiting for detokenize");
 }
 
 fn bitmask_first_allowed_token_id(guided_token_mask: &[i32]) -> Option<i32> {

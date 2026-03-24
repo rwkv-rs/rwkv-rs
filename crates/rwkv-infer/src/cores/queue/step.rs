@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::cores::forward::{TokenId, TokenIdLogprobsConfig};
+use crate::cores::forward::{StepMode, TokenId, TokenIdLogprobsConfig};
 
-use super::{BatchStatus, END_TOKEN_ID, Queue, QueueItemStatus};
+use super::{BatchStatus, END_TOKEN_ID, Queue, QueueFinishMeta, QueueFinishReason, QueueItemStatus};
 
 pub(super) struct StepInputs {
     pub(super) batch_ids: Vec<usize>,
@@ -132,10 +132,14 @@ impl Queue {
             };
 
             let token_id = token.token_id;
-            let mut should_finish =
-                token_id == END_TOKEN_ID || token.finish_after_token || next_len >= max_new_tokens;
+            let finished_by_model = token_id == END_TOKEN_ID || token.finish_after_token;
+            let finished_by_length = next_len >= max_new_tokens;
+            let mut should_finish = finished_by_model || finished_by_length;
+            let should_finish_before_guided = should_finish;
 
-            if token_id != END_TOKEN_ID && self.queue_detokenize_token(item_id, token_id).is_err() {
+            if token_id != END_TOKEN_ID
+                && self.queue_detokenize_token(item_id, token.clone()).is_err()
+            {
                 removed_item_ids.push(item_id);
                 continue;
             }
@@ -148,6 +152,18 @@ impl Queue {
                 continue;
             }
 
+            let finish_reason = if should_finish {
+                Some(if finished_by_model || !should_finish_before_guided {
+                    QueueFinishReason::Stop
+                } else if finished_by_length {
+                    QueueFinishReason::Length
+                } else {
+                    QueueFinishReason::Stop
+                })
+            } else {
+                None
+            };
+
             let (batch_id_to_reset, should_remove) = {
                 let item = self
                     .items
@@ -155,6 +171,12 @@ impl Queue {
                     .expect("scheduled item_id must exist in queue");
 
                 if should_finish {
+                    item.finish_meta = Some(QueueFinishMeta {
+                        reason: finish_reason.expect("finish reason"),
+                        matched_stop_suffix: None,
+                        matched_stop_suffix_index: None,
+                        generated_tokens: next_len,
+                    });
                     item.status = QueueItemStatus::Finished;
                     (item.batch_id.take(), item.pending_detokenize_tasks == 0)
                 } else {
@@ -167,7 +189,7 @@ impl Queue {
             if let Some(batch_id) = batch_id_to_reset {
                 self.model_forward.reset(batch_id);
             }
-            if should_remove {
+            if should_remove && self.finish_item_if_ready(item_id) {
                 removed_item_ids.push(item_id);
             }
         }
@@ -176,6 +198,21 @@ impl Queue {
             removed_item_ids.sort_unstable();
             removed_item_ids.dedup();
             self.remove(&removed_item_ids);
+        }
+    }
+
+    pub(super) fn build_step_mode<'a>(
+        &self,
+        step_inputs: &'a StepInputs,
+        guided_token_masks: &'a [Option<&'a [i32]>],
+    ) -> StepMode<'a> {
+        match self.batch_status {
+            BatchStatus::PrefillWithoutOutput => StepMode::PrefillNoOutput,
+            BatchStatus::Prefill | BatchStatus::Decode => StepMode::Sample {
+                sampling_configs: &step_inputs.sampling_configs,
+                token_logprobs_configs: &step_inputs.token_logprobs_configs,
+                guided_token_masks,
+            },
         }
     }
 }
