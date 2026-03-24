@@ -4,7 +4,11 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
 use super::writes::recover_running_tasks;
 use crate::db::Db;
 
-pub async fn connect(cfg: &SpaceDbConfig, max_connections: u32) -> Result<Db, String> {
+pub async fn connect(
+    cfg: &SpaceDbConfig,
+    max_connections: u32,
+    startup_recovery: bool,
+) -> Result<Db, String> {
     let options = build_connect_options(cfg)?;
     let pool = PgPoolOptions::new()
         .max_connections(max_connections)
@@ -13,11 +17,15 @@ pub async fn connect(cfg: &SpaceDbConfig, max_connections: u32) -> Result<Db, St
         .map_err(|err| format!("connect postgres failed: {err}"))?;
 
     let db = Db { pool };
-    let stats = recover_running_tasks(&db).await?;
-    println!(
-        "startup recovery: marked {} running tasks as Failed, {} running completions as Failed",
-        stats.failed_task_count, stats.failed_completion_count
-    );
+    if startup_recovery {
+        let stats = recover_running_tasks(&db).await?;
+        println!(
+            "startup recovery: marked {} running tasks as Failed, {} running completions as Failed",
+            stats.failed_task_count, stats.failed_completion_count
+        );
+    } else {
+        println!("startup recovery: disabled");
+    }
 
     Ok(db)
 }

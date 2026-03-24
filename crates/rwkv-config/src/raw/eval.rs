@@ -21,6 +21,7 @@ pub struct RawEvalConfig {
     pub benchmark_field: Vec<String>,
     pub extra_benchmark_name: Vec<String>,
     pub upload_to_space: Option<bool>,
+    pub startup_recovery: Option<bool>,
     pub git_hash: String,
     pub models: Vec<IntApiConfig>,
     pub llm_judger: ExtApiConfig,
@@ -33,6 +34,7 @@ impl RawEvalConfig {
         fill_default!(
             self,
             upload_to_space: false,
+            startup_recovery: false,
             run_mode: "new".to_string(),
             skip_checker: false,
             attempt_concurrency: 8,

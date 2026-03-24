@@ -39,9 +39,7 @@ use self::paths::{build_task_log_path, cot_mode_name};
 use self::persistence_json::{build_metrics_json, build_task_sampling_config_json};
 use self::runtime::{CheckerRuntime, TaskExecutionState};
 use self::sampling::build_avg_k_execution_plan;
-use self::task_persistence::{
-    ensure_existing_results_match_plan, fail_task, prepare_task_execution,
-};
+use self::task_persistence::{ensure_existing_results_match_plan, fail_task, prepare_task_execution};
 
 const EVALUATOR_NAME: &str = "rwkv-lm-eval";
 
@@ -61,6 +59,7 @@ pub async fn evaluating(
     let git_hash = eval_cfg.git_hash.clone();
     let db = connect_db_if_configured(
         eval_cfg.upload_to_space,
+        eval_cfg.startup_recovery,
         eval_cfg.space_db.as_ref(),
         options.db_pool_max_connections,
     )
@@ -257,12 +256,11 @@ async fn run_target_model(
     for &cot_mode in benchmark_info.cot_mode {
         for &n_shot in benchmark_info.n_shots {
             for &avg_k in benchmark_info.avg_ks {
-                let avg_k_plan =
-                    build_avg_k_execution_plan(
-                        benchmark_info.name.0,
-                        effective_benchmark_len,
-                        avg_k,
-                    );
+                let avg_k_plan = build_avg_k_execution_plan(
+                    benchmark_info.name.0,
+                    effective_benchmark_len,
+                    avg_k,
+                );
                 let sampling_config_json = build_task_sampling_config_json(
                     benchmark_info,
                     cot_mode,

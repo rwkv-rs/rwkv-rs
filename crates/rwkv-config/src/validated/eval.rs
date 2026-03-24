@@ -26,6 +26,7 @@ pub struct FinalEvalConfig {
     pub benchmark_field: Vec<String>,
     pub extra_benchmark_name: Vec<String>,
     pub upload_to_space: bool,
+    pub startup_recovery: bool,
     pub git_hash: String,
     pub models: Vec<IntApiConfig>,
     pub llm_judger: ExtApiConfig,

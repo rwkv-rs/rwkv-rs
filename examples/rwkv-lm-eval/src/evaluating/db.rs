@@ -4,6 +4,7 @@ use crate::db::{Db, connect};
 
 pub(crate) async fn connect_db_if_configured(
     upload_to_space: bool,
+    startup_recovery: bool,
     cfg: Option<&SpaceDbConfig>,
     max_connections: u32,
 ) -> Option<Db> {
@@ -19,7 +20,7 @@ pub(crate) async fn connect_db_if_configured(
         panic!("upload_to_space=true requires a complete [space_db] config");
     }
 
-    let db = connect(cfg, max_connections)
+    let db = connect(cfg, max_connections, startup_recovery)
         .await
         .unwrap_or_else(|err| panic!("failed to connect to postgres: {err}"));
     println!("database persistence: enabled (pool max connections = {max_connections})");
