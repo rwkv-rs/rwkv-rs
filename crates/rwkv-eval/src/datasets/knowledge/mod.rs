@@ -9,6 +9,7 @@ use async_openai::config::OpenAIConfig;
 pub mod ceval;
 pub mod cmmlu;
 pub mod gpqa;
+pub mod include;
 pub mod mmlu;
 pub mod mmlu_pro;
 pub mod mmlu_redux;

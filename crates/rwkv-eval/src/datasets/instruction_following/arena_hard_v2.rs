@@ -1,9 +1,8 @@
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
-    apply_user_assistant_template,
-    instruction_following::sanitize_visible_answer,
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
+    apply_user_assistant_template, instruction_following::sanitize_visible_answer, ALL_BENCHMARKS,
+    Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use crate::inferers::generate_text_completion;
 use async_openai::Client;
@@ -77,6 +76,16 @@ static ARENA_HARD_V2_INFO: BenchmarkInfo = BenchmarkInfo {
 pub struct ArenaHardV2 {
     dataset_root: PathBuf,
     test: Vec<ArenaHardV2Item>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&ARENA_HARD_V2_INFO).await;
+    }
 }
 
 pub struct ArenaHardV2Item {
@@ -302,7 +311,10 @@ fn build_context_with_judges(
     )
 }
 
-fn build_judge_error_reason(round_one_error: Option<&str>, round_two_error: Option<&str>) -> String {
+fn build_judge_error_reason(
+    round_one_error: Option<&str>,
+    round_two_error: Option<&str>,
+) -> String {
     let mut parts = Vec::new();
     if let Some(err) = round_one_error {
         parts.push(format!("round1={err}"));

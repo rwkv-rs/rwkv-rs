@@ -662,8 +662,14 @@ async fn complete_text(
 #[cfg(test)]
 mod tests {
     use super::McpBench;
+    use super::MCP_BENCH_INFO;
     use crate::datasets::function_calling::mcp_bench::prompt::build_context_summary;
     use crate::datasets::function_calling::mcp_bench::types::RawTaskFile;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&MCP_BENCH_INFO).await;
+    }
 
     #[test]
     fn flatten_runner_format_groups() {

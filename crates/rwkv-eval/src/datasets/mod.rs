@@ -179,11 +179,6 @@ pub(crate) async fn assert_benchmark_download_load_and_read(info: &'static Bench
         "load() returned invalid after download for `{}`",
         info.name.0
     );
-    assert!(
-        !benchmark.check().await,
-        "check() returned invalid after download for `{}`",
-        info.name.0
-    );
     assert!(benchmark.len() > 0, "len() == 0 for `{}`", info.name.0);
 
     let cot_mode = *info

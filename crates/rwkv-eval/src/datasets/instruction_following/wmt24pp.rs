@@ -2,9 +2,8 @@ use crate::datasets::utils::collect_files_with_extension;
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
-    apply_user_assistant_template,
-    instruction_following::sanitize_visible_answer,
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
+    apply_user_assistant_template, instruction_following::sanitize_visible_answer, ALL_BENCHMARKS,
+    Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
 };
 use crate::inferers::generate_text_completion;
 use async_openai::Client;
@@ -117,6 +116,16 @@ const WMT24PP_REFERENCE_BASED_JUDGE_INSTRUCTION: &str = concat!(
 pub struct Wmt24pp {
     dataset_root: PathBuf,
     test: Vec<Wmt24ppItem>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&WMT24PP_INFO).await;
+    }
 }
 
 pub struct Wmt24ppItem {

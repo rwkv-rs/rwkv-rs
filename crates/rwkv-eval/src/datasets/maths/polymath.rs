@@ -50,6 +50,16 @@ pub struct PolyMath {
     test: Vec<PolyMathItem>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn downloads_and_reads_dataset() {
+        crate::datasets::assert_benchmark_download_load_and_read(&POLYMATH_INFO).await;
+    }
+}
+
 pub struct PolyMathItem {
     id: String,
     question: String,
@@ -279,7 +289,10 @@ impl Benchmark for PolyMath {
 
         let ref_answer = self.get_ref_answer(index);
         let answer = extract_last_boxed_answer(&generated.context).unwrap_or_default();
-        let context = format!("{0}{1}{2}", generated.context, POLYMATH_BOXED_ANSWER_MARKER, answer);
+        let context = format!(
+            "{0}{1}{2}",
+            generated.context, POLYMATH_BOXED_ANSWER_MARKER, answer
+        );
 
         if answer.is_empty() {
             return Record {
