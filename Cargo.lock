@@ -9132,32 +9132,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rwkv-infer-old"
-version = "0.1.0"
-dependencies = [
- "axum",
- "burn",
- "clia-tracing-config",
- "iceoryx2",
- "itertools 0.14.0",
- "log",
- "once_cell",
- "rwkv-bench",
- "rwkv-config",
- "rwkv-data",
- "serde",
- "sonic-rs",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "toml 1.0.7+spec-1.1.0",
- "tower-http",
- "tracing",
- "uuid",
- "xgrammar-rs",
-]
-
-[[package]]
 name = "rwkv-lm"
 version = "0.1.0"
 dependencies = [
