@@ -6,13 +6,15 @@ use burn::{
     tensor::activation::relu,
 };
 
-use crate::functions::{
-    context_mask::apply_context_mask,
-    init_weights::{get_token_shift_diff_scale, uniform_init, zeros_init},
-};
-use crate::kernels::{
-    addcmul::{AddcmulBackend, addcmul},
-    token_shift_diff::{TokenShiftDiffBackend, token_shift_diff},
+use crate::{
+    functions::{
+        context_mask::apply_context_mask,
+        init_weights::{get_token_shift_diff_scale, uniform_init, zeros_init},
+    },
+    kernels::{
+        addcmul::{AddcmulBackend, addcmul},
+        token_shift_diff::{TokenShiftDiffBackend, token_shift_diff},
+    },
 };
 
 #[derive(Config, Debug)]

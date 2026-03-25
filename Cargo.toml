@@ -95,6 +95,7 @@ indicatif = { version = "0.18.4", features = ["tokio"] }
 thiserror = "2.0.18"
 wandb = { git = "https://github.com/rwkv-rs/wandb-rs", rev = "1633ca27afb4e09caca2e00d148ea239bc639a69" }
 plotters = { version = "0.3.7", default-features = false }
+all-smi = { version = "0.17.3" }
 
 # === Deep Learning Core ===
 burn = { version = "0.21.0-pre.2", default-features = false }

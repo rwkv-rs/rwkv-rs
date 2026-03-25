@@ -1,36 +1,58 @@
 use std::time::Duration;
 
-use axum::Json;
-use axum::extract::State;
-use axum::response::sse::{Event, KeepAlive};
-use axum::response::{IntoResponse, Response, Sse};
+use axum::{
+    Json,
+    extract::State,
+    response::{
+        IntoResponse,
+        Response,
+        Sse,
+        sse::{Event, KeepAlive},
+    },
+};
 use tokio::sync::mpsc;
-use tokio_stream::StreamExt;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
-use crate::cores::queue::QueueEvent;
-use crate::dtos::chat::completions::ChatCompletionsReq;
-use crate::routes::AppState;
-use crate::services::chat::completions::chat_completions as run_chat_completions;
+use crate::{
+    cores::queue::QueueEvent,
+    dtos::chat::completions::ChatCompletionsReq,
+    routes::http_api::AppState,
+    services::{chat::completions::chat_completions as run_chat_completions, select_model_queue},
+};
 
 pub async fn chat_completions(
     State(app_state): State<AppState>,
     Json(req): Json<ChatCompletionsReq>,
 ) -> Response {
-    let run = match run_chat_completions(app_state.clone(), req).await {
+    let handle = {
+        let queues = app_state
+            .queues
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match select_model_queue(&queues, &req.model) {
+            Ok(handle) => handle,
+            Err(err) => return err.into_response(),
+        }
+    };
+    let run = match run_chat_completions(handle, req).await {
         Ok(run) => run,
         Err(err) => return err.into_response(),
     };
 
     if run.stream_requested {
-        let keep_alive = KeepAlive::new().interval(Duration::from_millis(app_state.sse_keep_alive_ms));
+        let keep_alive =
+            KeepAlive::new().interval(Duration::from_millis(app_state.sse_keep_alive_ms));
         let (sse_tx, sse_rx) = mpsc::channel(64);
 
         tokio::spawn(async move {
             let mut run = run;
             let mut stream_state = run.new_stream_state();
             let role_chunk = sonic_rs::to_string(&run.stream_role_chunk()).unwrap();
-            if sse_tx.send(Event::default().data(role_chunk)).await.is_err() {
+            if sse_tx
+                .send(Event::default().data(role_chunk))
+                .await
+                .is_err()
+            {
                 return;
             }
 

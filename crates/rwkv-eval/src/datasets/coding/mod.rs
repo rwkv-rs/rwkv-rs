@@ -1,9 +1,15 @@
-use crate::datasets::{
-    CoTMode, SamplingConfig, get_completions_of_cot, get_prompt_for_cot, render_context,
+use async_openai::{Client, config::OpenAIConfig};
+
+use crate::{
+    datasets::{
+        CoTMode,
+        SamplingConfig,
+        get_completions_of_cot,
+        get_prompt_for_cot,
+        render_context,
+    },
+    evaluators::coding::get_completion,
 };
-use crate::evaluators::coding::get_completion;
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
 
 pub mod human_eval;
 pub mod livecodebench;

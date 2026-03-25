@@ -1,14 +1,22 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::thread;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
+    thread,
+};
 
 use rwkv_data::tokenizer::Tokenizer;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::cores::forward::ModelForward;
-use crate::cores::forward::sampling::SamplingConfig;
-use crate::cores::forward::TokenIdLogprobsConfig;
-use crate::cores::queue::{GuidedDecodingConfig, Queue, QueueEvent, QueueItem};
+use super::stats::{QueuePerfHistory, new_perf_history};
+use crate::{
+    cores::{
+        forward::{ModelForward, TokenIdLogprobsConfig, sampling::SamplingConfig},
+        queue::{GuidedDecodingConfig, Queue, QueueEvent, QueueItem, snapshot_perf_history},
+    },
+    dtos::health::QueuePerfSample,
+};
 
 #[derive(Clone, Debug)]
 pub struct QueueHandle {
@@ -19,6 +27,7 @@ pub struct QueueHandle {
     pub weights_path: String,
     pub max_batch_size: usize,
     pub tokenizer: Arc<Tokenizer>,
+    perf_history: QueuePerfHistory,
 }
 
 #[derive(Clone, Debug)]
@@ -52,6 +61,10 @@ impl QueueHandle {
 
     pub fn begin_drain(&self) {
         self.accepting.store(false, Ordering::Release);
+    }
+
+    pub fn perf_samples(&self) -> Vec<QueuePerfSample> {
+        snapshot_perf_history(&self.perf_history)
     }
 
     pub async fn submit(&self, request: QueueSubmitRequest) -> mpsc::Receiver<QueueEvent> {
@@ -94,10 +107,12 @@ pub fn spawn_queue_worker(
 ) -> QueueHandle {
     let pending = Arc::new(AtomicUsize::new(0));
     let accepting = Arc::new(AtomicBool::new(true));
+    let perf_history = new_perf_history();
     let (tx, mut rx) = mpsc::channel(1024);
     let pending_for_thread = Arc::clone(&pending);
     let accepting_for_thread = Arc::clone(&accepting);
     let worker_tokenizer = Arc::clone(&tokenizer);
+    let perf_history_for_thread = Arc::clone(&perf_history);
 
     thread::spawn(move || {
         let mut queue = Queue::new(
@@ -105,6 +120,7 @@ pub fn spawn_queue_worker(
             Arc::clone(&worker_tokenizer),
             max_batch_size,
             paragraph_len,
+            perf_history_for_thread,
         );
         let mut active_items = 0usize;
         let mut next_item_id = 1usize;
@@ -193,6 +209,7 @@ pub fn spawn_queue_worker(
         weights_path,
         max_batch_size,
         tokenizer,
+        perf_history,
     }
 }
 

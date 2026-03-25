@@ -1,18 +1,21 @@
 use std::sync::Arc;
 
-use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{Method, StatusCode};
-use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{
+    Json,
+    Router,
+    extract::{DefaultBodyLimit, State},
+    http::{Method, StatusCode},
+    routing::{get, post},
+};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 #[cfg(feature = "trace")]
 use tower_http::trace::TraceLayer;
 
-use crate::access::http_api::HttpApiService;
-use crate::access::http_api::ModelListResponse;
-use crate::access::http_api::handlers;
-use crate::auth::AuthConfig;
-use crate::model_pool::loaded_model_registry::LoadedModelRegistry;
+use crate::{
+    access::http_api::{HttpApiService, ModelListResponse, handlers},
+    auth::AuthConfig,
+    model_pool::loaded_model_registry::LoadedModelRegistry,
+};
 
 #[derive(Clone)]
 pub struct HttpApiState {

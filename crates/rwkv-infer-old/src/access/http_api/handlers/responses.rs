@@ -5,11 +5,16 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use crate::access::http_api::HttpApiService;
-use crate::access::http_api::{
-    HttpApiState, OpenAiErrorResponse, ResponseIdRequest, ResponsesCreateRequest,
+use crate::{
+    access::http_api::{
+        HttpApiService,
+        HttpApiState,
+        OpenAiErrorResponse,
+        ResponseIdRequest,
+        ResponsesCreateRequest,
+    },
+    auth::check_api_key,
 };
-use crate::auth::check_api_key;
 
 #[cfg_attr(
     feature = "trace",

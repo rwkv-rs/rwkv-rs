@@ -11,36 +11,46 @@ mod runtime;
 mod sampling;
 mod task_persistence;
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfigBuilder};
-use rwkv_eval::datasets::Benchmark;
-use rwkv_eval::datasets::maths::set_llm_judger_semaphore;
+use rwkv_eval::datasets::{Benchmark, maths::set_llm_judger_semaphore};
 use tokio::sync::Semaphore;
 
 use crate::db::{
-    BenchmarkInsert, Db, ModelInsert, ScoreInsert, TaskInsert, TaskStatus, insert_score,
-    update_task_status, upsert_benchmark, upsert_model,
+    BenchmarkInsert,
+    Db,
+    ModelInsert,
+    ScoreInsert,
+    TaskInsert,
+    TaskStatus,
+    insert_score,
+    update_task_status,
+    upsert_benchmark,
+    upsert_model,
 };
-
-use self::attempts::{build_attempt_keys, execute_attempts, execute_pending_checks};
-use self::benchmark::{
-    collect_benchmarks, ensure_microsandbox_for_coding_benchmarks, prepare_benchmark,
-    validate_benchmark_info,
-};
-use self::client::{ClientWithConfig, build_client, check_client};
-use self::db::connect_db_if_configured;
-use self::metrics::compute_metrics;
-use self::models::{collect_models, model_cache_key};
-use self::options::{RunMode, build_evaluating_options};
-use self::paths::{build_task_log_path, cot_mode_name};
-use self::persistence_json::{build_metrics_json, build_task_sampling_config_json};
-use self::runtime::{CheckerRuntime, TaskExecutionState};
-use self::sampling::build_avg_k_execution_plan;
-use self::task_persistence::{
-    ensure_existing_results_match_plan, fail_task, prepare_task_execution,
+use self::{
+    attempts::{build_attempt_keys, execute_attempts, execute_pending_checks},
+    benchmark::{
+        collect_benchmarks,
+        ensure_microsandbox_for_coding_benchmarks,
+        prepare_benchmark,
+        validate_benchmark_info,
+    },
+    client::{ClientWithConfig, build_client, check_client},
+    db::connect_db_if_configured,
+    metrics::compute_metrics,
+    models::{collect_models, model_cache_key},
+    options::{RunMode, build_evaluating_options},
+    paths::{build_task_log_path, cot_mode_name},
+    persistence_json::{build_metrics_json, build_task_sampling_config_json},
+    runtime::{CheckerRuntime, TaskExecutionState},
+    sampling::build_avg_k_execution_plan,
+    task_persistence::{ensure_existing_results_match_plan, fail_task, prepare_task_execution},
 };
 
 const EVALUATOR_NAME: &str = "rwkv-lm-eval";

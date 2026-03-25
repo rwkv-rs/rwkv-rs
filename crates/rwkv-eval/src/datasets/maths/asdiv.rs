@@ -1,15 +1,21 @@
-use crate::datasets::maths::{
-    get_expect_context, get_final_answer_with_cot_mode, judge_with_retry,
-};
-use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
-use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
-};
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::path::{Path, PathBuf};
+
+use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use std::path::{Path, PathBuf};
+
+use crate::datasets::{
+    ALL_BENCHMARKS,
+    Benchmark,
+    BenchmarkInfo,
+    BenchmarkName,
+    CoTMode,
+    Field,
+    Record,
+    SamplingConfig,
+    maths::{get_expect_context, get_final_answer_with_cot_mode, judge_with_retry},
+    utils::hf::downloader::{UrlDownloadFile, download_url_files},
+};
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static ASDIV_INFO: BenchmarkInfo = BenchmarkInfo {

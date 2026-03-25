@@ -1,13 +1,18 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use clia_tracing_config::WorkerGuard;
-use rwkv_config::load_toml;
-use rwkv_config::raw::infer::RawInferConfig;
-use rwkv_config::raw::model::RawModelConfig;
-use rwkv_config::validated::infer::FinalInferConfigBuilder;
-use rwkv_config::validated::model::{FinalModelConfig, FinalModelConfigBuilder};
+use rwkv_config::{
+    load_toml,
+    raw::{infer::RawInferConfig, model::RawModelConfig},
+    validated::{
+        infer::FinalInferConfigBuilder,
+        model::{FinalModelConfig, FinalModelConfigBuilder},
+    },
+};
 
 fn is_path_like(s: &str) -> bool {
     s.contains('/') || s.contains('\\')

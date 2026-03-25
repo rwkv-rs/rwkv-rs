@@ -1,19 +1,29 @@
 use core::fmt::Debug;
-use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
+use std::{sync::Arc, thread, time::Duration};
 
-use iceoryx2::active_request::ActiveRequest;
-use iceoryx2::prelude::{NodeBuilder, ZeroCopySend, ipc};
+use iceoryx2::{
+    active_request::ActiveRequest,
+    prelude::{NodeBuilder, ZeroCopySend, ipc},
+};
 use tokio::runtime::Handle;
 
-use crate::access::http_api::HttpApiService;
-use crate::auth::{AuthConfig, check_api_key_token};
-use crate::model_pool::LoadedModelRegistry;
-
+use crate::{
+    access::http_api::HttpApiService,
+    auth::{AuthConfig, check_api_key_token},
+    model_pool::LoadedModelRegistry,
+};
 use super::protocol::{
-    HandshakeRequest, HandshakeResponse, IPC_PROTOCOL_VERSION, IpcRequest, IpcResponse,
-    ResponseKind, RouteId, decode_json, decode_request, encode_json, encode_response,
+    HandshakeRequest,
+    HandshakeResponse,
+    IPC_PROTOCOL_VERSION,
+    IpcRequest,
+    IpcResponse,
+    ResponseKind,
+    RouteId,
+    decode_json,
+    decode_request,
+    encode_json,
+    encode_response,
 };
 
 #[derive(Clone, Debug)]

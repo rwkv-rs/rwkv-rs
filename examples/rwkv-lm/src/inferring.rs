@@ -1,13 +1,14 @@
 use std::{
     collections::{HashMap, HashSet},
+    fs,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use itertools::izip;
+use serde::de::DeserializeOwned;
 use rwkv::{
     config::{
-        load_toml,
         raw::{
             infer::{GenerationConfig, RawInferConfig},
             model::RawModelConfig,
@@ -26,15 +27,17 @@ use rwkv::{
     infer::{
         cores::{
             forward::{
-                ModelForward, StepMode, TokenId, TokenIdLogprobsConfig,
+                ModelForward,
+                StepMode,
+                TokenId,
                 logprobs::build_sampled_token_logprob,
-                sampling::{SamplingConfig, SamplingConfigsTensor, sampling_configs_to_tensor},
+                sampling::{SamplingConfigsTensor, sampling_configs_to_tensor},
             },
             queue::queue_worker::spawn_queue_worker,
         },
         handlers::auth::AuthConfig,
-        routes::AppState,
-        services::QueueMap,
+        routes::http_api::AppState,
+        services::{QueueMap, QueueMapBuilder, ServiceError, ServiceResult},
     },
     nn::kernels::{
         addcmul::AddcmulBackend,
@@ -43,6 +46,8 @@ use rwkv::{
         wkv7_common::Wkv7Backend,
     },
 };
+#[cfg(feature = "ipc")]
+use rwkv::infer::routes::IpcServerConfig;
 
 use crate::model::{AutoRegressiveModel, AutoRegressiveModelConfig, UnembedMode};
 
@@ -470,70 +475,29 @@ where
     let infer_cfg_path = config_dir
         .join("infer")
         .join(format!("{infer_cfg_name}.toml"));
-    let infer_cfg_dir = infer_cfg_path.parent().unwrap_or_else(|| Path::new("."));
-
-    let mut infer_cfg: RawInferConfig = load_toml(&infer_cfg_path);
-    infer_cfg.fill_default();
-    assert!(
-        !infer_cfg.models.is_empty(),
-        "infer config requires at least one model"
-    );
-
-    let mut names = HashSet::new();
-    for model in &infer_cfg.models {
-        assert!(
-            !model.model_name.trim().is_empty(),
-            "model_name cannot be empty"
-        );
-        assert!(
-            names.insert(model.model_name.clone()),
-            "duplicated model_name: {}",
-            model.model_name
-        );
-        assert!(
-            !model.model_cfg.trim().is_empty(),
-            "model_cfg cannot be empty"
-        );
-        assert!(
-            !model.weights_path.trim().is_empty(),
-            "weights_path cannot be empty"
-        );
-        assert!(
-            !model.tokenizer_vocab_path.trim().is_empty(),
-            "tokenizer_vocab_path cannot be empty"
-        );
-        assert!(!model.device_ids.is_empty(), "device_ids cannot be empty");
-    }
-
-    let mut runtime_models = infer_cfg.models.clone();
-    for model in &mut runtime_models {
-        model.weights_path = resolve_path(infer_cfg_dir, &model.weights_path);
-        model.tokenizer_vocab_path = resolve_path(infer_cfg_dir, &model.tokenizer_vocab_path);
-    }
-
-    let mut model_cfgs = HashMap::new();
-    for model in &runtime_models {
-        let model_cfg_path = if model.model_cfg.contains('/') || model.model_cfg.contains('\\') {
-            let path = PathBuf::from(&model.model_cfg);
-            if path.is_absolute() {
-                path
-            } else {
-                infer_cfg_dir.join(path)
-            }
-        } else {
-            config_dir
-                .join("model")
-                .join(format!("{}.toml", model.model_cfg))
-        };
-        let mut raw_model_cfg: RawModelConfig = load_toml(&model_cfg_path);
-        raw_model_cfg.fill_default();
-
-        let mut model_cfg_builder = FinalModelConfigBuilder::load_from_raw(raw_model_cfg);
-        model_cfg_builder.fill_auto_after_load();
-        model_cfgs.insert(model.model_name.clone(), model_cfg_builder.build_local());
-    }
-
-    let queues = build_queue_map::<B>(&runtime_models, &model_cfgs);
+    let infer_cfg = load_raw_infer_cfg(&infer_cfg_path).unwrap_or_else(|err| {
+        panic!(
+            "failed to load infer config {}: {}",
+            infer_cfg_path.display(),
+            err.body().error.message
+        )
+    });
+    let queues =
+        build_queue_map_from_generation_cfgs::<B>(&config_dir, &infer_cfg_path, &infer_cfg.models)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "failed to build infer queues from {}: {}",
+                    infer_cfg_path.display(),
+                    err.body().error.message
+                )
+            });
+    let build_queues: QueueMapBuilder = Arc::new({
+        let config_dir = config_dir.clone();
+        let infer_cfg_path = infer_cfg_path.clone();
+        move |models| {
+            build_queue_map_from_generation_cfgs::<B>(&config_dir, &infer_cfg_path, models)
+        }
+    });
     let bind_addr = infer_cfg.http_bind_addr.clone().unwrap();
 
     (
@@ -545,9 +509,57 @@ where
             infer_cfg.sse_keep_alive_ms.unwrap(),
             infer_cfg.allowed_origins.clone(),
             queues,
-        ),
+        )
+        .with_reload_support(infer_cfg_path, build_queues),
         bind_addr,
     )
+}
+
+#[cfg(feature = "ipc")]
+pub fn build_ipc_server_config(
+    config_dir: PathBuf,
+    infer_cfg_name: &str,
+) -> Option<IpcServerConfig> {
+    let infer_cfg_path = config_dir
+        .join("infer")
+        .join(format!("{infer_cfg_name}.toml"));
+    let mut infer_cfg: RawInferConfig = read_toml_file(&infer_cfg_path).ok()?;
+    infer_cfg.fill_default();
+
+    let ipc_cfg = infer_cfg.ipc?;
+    if !ipc_cfg.enabled.unwrap_or(false) {
+        return None;
+    }
+
+    Some(IpcServerConfig {
+        service_name: ipc_cfg.service_name.unwrap(),
+        max_request_bytes: ipc_cfg.max_request_bytes.unwrap(),
+        max_response_bytes: ipc_cfg.max_response_bytes.unwrap(),
+        max_inflight_requests: ipc_cfg.max_inflight_requests.unwrap(),
+        require_api_key: ipc_cfg.require_api_key.unwrap(),
+    })
+}
+
+fn build_queue_map_from_generation_cfgs<B>(
+    config_dir: &Path,
+    infer_cfg_path: &Path,
+    models: &[GenerationConfig],
+) -> ServiceResult<QueueMap>
+where
+    B: Backend
+        + TokenShiftDiffBackend
+        + AddcmulBackend
+        + Wkv7Backend
+        + RapidSampleBackend
+        + Send
+        + Sync
+        + 'static,
+{
+    validate_generation_models(models)?;
+    let infer_cfg_dir = infer_cfg_path.parent().unwrap_or_else(|| Path::new("."));
+    let runtime_models = resolve_runtime_models(infer_cfg_dir, models);
+    let model_cfgs = load_model_cfgs(config_dir, infer_cfg_dir, &runtime_models)?;
+    Ok(build_queue_map::<B>(&runtime_models, &model_cfgs))
 }
 
 fn build_queue_map<B>(
@@ -621,6 +633,125 @@ where
     }
 
     queue_map
+}
+
+fn load_raw_infer_cfg(path: &Path) -> ServiceResult<RawInferConfig> {
+    let mut cfg: RawInferConfig = read_toml_file(path)?;
+    cfg.fill_default();
+    validate_generation_models(&cfg.models)?;
+    Ok(cfg)
+}
+
+fn read_toml_file<T: DeserializeOwned>(path: &Path) -> ServiceResult<T> {
+    let content = fs::read_to_string(path).map_err(|err| {
+        ServiceError::bad_request(format!("failed to read {}: {err}", path.display()))
+    })?;
+    toml::from_str(&content)
+        .map_err(|err| ServiceError::bad_request(format!("invalid toml {}: {err}", path.display())))
+}
+
+fn validate_generation_models(models: &[GenerationConfig]) -> ServiceResult<()> {
+    if models.is_empty() {
+        return Err(ServiceError::bad_request(
+            "infer config requires at least one model",
+        ));
+    }
+
+    let mut names = HashSet::new();
+    for model in models {
+        if model.model_name.trim().is_empty() {
+            return Err(ServiceError::bad_request("model_name cannot be empty"));
+        }
+        if !names.insert(model.model_name.clone()) {
+            return Err(ServiceError::bad_request(format!(
+                "duplicated model_name: {}",
+                model.model_name
+            )));
+        }
+        if model.model_cfg.trim().is_empty() {
+            return Err(ServiceError::bad_request(format!(
+                "model_cfg cannot be empty for model {}",
+                model.model_name
+            )));
+        }
+        if model.weights_path.trim().is_empty() {
+            return Err(ServiceError::bad_request(format!(
+                "weights_path cannot be empty for model {}",
+                model.model_name
+            )));
+        }
+        if model.tokenizer_vocab_path.trim().is_empty() {
+            return Err(ServiceError::bad_request(format!(
+                "tokenizer_vocab_path cannot be empty for model {}",
+                model.model_name
+            )));
+        }
+        if model.device_ids.is_empty() {
+            return Err(ServiceError::bad_request(format!(
+                "device_ids cannot be empty for model {}",
+                model.model_name
+            )));
+        }
+        if model.max_batch_size.unwrap_or_default() < 1 {
+            return Err(ServiceError::bad_request(format!(
+                "max_batch_size must be >= 1 for model {}",
+                model.model_name
+            )));
+        }
+        if model.max_context_len.unwrap_or_default() < 1 {
+            return Err(ServiceError::bad_request(format!(
+                "max_context_len must be >= 1 for model {}",
+                model.model_name
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn load_model_cfgs(
+    config_dir: &Path,
+    infer_cfg_dir: &Path,
+    models: &[GenerationConfig],
+) -> ServiceResult<HashMap<String, Arc<FinalModelConfig>>> {
+    let mut model_cfgs = HashMap::new();
+
+    for model in models {
+        let model_cfg_path = resolve_model_cfg_path(config_dir, infer_cfg_dir, &model.model_cfg);
+        let mut raw_model_cfg: RawModelConfig = read_toml_file(&model_cfg_path)?;
+        raw_model_cfg.fill_default();
+
+        let mut model_cfg_builder = FinalModelConfigBuilder::load_from_raw(raw_model_cfg);
+        model_cfg_builder.fill_auto_after_load();
+        model_cfgs.insert(model.model_name.clone(), model_cfg_builder.build_local());
+    }
+
+    Ok(model_cfgs)
+}
+
+fn resolve_runtime_models(
+    infer_cfg_dir: &Path,
+    models: &[GenerationConfig],
+) -> Vec<GenerationConfig> {
+    let mut resolved_models = models.to_vec();
+    for model in &mut resolved_models {
+        model.weights_path = resolve_path(infer_cfg_dir, &model.weights_path);
+        model.tokenizer_vocab_path = resolve_path(infer_cfg_dir, &model.tokenizer_vocab_path);
+    }
+    resolved_models
+}
+
+fn resolve_model_cfg_path(config_dir: &Path, infer_cfg_dir: &Path, model_cfg: &str) -> PathBuf {
+    if model_cfg.contains('/') || model_cfg.contains('\\') {
+        let path = PathBuf::from(model_cfg);
+        if path.is_absolute() {
+            path
+        } else {
+            infer_cfg_dir.join(path)
+        }
+    } else {
+        config_dir.join("model").join(format!("{model_cfg}.toml"))
+    }
 }
 
 fn resolve_path(base_dir: &Path, path: &str) -> String {

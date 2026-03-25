@@ -1,11 +1,14 @@
-use crate::datasets::SamplingConfig;
-use crate::inferers::{CompletionRequest, CompletionResponse};
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use async_openai::{Client, config::OpenAIConfig};
 use microsandbox::sandbox::Sandbox;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
-use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::{
+    datasets::SamplingConfig,
+    inferers::{CompletionRequest, CompletionResponse},
+};
 
 static SANDBOX_COUNTER: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(1));
 
@@ -107,7 +110,10 @@ pub async fn run_python_verdict_script(script: &str) -> Result<SandboxVerdict, S
             } else if !stdout.trim().is_empty() {
                 format!("invalid sandbox verdict: {stdout}")
             } else if !execution.status.success {
-                format!("sandbox execution failed with status {}", execution.status.code)
+                format!(
+                    "sandbox execution failed with status {}",
+                    execution.status.code
+                )
             } else {
                 "sandbox returned no verdict".to_string()
             };

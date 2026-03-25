@@ -1,15 +1,24 @@
 use std::net::SocketAddr;
 
-use axum::Router;
-use axum::http::Method;
-use axum::routing::get;
+use axum::{Router, http::Method, routing::get};
 use tower_http::cors::{Any, CorsLayer};
 
-use super::handlers::{
-    benchmarks, completion_detail, health, index, meta, models, openapi_json, review_queue,
-    task_attempts, task_detail, tasks,
+use super::{
+    handlers::{
+        benchmarks,
+        completion_detail,
+        health,
+        index,
+        meta,
+        models,
+        openapi_json,
+        review_queue,
+        task_attempts,
+        task_detail,
+        tasks,
+    },
+    state::AppState,
 };
-use super::state::AppState;
 use crate::db::Db;
 
 pub fn build_router(state: AppState) -> Router {

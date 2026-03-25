@@ -1,8 +1,14 @@
 use std::collections::HashMap;
 
 use crate::cores::forward::{StepMode, TokenId, TokenIdLogprobsConfig};
-
-use super::{BatchStatus, END_TOKEN_ID, Queue, QueueFinishMeta, QueueFinishReason, QueueItemStatus};
+use super::{
+    BatchStatus,
+    END_TOKEN_ID,
+    Queue,
+    QueueFinishMeta,
+    QueueFinishReason,
+    QueueItemStatus,
+};
 
 pub(super) struct StepInputs {
     pub(super) batch_ids: Vec<usize>,

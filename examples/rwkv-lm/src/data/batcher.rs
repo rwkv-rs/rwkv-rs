@@ -1,10 +1,14 @@
-use rwkv::custom::Tensor;
-use rwkv::custom::data::dataloader::batcher::Batcher;
-use rwkv::custom::prelude::{Backend, Int, TensorData};
-use rwkv::data::mmap::dtype::TokenUnit;
-use rwkv::train::data::sliding::{MmapBinReader, SlidingSample};
-use std::marker::PhantomData;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
+
+use rwkv::{
+    custom::{
+        Tensor,
+        data::dataloader::batcher::Batcher,
+        prelude::{Backend, Int, TensorData},
+    },
+    data::mmap::dtype::TokenUnit,
+    train::data::sliding::{MmapBinReader, SlidingSample},
+};
 
 #[derive(Clone)]
 pub struct AutoRegressiveBatcher<B: Backend, T: TokenUnit> {

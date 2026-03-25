@@ -3,8 +3,16 @@ use std::thread;
 use sonic_rs::{json, to_string};
 use tokio::sync::mpsc;
 use xgrammar::{
-    DLDataType, DLDataTypeCode, DLDevice, DLDeviceType, DLTensor, GrammarCompiler, GrammarMatcher,
-    TokenizerInfo, get_bitmask_shape, reset_token_bitmask,
+    DLDataType,
+    DLDataTypeCode,
+    DLDevice,
+    DLDeviceType,
+    DLTensor,
+    GrammarCompiler,
+    GrammarMatcher,
+    TokenizerInfo,
+    get_bitmask_shape,
+    reset_token_bitmask,
 };
 
 use super::Queue;

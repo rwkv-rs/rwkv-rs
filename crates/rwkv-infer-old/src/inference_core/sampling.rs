@@ -1,8 +1,9 @@
 use itertools::Itertools;
-
-use burn::Tensor;
-use burn::prelude::Backend;
-use burn::tensor::{Int, TensorData};
+use burn::{
+    Tensor,
+    prelude::Backend,
+    tensor::{Int, TensorData},
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct SamplingConfig {

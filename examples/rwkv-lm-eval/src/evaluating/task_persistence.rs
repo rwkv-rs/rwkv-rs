@@ -1,12 +1,21 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::db::{
-    Db, TaskIdentity, TaskInsert, TaskLookup, TaskStatus, delete_score_by_task_id,
-    find_tasks_by_identity, insert_task, list_attempt_records, update_task_status,
+    Db,
+    TaskIdentity,
+    TaskInsert,
+    TaskLookup,
+    TaskStatus,
+    delete_score_by_task_id,
+    find_tasks_by_identity,
+    insert_task,
+    list_attempt_records,
+    update_task_status,
 };
-
-use super::options::RunMode;
-use super::runtime::{AttemptKey, PendingChecker, TaskExecutionState};
+use super::{
+    options::RunMode,
+    runtime::{AttemptKey, PendingChecker, TaskExecutionState},
+};
 
 pub(crate) async fn prepare_task_execution(
     db: &Db,

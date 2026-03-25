@@ -1,20 +1,32 @@
-use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 
 use rwkv_data::tokenizer::Tokenizer;
 use tokio::sync::{mpsc, oneshot};
 use xgrammar::GrammarCompiler;
 
-use super::batch_scheduler::Scheduler;
-use super::constraint::build_tokenizer_info_from_vocab;
-use super::request_state::{RequestPhase, RequestState};
-use super::request_submit::{InferenceSubmitCommand, InferenceSubmitHandle, InferenceSubmitResult};
-use super::special_token::{END_TOKEN_ID, PREFILL_PAD_TOKEN_ID};
-use super::tokenizer_loop::{TokenizerCommand, TokenizerLoop};
 use super::{
-    ConstraintSpec, EntryId, FinishMetadata, FinishReason, OutputToken, OutputTokenCandidate,
-    RequestedTokenLogprobsConfig, SampledToken, SamplingConfig, StopMatch, TimingBreakdownMs,
-    TokenLogprobsConfig, build_sampled_token_logprob,
+    ConstraintSpec,
+    EntryId,
+    FinishMetadata,
+    FinishReason,
+    OutputToken,
+    OutputTokenCandidate,
+    RequestedTokenLogprobsConfig,
+    SampledToken,
+    SamplingConfig,
+    StopMatch,
+    TimingBreakdownMs,
+    TokenLogprobsConfig,
+    batch_scheduler::Scheduler,
+    build_sampled_token_logprob,
+    constraint::build_tokenizer_info_from_vocab,
+    request_state::{RequestPhase, RequestState},
+    request_submit::{InferenceSubmitCommand, InferenceSubmitHandle, InferenceSubmitResult},
+    special_token::{END_TOKEN_ID, PREFILL_PAD_TOKEN_ID},
+    tokenizer_loop::{TokenizerCommand, TokenizerLoop},
 };
 
 #[derive(Clone, Debug)]

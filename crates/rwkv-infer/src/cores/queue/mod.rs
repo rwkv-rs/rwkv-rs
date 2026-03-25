@@ -2,24 +2,35 @@ mod detokenize;
 mod guided_decode;
 pub mod queue_worker;
 mod schedule;
+mod stats;
 mod step;
 #[cfg(test)]
 mod tests;
 
-use std::{sync::Arc, thread, time::Duration};
+use std::{
+    sync::Arc,
+    thread,
+    time::{Duration, Instant},
+};
 
 use indexmap::IndexMap;
 use rwkv_data::tokenizer::Tokenizer;
 use tokio::sync::mpsc;
 use xgrammar::TokenizerInfo;
 
-use self::detokenize::{DetokenizeResult, DetokenizeTask, spawn_detokenize_worker};
-use self::guided_decode::{GuidedDecodeResult, GuidedDecodeTask, spawn_guided_decode_worker};
-use crate::cores::forward::sampling::SamplingConfig;
-use crate::cores::forward::{ModelForward, TokenId, TokenIdLogprobsConfig};
-use crate::cores::queue::guided_decode::{build_tokenizer_info_from_vocab, GuidedDecodingState};
-
-pub use self::guided_decode::GuidedDecodingConfig;
+use self::{
+    detokenize::{DetokenizeResult, DetokenizeTask, spawn_detokenize_worker},
+    guided_decode::{GuidedDecodeResult, GuidedDecodeTask, spawn_guided_decode_worker},
+    stats::{QueuePerfHistory, record_perf_sample},
+};
+use crate::{
+    cores::{
+        forward::{ModelForward, TokenId, TokenIdLogprobsConfig, sampling::SamplingConfig},
+        queue::guided_decode::{GuidedDecodingState, build_tokenizer_info_from_vocab},
+    },
+    dtos::health::QueuePerfStage,
+};
+pub use self::{guided_decode::GuidedDecodingConfig, stats::snapshot_perf_history};
 
 pub(super) const END_TOKEN_ID: i32 = 0;
 
@@ -35,6 +46,7 @@ pub struct Queue {
     detokenize_receiver: mpsc::UnboundedReceiver<DetokenizeResult>,
     guided_decode_sender: mpsc::UnboundedSender<GuidedDecodeTask>,
     guided_decode_receiver: mpsc::UnboundedReceiver<GuidedDecodeResult>,
+    perf_history: QueuePerfHistory,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -100,6 +112,7 @@ impl Queue {
         tokenizer: Arc<Tokenizer>,
         max_batch_size: usize,
         paragraph_len: usize,
+        perf_history: QueuePerfHistory,
     ) -> Self {
         debug_assert!(max_batch_size > 0);
         debug_assert!(paragraph_len > 0);
@@ -126,6 +139,7 @@ impl Queue {
             detokenize_receiver,
             guided_decode_sender,
             guided_decode_receiver,
+            perf_history,
         }
     }
 
@@ -223,7 +237,12 @@ impl Queue {
             return items_before.saturating_sub(self.items.len());
         }
 
-        match self.step(&item_ids) {
+        let batch_status = self.batch_status;
+        let started_at = Instant::now();
+        let step_result = self.step(&item_ids);
+        self.record_perf_sample(batch_status, item_ids.len(), started_at.elapsed());
+
+        match step_result {
             None => self.advance_prefill_items(&item_ids),
             Some(new_tokens) => self.apply_output_tokens(&item_ids, new_tokens),
         }
@@ -248,6 +267,22 @@ impl Queue {
         self.items
             .values()
             .any(|item| item.pending_detokenize_tasks > 0 || item.guided_decoding_pending)
+    }
+
+    fn record_perf_sample(&self, batch_status: BatchStatus, batch_used: usize, duration: Duration) {
+        let stage = match batch_status {
+            BatchStatus::Decode => QueuePerfStage::Decode,
+            BatchStatus::PrefillWithoutOutput | BatchStatus::Prefill => QueuePerfStage::Prefill,
+        };
+
+        record_perf_sample(
+            &self.perf_history,
+            stage,
+            batch_used,
+            self.max_batch_size,
+            self.paragraph_len,
+            duration,
+        );
     }
 }
 

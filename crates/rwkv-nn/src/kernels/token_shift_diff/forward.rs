@@ -1,14 +1,15 @@
 use burn::tensor::ops::FloatTensor;
 use burn_cubecl::{
-    CubeElement, CubeRuntime,
+    CubeElement,
+    CubeRuntime,
     cubecl::{CubeCount, CubeDim},
     kernel::into_contiguous,
     ops::numeric::empty_device,
 };
 
-use crate::kernels::backend::{BoolElement, CubeBackend, FloatElement, IntElement};
-use crate::kernels::token_shift_diff::{
-    TokenShiftDiffBackend, kernel::rwkv_token_shift_diff_kernel,
+use crate::kernels::{
+    backend::{BoolElement, CubeBackend, FloatElement, IntElement},
+    token_shift_diff::{TokenShiftDiffBackend, kernel::rwkv_token_shift_diff_kernel},
 };
 
 const BLOCK_SIZE: u32 = 256;
@@ -82,7 +83,9 @@ where
 mod fusion_impl {
     use burn::tensor::{Element, Shape};
     use burn_fusion::{
-        Fusion, FusionBackend, FusionRuntime,
+        Fusion,
+        FusionBackend,
+        FusionRuntime,
         stream::{Operation, OperationStreams},
     };
     use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};

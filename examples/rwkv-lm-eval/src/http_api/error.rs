@@ -1,5 +1,7 @@
-use axum::Json;
-use axum::response::{IntoResponse, Response};
+use axum::{
+    Json,
+    response::{IntoResponse, Response},
+};
 use serde::Serialize;
 use utoipa::ToSchema;
 

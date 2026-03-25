@@ -1,17 +1,22 @@
 use burn::tensor::{Shape, ops::FloatTensor};
 use burn_cubecl::{
-    CubeElement, CubeRuntime,
+    CubeElement,
+    CubeRuntime,
     cubecl::{CubeCount, CubeDim},
     kernel::into_contiguous,
     ops::numeric::empty_device,
 };
 
-use crate::kernels::backend::{BoolElement, CubeBackend, FloatElement, IntElement};
-use crate::kernels::wkv7_infer::{
-    Wkv7InferForwardOutput,
-    kernel::{
-        Wkv7InferConfig, Wkv7InferForwardInputsLaunch, Wkv7InferForwardOutputsLaunch,
-        wkv7_infer_forward_kernel,
+use crate::kernels::{
+    backend::{BoolElement, CubeBackend, FloatElement, IntElement},
+    wkv7_infer::{
+        Wkv7InferForwardOutput,
+        kernel::{
+            Wkv7InferConfig,
+            Wkv7InferForwardInputsLaunch,
+            Wkv7InferForwardOutputsLaunch,
+            wkv7_infer_forward_kernel,
+        },
     },
 };
 

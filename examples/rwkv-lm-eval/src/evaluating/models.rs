@@ -1,5 +1,4 @@
-use rwkv_config::raw::eval::IntApiConfig;
-use rwkv_config::validated::eval::EVAL_CFG;
+use rwkv_config::{raw::eval::IntApiConfig, validated::eval::EVAL_CFG};
 
 pub(crate) fn collect_models() -> Vec<IntApiConfig> {
     let mut target_models = Vec::new();

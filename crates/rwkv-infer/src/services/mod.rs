@@ -8,22 +8,33 @@ pub mod images;
 pub mod models;
 pub mod responses;
 
-use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{
+    Json,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use rwkv_config::raw::infer::GenerationConfig;
 use rwkv_data::tokenizer::Tokenizer;
 use uuid::Uuid;
 
-use crate::cores::forward::sampling::SamplingConfig;
-use crate::cores::forward::{TokenIdLogprobsConfig, TokenTextLogprobsConfig};
-use crate::cores::queue::queue_worker::QueueHandle;
-use crate::dtos::errors::OpenAiErrorResponse;
-use crate::routes::AppState;
+use crate::{
+    cores::{
+        forward::{TokenIdLogprobsConfig, TokenTextLogprobsConfig, sampling::SamplingConfig},
+        queue::queue_worker::QueueHandle,
+    },
+    dtos::errors::OpenAiErrorResponse,
+};
 
 pub type QueueMap = HashMap<String, Vec<QueueHandle>>;
+pub type SharedQueueMap = Arc<RwLock<QueueMap>>;
+pub type QueueMapBuilder =
+    Arc<dyn Fn(&[GenerationConfig]) -> ServiceResult<QueueMap> + Send + Sync + 'static>;
 pub type ServiceResult<T> = Result<T, ServiceError>;
 
 const MAX_COMPLETION_LOGPROBS: u8 = 5;
@@ -43,11 +54,37 @@ impl ServiceError {
         }
     }
 
+    pub fn unauthorized(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            body: OpenAiErrorResponse::unauthorized(message),
+        }
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            body: OpenAiErrorResponse::internal(message),
+        }
+    }
+
     pub fn not_supported(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::NOT_IMPLEMENTED,
             body: OpenAiErrorResponse::not_supported(message),
         }
+    }
+
+    pub fn status_code(&self) -> StatusCode {
+        self.status
+    }
+
+    pub fn body(&self) -> &OpenAiErrorResponse {
+        &self.body
+    }
+
+    pub fn into_parts(self) -> (StatusCode, OpenAiErrorResponse) {
+        (self.status, self.body)
     }
 }
 
@@ -57,7 +94,7 @@ impl IntoResponse for ServiceError {
     }
 }
 
-pub(crate) fn validate_sampling_config(
+pub fn validate_sampling_config(
     temperature: Option<f32>,
     top_k: Option<i32>,
     top_p: Option<f32>,
@@ -94,7 +131,8 @@ pub(crate) fn validate_sampling_config(
         )));
     }
 
-    let presence_penalty = finite_or_bad_request("presence_penalty", presence_penalty.unwrap_or(0.0))?;
+    let presence_penalty =
+        finite_or_bad_request("presence_penalty", presence_penalty.unwrap_or(0.0))?;
     let repetition_penalty =
         finite_or_bad_request("repetition_penalty", repetition_penalty.unwrap_or(0.0))?;
     let penalty_decay = finite_or_bad_request("penalty_decay", penalty_decay.unwrap_or(1.0))?;
@@ -119,14 +157,16 @@ fn finite_or_bad_request(name: &str, value: f32) -> ServiceResult<f32> {
     Ok(value)
 }
 
-pub(crate) async fn select_queue(state: &AppState, model_name: &str) -> ServiceResult<QueueHandle> {
+pub fn model_queues<'a>(
+    queues: &'a QueueMap,
+    model_name: &str,
+) -> ServiceResult<&'a [QueueHandle]> {
     if model_name.trim().is_empty() {
         return Err(ServiceError::bad_request(
             "model is required and cannot be empty",
         ));
     }
 
-    let queues = state.queues.read().await;
     let group = queues.get(model_name).ok_or_else(|| {
         ServiceError::bad_request(format!(
             "unknown model_name: {model_name}. available: {:?}",
@@ -134,16 +174,36 @@ pub(crate) async fn select_queue(state: &AppState, model_name: &str) -> ServiceR
         ))
     })?;
 
+    Ok(group)
+}
+
+pub fn shared_queue_map(queues: QueueMap) -> SharedQueueMap {
+    Arc::new(RwLock::new(queues))
+}
+
+pub fn select_queue(group: &[QueueHandle], model_name: &str) -> ServiceResult<QueueHandle> {
+    if group.is_empty() {
+        return Err(ServiceError::bad_request(format!(
+            "model {model_name} has no available queues"
+        )));
+    }
+
     let handle = group
         .iter()
         .filter(|queue| queue.is_accepting())
         .min_by_key(|queue| (queue.load_score(), queue.device_id))
-        .unwrap();
+        .ok_or_else(|| {
+            ServiceError::internal(format!("model {model_name} has no accepting queues"))
+        })?;
 
     Ok(handle.clone())
 }
 
-pub(crate) fn validate_completion_logprobs(
+pub fn select_model_queue(queues: &QueueMap, model_name: &str) -> ServiceResult<QueueHandle> {
+    select_queue(model_queues(queues, model_name)?, model_name)
+}
+
+pub fn validate_completion_logprobs(
     logprobs: Option<u8>,
     candidate_token_texts: Option<Vec<String>>,
     tokenizer: &Tokenizer,
@@ -178,7 +238,7 @@ pub(crate) fn validate_completion_logprobs(
     )
 }
 
-pub(crate) fn validate_chat_logprobs(
+pub fn validate_chat_logprobs(
     logprobs: Option<bool>,
     top_logprobs: Option<u8>,
     candidate_token_texts: Option<Vec<String>>,
@@ -225,14 +285,21 @@ pub(crate) fn validate_chat_logprobs(
     )
 }
 
-pub(crate) fn current_unix_seconds() -> u64 {
+pub fn current_unix_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs()
 }
 
-pub(crate) fn next_id(prefix: &str) -> String {
+pub fn current_unix_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+pub fn next_id(prefix: &str) -> String {
     format!("{prefix}_{}", Uuid::new_v4().simple())
 }
 

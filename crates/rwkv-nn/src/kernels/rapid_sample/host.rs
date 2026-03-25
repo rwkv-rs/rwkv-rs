@@ -1,24 +1,30 @@
 use burn::tensor::{
-    DType, Shape,
+    DType,
+    Shape,
     ops::{FloatTensor, IntTensor},
 };
 use burn_cubecl::{
     CubeRuntime,
-    cubecl::prelude::ScalarArg,
-    cubecl::{CubeCount, CubeDim},
+    cubecl::{CubeCount, CubeDim, prelude::ScalarArg},
     kernel::{cast, into_contiguous},
     ops::numeric::empty_device,
 };
 
-use crate::kernels::backend::{BoolElement, CubeBackend, FloatElement, IntElement};
-use crate::kernels::rapid_sample::{
-    RapidSampleOutput,
-    kernel::{
-        RapidSampleConfig, RapidSamplePenaltyParamsLaunch, RapidSampleRepetitionInputsLaunch,
-        RapidSampleRepetitionOutputsLaunch, RapidSampleSamplingParamsLaunch,
-        RapidSampleTemperatureInputsLaunch, RapidSampleTemperatureOutputsLaunch,
-        rapid_sample_repetition_temperature_topk_topp_kernel,
-        rapid_sample_temperature_topk_topp_kernel,
+use crate::kernels::{
+    backend::{BoolElement, CubeBackend, FloatElement, IntElement},
+    rapid_sample::{
+        RapidSampleOutput,
+        kernel::{
+            RapidSampleConfig,
+            RapidSamplePenaltyParamsLaunch,
+            RapidSampleRepetitionInputsLaunch,
+            RapidSampleRepetitionOutputsLaunch,
+            RapidSampleSamplingParamsLaunch,
+            RapidSampleTemperatureInputsLaunch,
+            RapidSampleTemperatureOutputsLaunch,
+            rapid_sample_repetition_temperature_topk_topp_kernel,
+            rapid_sample_temperature_topk_topp_kernel,
+        },
     },
 };
 

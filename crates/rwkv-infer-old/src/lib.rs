@@ -17,13 +17,23 @@ pub mod response_store;
 #[cfg(feature = "trace")]
 pub mod trace;
 
-pub use access::http_api::{AppState, HttpApiRouterBuilder, HttpApiState, RouterBuilder};
+pub use access::{
+    http_api::{AppState, HttpApiRouterBuilder, HttpApiState, RouterBuilder},
+    local_api::{LocalInferenceClient, RwkvInferClient},
+};
 #[cfg(feature = "ipc")]
 pub use access::ipc_api::{IpcClientConfig, IpcOpenAiClient, IpcServer, IpcServerConfig};
-pub use access::local_api::{LocalInferenceClient, RwkvInferClient};
 pub use error::{Error, Result};
 pub use inference_core::{
-    ConstraintSpec, InferenceExecutionConfig, InferenceExecutionLoop, InferenceSubmitCommand,
-    InferenceSubmitHandle, InferenceSubmitResult, LogitsOutput, ModelForward,
-    RequestedTokenLogprobsConfig, SamplingConfig, TokenLogprobsConfig,
+    ConstraintSpec,
+    InferenceExecutionConfig,
+    InferenceExecutionLoop,
+    InferenceSubmitCommand,
+    InferenceSubmitHandle,
+    InferenceSubmitResult,
+    LogitsOutput,
+    ModelForward,
+    RequestedTokenLogprobsConfig,
+    SamplingConfig,
+    TokenLogprobsConfig,
 };

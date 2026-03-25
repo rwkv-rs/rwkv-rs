@@ -1,6 +1,5 @@
-use axum::http::header::AUTHORIZATION;
 use axum::{
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header::AUTHORIZATION},
     response::{IntoResponse, Response},
 };
 

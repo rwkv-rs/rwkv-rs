@@ -1,26 +1,58 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::{
+    collections::BTreeMap,
+    sync::Arc,
+    time::{Instant, SystemTime, UNIX_EPOCH},
+};
 
 use sonic_rs::{Value, from_str, prelude::*, to_string};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::access::http_api::validation::ChatStructuredResponseMode;
-use crate::access::http_api::{
-    ChatCompletionChunkChoice, ChatCompletionChunkDelta, ChatCompletionChunkResponse,
-    ChatCompletionLogprobs, ChatCompletionMessageToolCall, ChatCompletionMessageToolCallFunction,
-    ChatCompletionRequest, ChatCompletionResponse, ChatCompletionResponseChoice,
-    ChatCompletionTokenLogprob, ChatCompletionTokenTopLogprob, ChatMessage, CompletionLogprobs,
-    CompletionRequest, CompletionResponse, CompletionResponseChoice, DeleteResponse,
-    HealthResponse, ModelListResponse, ModelObject, ReloadModelsRequest, ReloadModelsResponse,
-    ResponseIdRequest, ResponsesCreateRequest, ResponsesResource, StopField,
-};
-use crate::inference_core::InferenceSubmitResult as SubmitOutput;
-use crate::inference_core::{EngineEvent, EntryId, FinishMetadata, InferenceOutput, StreamDelta};
-use crate::model_pool::loaded_model_registry::{LoadedModelRegistry, ModelsReloadPatch};
-use crate::response_store::{
-    BackgroundTaskState, CachedResponse, GLOBAL_BACKGROUND_TASKS, GLOBAL_RESPONSE_CACHE,
+use crate::{
+    access::http_api::{
+        ChatCompletionChunkChoice,
+        ChatCompletionChunkDelta,
+        ChatCompletionChunkResponse,
+        ChatCompletionLogprobs,
+        ChatCompletionMessageToolCall,
+        ChatCompletionMessageToolCallFunction,
+        ChatCompletionRequest,
+        ChatCompletionResponse,
+        ChatCompletionResponseChoice,
+        ChatCompletionTokenLogprob,
+        ChatCompletionTokenTopLogprob,
+        ChatMessage,
+        CompletionLogprobs,
+        CompletionRequest,
+        CompletionResponse,
+        CompletionResponseChoice,
+        DeleteResponse,
+        HealthResponse,
+        ModelListResponse,
+        ModelObject,
+        ReloadModelsRequest,
+        ReloadModelsResponse,
+        ResponseIdRequest,
+        ResponsesCreateRequest,
+        ResponsesResource,
+        StopField,
+        validation::ChatStructuredResponseMode,
+    },
+    inference_core::{
+        EngineEvent,
+        EntryId,
+        FinishMetadata,
+        InferenceOutput,
+        InferenceSubmitResult as SubmitOutput,
+        StreamDelta,
+    },
+    model_pool::loaded_model_registry::{LoadedModelRegistry, ModelsReloadPatch},
+    response_store::{
+        BackgroundTaskState,
+        CachedResponse,
+        GLOBAL_BACKGROUND_TASKS,
+        GLOBAL_RESPONSE_CACHE,
+    },
 };
 
 #[derive(Clone)]
@@ -860,9 +892,10 @@ pub type ApiService = HttpApiService;
 
 #[cfg(test)]
 mod tests {
+    use sonic_rs::{from_str, json};
+
     use super::*;
     use crate::inference_core::{FinishReason, TimingBreakdownMs};
-    use sonic_rs::{from_str, json};
 
     fn finish_metadata(reason: FinishReason) -> FinishMetadata {
         FinishMetadata {

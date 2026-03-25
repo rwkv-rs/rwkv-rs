@@ -6,7 +6,9 @@ use burn::{
         ops::{Backward, Ops, OpsKind},
     },
     tensor::{
-        Tensor, TensorMetadata, TensorPrimitive,
+        Tensor,
+        TensorMetadata,
+        TensorPrimitive,
         backend::{AutodiffBackend, Backend},
     },
 };

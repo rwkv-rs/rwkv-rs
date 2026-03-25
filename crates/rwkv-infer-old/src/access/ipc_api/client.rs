@@ -1,12 +1,23 @@
 use std::time::{Duration, Instant};
 
-use iceoryx2::port::client::Client;
-use iceoryx2::prelude::{NodeBuilder, ipc};
+use iceoryx2::{
+    port::client::Client,
+    prelude::{NodeBuilder, ipc},
+};
 use uuid::Uuid;
 
 use super::protocol::{
-    HandshakeRequest, HandshakeResponse, IPC_PROTOCOL_VERSION, IpcRequest, IpcResponse,
-    ResponseKind, RouteId, decode_json, decode_response, encode_json, encode_request,
+    HandshakeRequest,
+    HandshakeResponse,
+    IPC_PROTOCOL_VERSION,
+    IpcRequest,
+    IpcResponse,
+    ResponseKind,
+    RouteId,
+    decode_json,
+    decode_response,
+    encode_json,
+    encode_request,
 };
 
 #[derive(Clone, Debug)]

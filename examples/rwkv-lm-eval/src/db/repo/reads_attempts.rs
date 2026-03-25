@@ -2,7 +2,11 @@ use sqlx::{Postgres, QueryBuilder, Row, query};
 
 use super::decode::{decode_checker_record, decode_completion_status, decode_task_record};
 use crate::db::{
-    CompletionDetailRecord, Db, ReviewQueueQuery, ReviewQueueRecord, TaskAttemptRecord,
+    CompletionDetailRecord,
+    Db,
+    ReviewQueueQuery,
+    ReviewQueueRecord,
+    TaskAttemptRecord,
     TaskAttemptsQuery,
 };
 

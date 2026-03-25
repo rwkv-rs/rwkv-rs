@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+
 use crate::cores::forward::{Logprob, TokenIdLogprobsConfig, TopLogprob};
 
 /// Builds per-token logprob metadata from post-sampling probabilities.

@@ -1,11 +1,25 @@
-use super::{
-    EnvAssertion, EnvFunctionCall, FunctionCall, TauDomainEnv, ToolArgSpec, ToolRequestor,
-    ToolSpec, as_array, as_array_mut, as_object, as_object_mut, calculate_expression,
-    get_f64_field, get_string_field, get_value, update_json,
-};
+use std::{fs, path::Path};
+
 use sonic_rs::{Object as Map, Value, json, prelude::*};
-use std::fs;
-use std::path::Path;
+
+use super::{
+    EnvAssertion,
+    EnvFunctionCall,
+    FunctionCall,
+    TauDomainEnv,
+    ToolArgSpec,
+    ToolRequestor,
+    ToolSpec,
+    as_array,
+    as_array_mut,
+    as_object,
+    as_object_mut,
+    calculate_expression,
+    get_f64_field,
+    get_string_field,
+    get_value,
+    update_json,
+};
 
 const EMPTY_ARGS: &[ToolArgSpec] = &[];
 const EMAIL_ARG: &[ToolArgSpec] = &[ToolArgSpec {

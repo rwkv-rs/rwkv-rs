@@ -5,9 +5,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use crate::access::http_api::HttpApiService;
-use crate::access::http_api::HttpApiState;
-use crate::auth::check_api_key;
+use crate::{
+    access::http_api::{HttpApiService, HttpApiState},
+    auth::check_api_key,
+};
 
 pub async fn audio_speech(
     headers: HeaderMap,

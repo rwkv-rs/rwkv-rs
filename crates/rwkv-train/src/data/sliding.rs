@@ -9,7 +9,8 @@ use std::{
 use burn::data::dataset::Dataset;
 use rwkv_config::{DatasetFormatOptions, validated::train::TRAIN_CFG};
 use rwkv_data::mmap::{
-    bin, bin_old,
+    bin,
+    bin_old,
     dtype::{TokenUnit, TokenUnitDType},
     sample::Sampler,
 };

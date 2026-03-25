@@ -8,15 +8,13 @@ use crate::{
         QueueFinishMeta,
         QueueOutput,
         QueueOutputToken,
-        queue_worker::QueueSubmitRequest,
+        queue_worker::{QueueHandle, QueueSubmitRequest},
     },
     dtos::completions::{Choice, CompletionsReq, CompletionsResp, Logprobs},
-    routes::AppState,
     services::{
         ServiceResult,
         current_unix_seconds,
         next_id,
-        select_queue,
         validate_completion_logprobs,
         validate_sampling_config,
     },
@@ -101,7 +99,7 @@ impl CompletionRun {
     }
 }
 
-pub async fn completions(state: AppState, req: CompletionsReq) -> ServiceResult<CompletionRun> {
+pub async fn completions(handle: QueueHandle, req: CompletionsReq) -> ServiceResult<CompletionRun> {
     let sampling = validate_sampling_config(
         req.temperature,
         req.top_k,
@@ -111,7 +109,6 @@ pub async fn completions(state: AppState, req: CompletionsReq) -> ServiceResult<
         req.repetition_penalty,
         req.penalty_decay,
     )?;
-    let handle = select_queue(&state, &req.model).await?;
     let token_logprobs_config =
         validate_completion_logprobs(req.logprobs, req.candidate_token_texts, &handle.tokenizer)?;
     let include_logprobs = token_logprobs_config.is_some();

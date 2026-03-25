@@ -1,8 +1,9 @@
-use crate::dtos::models::{ModelObject, ModelsResp};
-use crate::routes::AppState;
+use crate::{
+    dtos::models::{ModelObject, ModelsResp},
+    services::QueueMap,
+};
 
-pub async fn models(state: AppState) -> ModelsResp {
-    let queues = state.queues.read().await;
+pub fn models(queues: &QueueMap) -> ModelsResp {
     let mut data: Vec<ModelObject> = queues
         .keys()
         .cloned()

@@ -1,19 +1,33 @@
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::path::{Path, PathBuf};
+
+use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
-use std::path::{Path, PathBuf};
 
-use crate::datasets::knowledge::{
-    answer_index_from_letter, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
-};
-use crate::datasets::utils::collect_files_with_extension;
-use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
-use crate::datasets::utils::hf::viewer::{get_parquet_files, get_split_row_count};
-use crate::datasets::utils::parquet::{get_i64, get_string, read_parquet_items};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
+    ALL_BENCHMARKS,
+    Benchmark,
+    BenchmarkInfo,
+    BenchmarkName,
+    CoTMode,
+    Field,
+    Record,
+    SamplingConfig,
+    knowledge::{
+        answer_index_from_letter,
+        get_expect_context,
+        get_final_answer_with_cot_mode,
+        get_ref_answer,
+    },
+    utils::{
+        collect_files_with_extension,
+        hf::{
+            downloader::{UrlDownloadFile, download_url_files},
+            viewer::{get_parquet_files, get_split_row_count},
+        },
+        parquet::{get_i64, get_string, read_parquet_items},
+    },
 };
 
 const DATASET_ID: &str = "openai/MMMLU";

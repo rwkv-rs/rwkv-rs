@@ -1,5 +1,4 @@
-use std::collections::BTreeMap;
-use std::sync::OnceLock;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 use rwkv_eval::datasets::{ALL_BENCHMARKS, BenchmarkInfo};
 

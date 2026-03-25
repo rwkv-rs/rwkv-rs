@@ -1,5 +1,4 @@
-use std::process::Command;
-use std::time::Instant;
+use std::{process::Command, time::Instant};
 
 use serde::{Deserialize, Serialize};
 

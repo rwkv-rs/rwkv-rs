@@ -1,8 +1,9 @@
-use std::fs::File;
-use std::path::Path;
+use std::{fs::File, path::Path};
 
-use parquet::file::reader::{FileReader, SerializedFileReader};
-use parquet::record::{Field, Row};
+use parquet::{
+    file::reader::{FileReader, SerializedFileReader},
+    record::{Field, Row},
+};
 
 pub fn read_parquet_items<T, P, F>(path: P, mut parse: F) -> Vec<T>
 where

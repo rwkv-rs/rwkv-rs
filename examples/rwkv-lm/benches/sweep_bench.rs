@@ -1,7 +1,9 @@
 use clap::{Args, Parser};
-use rwkv_bench::Result;
-use rwkv_bench::report::generate_sweep_report;
-use rwkv_bench::serving::{SweepConfig, run_sweep, write_json_file};
+use rwkv_bench::{
+    Result,
+    report::generate_sweep_report,
+    serving::{SweepConfig, run_sweep, write_json_file},
+};
 
 #[path = "shared/common.rs"]
 mod common;

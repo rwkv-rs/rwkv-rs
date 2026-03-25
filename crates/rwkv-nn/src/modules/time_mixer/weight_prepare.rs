@@ -6,12 +6,12 @@ use burn::{
     tensor::activation::{sigmoid, softplus},
 };
 
-use crate::kernels::token_shift_diff::TokenShiftDiffOutput;
-use crate::kernels::wkv7_common::Wkv7ForwardInput;
 use crate::{
     functions::{
         init_weights::{
-            calculate_token_shift_with_offset, constant_init, get_token_shift_diff_scale,
+            calculate_token_shift_with_offset,
+            constant_init,
+            get_token_shift_diff_scale,
             uniform_init,
         },
         lerp::lerp,
@@ -19,7 +19,8 @@ use crate::{
     },
     kernels::{
         addcmul::{Addcmul5Output, AddcmulBackend, addcmul5},
-        token_shift_diff::{TokenShiftDiffBackend, token_shift_diff},
+        token_shift_diff::{TokenShiftDiffBackend, TokenShiftDiffOutput, token_shift_diff},
+        wkv7_common::Wkv7ForwardInput,
     },
     layers::lora::{ActivationFn, LoRA, LoRAConfig, LoRAType},
 };

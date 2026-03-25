@@ -1,8 +1,6 @@
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
-use std::ffi::OsString;
-use std::path::PathBuf;
+use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 
 use clap::{Args, ValueEnum};
 use rwkv_bench::serving::{Endpoint, ServeConfig};

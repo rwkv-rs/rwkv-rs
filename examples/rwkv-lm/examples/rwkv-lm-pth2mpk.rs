@@ -1,16 +1,22 @@
-use rayon::ThreadPoolBuilder;
-use rayon::prelude::*;
-use rwkv::custom::backend::Cuda;
-use rwkv::custom::cubecl::device::{Device as CubeDevice, DeviceId};
-use rwkv::custom::prelude::Backend;
-use rwkv::custom::tensor::bf16;
-use rwkv_lm::model::AutoRegressiveModelConfig;
-use rwkv_lm::pth2mpk::{ConvertPthToMpkOptions, convert_pth_to_mpk};
-use std::collections::HashMap;
-use std::fs;
-use std::io;
-use std::panic::{self, AssertUnwindSafe};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    io,
+    panic::{self, AssertUnwindSafe},
+    path::{Path, PathBuf},
+};
+
+use rayon::{ThreadPoolBuilder, prelude::*};
+use rwkv::custom::{
+    backend::Cuda,
+    cubecl::device::{Device as CubeDevice, DeviceId},
+    prelude::Backend,
+    tensor::bf16,
+};
+use rwkv_lm::{
+    model::AutoRegressiveModelConfig,
+    pth2mpk::{ConvertPthToMpkOptions, convert_pth_to_mpk},
+};
 
 const VOCAB_SIZE: usize = 65536;
 const HEAD_SIZE: usize = 64;

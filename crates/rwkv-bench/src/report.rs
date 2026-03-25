@@ -3,8 +3,11 @@ use std::path::{Path, PathBuf};
 use plotters::prelude::*;
 use sonic_rs::from_str;
 
-use crate::serving::{ServeRunResult, SweepRunResult};
-use crate::{BenchError, Result};
+use crate::{
+    BenchError,
+    Result,
+    serving::{ServeRunResult, SweepRunResult},
+};
 
 #[derive(Clone, Debug)]
 pub struct ReportArtifacts {

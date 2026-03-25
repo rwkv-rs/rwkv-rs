@@ -3,8 +3,14 @@ mod splitter;
 
 use burn::{config::Config, module::AutodiffModule, tensor::backend::AutodiffBackend};
 use burn_optim::{
-    AdamW, AdamWConfig, GradientsParams, LearningRate, MultiGradientsParams, Optimizer,
-    adaptor::OptimizerAdaptor, grad_clipping::GradientClippingConfig,
+    AdamW,
+    AdamWConfig,
+    GradientsParams,
+    LearningRate,
+    MultiGradientsParams,
+    Optimizer,
+    adaptor::OptimizerAdaptor,
+    grad_clipping::GradientClippingConfig,
 };
 pub use grouping::ParamGroupingMode;
 use grouping::{ParamGrouperVisitor, ParamGroups};

@@ -1,11 +1,16 @@
-use std::sync::Arc;
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use burn::train::{
     metric::{MetricDefinition, MetricId},
     renderer::{
-        EvaluationName, EvaluationProgress, MetricState, MetricsRenderer,
-        MetricsRendererEvaluation, MetricsRendererTraining, ProgressType, TrainingProgress,
+        EvaluationName,
+        EvaluationProgress,
+        MetricState,
+        MetricsRenderer,
+        MetricsRendererEvaluation,
+        MetricsRendererTraining,
+        ProgressType,
+        TrainingProgress,
     },
 };
 use indicatif::{ProgressBar, ProgressStyle};

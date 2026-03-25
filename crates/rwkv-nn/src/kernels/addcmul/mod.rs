@@ -2,8 +2,8 @@ mod backward;
 mod forward;
 mod kernel;
 
-use burn::backend::{Autodiff, autodiff::checkpoint::strategy::CheckpointStrategy};
 use burn::{
+    backend::{Autodiff, autodiff::checkpoint::strategy::CheckpointStrategy},
     prelude::Backend,
     tensor::{Tensor, TensorPrimitive, ops::FloatTensor},
 };
@@ -118,8 +118,10 @@ impl<B: AddcmulBackend, C: CheckpointStrategy> AddcmulBackend for Autodiff<B, C>
 
 #[cfg(test)]
 mod tests {
-    use burn::backend::{Autodiff, Cpu};
-    use burn::tensor::Tolerance;
+    use burn::{
+        backend::{Autodiff, Cpu},
+        tensor::Tolerance,
+    };
 
     use super::*;
 

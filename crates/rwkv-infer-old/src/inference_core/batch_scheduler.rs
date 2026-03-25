@@ -1,5 +1,7 @@
-use std::collections::{HashMap, VecDeque};
-use std::time::Instant;
+use std::{
+    collections::{HashMap, VecDeque},
+    time::Instant,
+};
 
 use crate::inference_core::{EntryId, PrefillStepKind, RequestPhase, RequestState};
 
@@ -159,10 +161,12 @@ impl Scheduler {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use uuid::Uuid;
+
     use super::Scheduler;
     use crate::inference_core::{RequestPhase, RequestState, SamplingConfig};
-    use std::collections::HashMap;
-    use uuid::Uuid;
 
     #[test]
     fn on_done_removes_waiting_entry() {

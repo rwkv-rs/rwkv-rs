@@ -9,7 +9,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-
 pub use openai_schema::*;
 pub use router::{AppState, HttpApiRouterBuilder, HttpApiState, RouterBuilder};
 pub use service::{ApiService, HttpApiService, collect_stream_output};

@@ -1,13 +1,11 @@
-use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
-use rwkv_config::load_toml;
-use rwkv_config::raw::eval::{RawEvalConfig, SpaceDbConfig};
-use rwkv_lm_eval::config_path::resolve_eval_cfg_path;
-use rwkv_lm_eval::db::connect;
-use rwkv_lm_eval::http_api::serve;
-use rwkv_lm_eval::paths;
+use rwkv_config::{
+    load_toml,
+    raw::eval::{RawEvalConfig, SpaceDbConfig},
+};
+use rwkv_lm_eval::{config_path::resolve_eval_cfg_path, db::connect, http_api::serve, paths};
 
 #[derive(Debug, Parser)]
 struct Args {

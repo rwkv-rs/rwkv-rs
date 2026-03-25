@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use rwkv_bench::Result;
-use rwkv_bench::report::{generate_report_from_input, load_report_input};
+use rwkv_bench::{
+    Result,
+    report::{generate_report_from_input, load_report_input},
+};
 
 #[path = "shared/common.rs"]
 mod common;

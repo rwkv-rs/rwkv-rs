@@ -3,18 +3,19 @@ pub mod param_state;
 mod weight_prepare;
 
 use burn::{config::Config, module::Module, prelude::*};
-
-use crate::{
-    kernels::{
-        addcmul::AddcmulBackend, token_shift_diff::TokenShiftDiffBackend, wkv7_common::Wkv7Kernel,
-    },
-    layers::lora::LoRARanks,
-};
-
-use crate::functions::context_mask::apply_context_mask;
-use crate::modules::time_mixer::gated_readout::GatedReadoutInput;
 use gated_readout::{GatedReadout, GatedReadoutConfig};
 use weight_prepare::{WeightPrepare, WeightPrepareConfig};
+
+use crate::{
+    functions::context_mask::apply_context_mask,
+    kernels::{
+        addcmul::AddcmulBackend,
+        token_shift_diff::TokenShiftDiffBackend,
+        wkv7_common::Wkv7Kernel,
+    },
+    layers::lora::LoRARanks,
+    modules::time_mixer::gated_readout::GatedReadoutInput,
+};
 
 const MIN_LORA_RANK: usize = 32;
 const LORA_RANK_GRANULARITY: usize = 32;

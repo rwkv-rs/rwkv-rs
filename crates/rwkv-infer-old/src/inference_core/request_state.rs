@@ -1,7 +1,12 @@
 use std::time::Instant;
 
 use super::{
-    ConstraintSpec, ConstraintState, EntryId, SamplingConfig, StopMatch, StopSuffixMatcher,
+    ConstraintSpec,
+    ConstraintState,
+    EntryId,
+    SamplingConfig,
+    StopMatch,
+    StopSuffixMatcher,
     TokenLogprobsConfig,
 };
 

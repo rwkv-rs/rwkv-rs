@@ -13,12 +13,13 @@
 //!     .route_layer(middleware::from_fn_with_state(auth_cfg, auth));
 //! ```
 
-use axum::extract::State;
-use axum::http::header::AUTHORIZATION;
-use axum::http::{Request, StatusCode};
-use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{
+    Json,
+    extract::State,
+    http::{Request, StatusCode, header::AUTHORIZATION},
+    middleware::Next,
+    response::{IntoResponse, Response},
+};
 use thiserror::Error;
 
 use crate::dtos::errors::OpenAiErrorResponse;

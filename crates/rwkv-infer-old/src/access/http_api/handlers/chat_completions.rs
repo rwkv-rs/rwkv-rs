@@ -7,12 +7,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tokio::sync::mpsc;
-use tokio_stream::StreamExt;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
-use crate::access::http_api::HttpApiService;
-use crate::access::http_api::{ChatCompletionRequest, HttpApiState};
-use crate::auth::check_api_key;
+use crate::{
+    access::http_api::{ChatCompletionRequest, HttpApiService, HttpApiState},
+    auth::check_api_key,
+};
 
 #[cfg_attr(
     feature = "trace",

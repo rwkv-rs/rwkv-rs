@@ -1,8 +1,6 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use async_openai::{Client, config::OpenAIConfig};
 use tokio::sync::Semaphore;
 
 use crate::db::CompletionKey;

@@ -1,8 +1,8 @@
-use rwkv_eval::datasets::BenchmarkInfo;
 use std::collections::BTreeMap;
 
-use super::runtime::AttemptKey;
-use super::sampling::AvgKExecutionPlan;
+use rwkv_eval::datasets::BenchmarkInfo;
+
+use super::{runtime::AttemptKey, sampling::AvgKExecutionPlan};
 
 pub(crate) struct ComputedMetrics {
     pub pass_at_k_hits: BTreeMap<u8, usize>,
@@ -63,14 +63,19 @@ pub(crate) fn compute_metrics(
 
 #[cfg(test)]
 mod tests {
-    use super::compute_metrics;
-    use crate::evaluating::runtime::AttemptKey;
-    use crate::evaluating::sampling::AvgKExecutionPlan;
+    use std::{collections::BTreeMap, path::PathBuf};
+
     use rwkv_eval::datasets::{
-        Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig,
+        Benchmark,
+        BenchmarkInfo,
+        BenchmarkName,
+        CoTMode,
+        Field,
+        SamplingConfig,
     };
-    use std::collections::BTreeMap;
-    use std::path::PathBuf;
+
+    use super::compute_metrics;
+    use crate::evaluating::{runtime::AttemptKey, sampling::AvgKExecutionPlan};
 
     #[test]
     fn computes_pass_at_k_counts() {

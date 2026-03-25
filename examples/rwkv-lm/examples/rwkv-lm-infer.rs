@@ -22,7 +22,11 @@ use rwkv::{
         wkv7_common::Wkv7Backend,
     },
 };
+#[cfg(feature = "ipc")]
+use rwkv::infer::routes::IpcServer;
 use rwkv_lm::{inferring::build_http_runtime, paths};
+#[cfg(feature = "ipc")]
+use rwkv_lm::inferring::build_ipc_server_config;
 #[cfg(feature = "trace")]
 use rwkv_bench::trace::init_tracing;
 use tokio::net::TcpListener;
@@ -85,10 +89,34 @@ where
     #[cfg(feature = "trace")]
     println!("trace mode: {trace_mode:?}");
 
-    #[cfg(feature = "ipc")]
-    panic!("ipc is not migrated to the new infer implementation yet");
+    let (app_state, bind_addr) = build_http_runtime::<B>(config_dir.clone(), &infer_cfg);
 
-    let (app_state, bind_addr) = build_http_runtime::<B>(config_dir, &infer_cfg);
+    #[cfg(feature = "ipc")]
+    if let Some(ipc_config) = build_ipc_server_config(config_dir.clone(), &infer_cfg) {
+        let ipc_server = IpcServer::new(
+            ipc_config.clone(),
+            app_state.auth_cfg.clone(),
+            app_state.queues.clone(),
+            app_state.gpu_metrics.clone(),
+            app_state.reload_lock.clone(),
+            app_state.infer_cfg_path.clone(),
+            app_state.build_queues.clone(),
+        )
+        .unwrap_or_else(|e| {
+            panic!(
+                "failed to create ipc server {}: {e}",
+                ipc_config.service_name
+            )
+        });
+        ipc_server.spawn().unwrap_or_else(|e| {
+            panic!(
+                "failed to spawn ipc server {}: {e}",
+                ipc_config.service_name
+            )
+        });
+        println!("ipc service: {}", ipc_config.service_name);
+    }
+
     let router = HttpApiRouterBuilder::new(app_state).build().await;
 
     let listener = TcpListener::bind(&bind_addr)

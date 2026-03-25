@@ -1,21 +1,51 @@
 use serde::{Deserialize, Serialize};
-use sonic_rs::{JsonContainerTrait, JsonValueTrait, Value, from_str, json, to_string, to_string_pretty};
+use sonic_rs::{
+    JsonContainerTrait,
+    JsonValueTrait,
+    Value,
+    from_str,
+    json,
+    to_string,
+    to_string_pretty,
+};
 use tokio::sync::mpsc;
 
-use crate::cores::queue::{
-    GuidedDecodingConfig, QueueEvent, QueueFinishMeta, QueueOutput, QueueOutputCandidate,
-    QueueOutputToken,
-};
-use crate::cores::queue::queue_worker::QueueSubmitRequest;
-use crate::dtos::chat::completions::{
-    ChatCompletionResp, ChatCompletionsChunkResponse, ChatCompletionsReq, Choices, ChunkChoice,
-    ChunkToolCall, ChunkToolCallFunction, Content, Delta, Logprobs, Message, ResponseFormat, Tool,
-    ToolCall, ToolChoice, TopLogprobs,
-};
-use crate::routes::AppState;
-use crate::services::{
-    ServiceError, ServiceResult, current_unix_seconds, next_id, select_queue,
-    validate_chat_logprobs, validate_sampling_config,
+use crate::{
+    cores::queue::{
+        GuidedDecodingConfig,
+        QueueEvent,
+        QueueFinishMeta,
+        QueueOutput,
+        QueueOutputCandidate,
+        QueueOutputToken,
+        queue_worker::{QueueHandle, QueueSubmitRequest},
+    },
+    dtos::chat::completions::{
+        ChatCompletionResp,
+        ChatCompletionsChunkResponse,
+        ChatCompletionsReq,
+        Choices,
+        ChunkChoice,
+        ChunkToolCall,
+        ChunkToolCallFunction,
+        Content,
+        Delta,
+        Logprobs,
+        Message,
+        ResponseFormat,
+        Tool,
+        ToolCall,
+        ToolChoice,
+        TopLogprobs,
+    },
+    services::{
+        ServiceError,
+        ServiceResult,
+        current_unix_seconds,
+        next_id,
+        validate_chat_logprobs,
+        validate_sampling_config,
+    },
 };
 
 pub struct ChatCompletionRun {
@@ -322,7 +352,7 @@ impl ChatCompletionRun {
 }
 
 pub async fn chat_completions(
-    state: AppState,
+    handle: QueueHandle,
     req: ChatCompletionsReq,
 ) -> ServiceResult<ChatCompletionRun> {
     if req.messages.is_empty() {
@@ -338,7 +368,6 @@ pub async fn chat_completions(
         req.repetition_penalty,
         req.penalty_decay,
     )?;
-    let handle = select_queue(&state, &req.model).await?;
     let token_logprobs_config = validate_chat_logprobs(
         req.logprobs,
         req.top_logprobs,

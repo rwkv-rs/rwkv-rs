@@ -1,29 +1,47 @@
 use std::time::Duration;
 
-use axum::Json;
-use axum::extract::State;
-use axum::response::sse::{Event, KeepAlive};
-use axum::response::{IntoResponse, Response, Sse};
+use axum::{
+    Json,
+    extract::State,
+    response::{
+        IntoResponse,
+        Response,
+        Sse,
+        sse::{Event, KeepAlive},
+    },
+};
 use tokio::sync::mpsc;
-use tokio_stream::StreamExt;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
-use crate::cores::queue::QueueEvent;
-use crate::dtos::completions::CompletionsReq;
-use crate::routes::AppState;
-use crate::services::completions::completions as run_completions;
+use crate::{
+    cores::queue::QueueEvent,
+    dtos::completions::CompletionsReq,
+    routes::http_api::AppState,
+    services::{completions::completions as run_completions, select_model_queue},
+};
 
 pub async fn completions(
     State(app_state): State<AppState>,
     Json(req): Json<CompletionsReq>,
 ) -> Response {
-    let run = match run_completions(app_state.clone(), req).await {
+    let handle = {
+        let queues = app_state
+            .queues
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match select_model_queue(&queues, &req.model) {
+            Ok(handle) => handle,
+            Err(err) => return err.into_response(),
+        }
+    };
+    let run = match run_completions(handle, req).await {
         Ok(run) => run,
         Err(err) => return err.into_response(),
     };
 
     if run.stream_requested {
-        let keep_alive = KeepAlive::new().interval(Duration::from_millis(app_state.sse_keep_alive_ms));
+        let keep_alive =
+            KeepAlive::new().interval(Duration::from_millis(app_state.sse_keep_alive_ms));
         let (sse_tx, sse_rx) = mpsc::channel(64);
 
         tokio::spawn(async move {
@@ -33,7 +51,8 @@ pub async fn completions(
             while let Some(event) = run.rx.recv().await {
                 match event {
                     QueueEvent::Delta(delta) => {
-                        let json = sonic_rs::to_string(&run.stream_chunk(&delta, text_offset)).unwrap();
+                        let json =
+                            sonic_rs::to_string(&run.stream_chunk(&delta, text_offset)).unwrap();
                         if sse_tx.send(Event::default().data(json)).await.is_err() {
                             return;
                         }

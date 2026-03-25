@@ -92,6 +92,8 @@ clia-tracing-config = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 itertools = { workspace = true }
 rayon = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
 
 # Utils
 derive-new = { workspace = true }

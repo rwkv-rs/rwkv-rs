@@ -1,6 +1,8 @@
 use clap::Parser;
-use rwkv_bench::Result;
-use rwkv_bench::profile::{ensure_success, run_tracy_passthrough};
+use rwkv_bench::{
+    Result,
+    profile::{ensure_success, run_tracy_passthrough},
+};
 
 #[path = "shared/common.rs"]
 mod common;

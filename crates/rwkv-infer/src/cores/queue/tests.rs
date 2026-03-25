@@ -10,10 +10,19 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use super::{
-    END_TOKEN_ID, Queue, QueueEvent, QueueFinishMeta, QueueFinishReason, QueueItem, QueueItemStatus,
+    END_TOKEN_ID,
+    Queue,
+    QueueEvent,
+    QueueFinishMeta,
+    QueueFinishReason,
+    QueueItem,
+    QueueItemStatus,
+    stats::new_perf_history,
 };
-use crate::cores::forward::{ModelForward, StepMode, TokenId};
-use crate::cores::queue::guided_decode::GuidedDecodingConfig;
+use crate::cores::{
+    forward::{ModelForward, StepMode, TokenId},
+    queue::guided_decode::GuidedDecodingConfig,
+};
 
 #[derive(Default)]
 struct DummyModelForward {
@@ -70,7 +79,6 @@ impl ModelForward for DummyModelForward {
     }
 
     fn reset(&mut self, _batch_index: usize) {}
-
 }
 
 #[test]
@@ -80,6 +88,7 @@ fn prefill_without_output_does_not_wait_for_guided_token_mask() {
         test_tokenizer(),
         4,
         2,
+        new_perf_history(),
     );
     let (completions_tx, _completions_rx) = mpsc::channel(8);
 
@@ -107,6 +116,7 @@ fn prefill_waits_for_guided_token_mask() {
         test_tokenizer(),
         4,
         2,
+        new_perf_history(),
     );
     let (completions_tx, _completions_rx) = mpsc::channel(8);
 
@@ -141,10 +151,12 @@ fn prefill_waits_for_guided_token_mask() {
         thread::sleep(Duration::from_millis(1));
     }
 
-    assert!(queue
-        .items
-        .get(&1)
-        .is_some_and(|item| item.guided_token_mask.is_some()));
+    assert!(
+        queue
+            .items
+            .get(&1)
+            .is_some_and(|item| item.guided_token_mask.is_some())
+    );
     assert_eq!(queue.collect_step_item_ids(), vec![1]);
 }
 
@@ -160,6 +172,7 @@ fn step_passes_guided_token_masks_to_sample() {
         test_tokenizer(),
         4,
         2,
+        new_perf_history(),
     );
     let (completions_tx, _completions_rx) = mpsc::channel(8);
 
@@ -202,6 +215,7 @@ fn run_guided_item_end_to_end() {
         test_tokenizer(),
         4,
         1,
+        new_perf_history(),
     );
     let (completions_tx, mut completions_rx) = mpsc::channel(8);
 
@@ -242,6 +256,7 @@ fn late_guided_result_is_ignored_after_remove() {
         test_tokenizer(),
         4,
         1,
+        new_perf_history(),
     );
     let (completions_tx, _completions_rx) = mpsc::channel(8);
 
@@ -275,6 +290,7 @@ fn stop_suffix_inside_token_emits_text_without_partial_token() {
         test_tokenizer_with_vocab("1 \"helloUser:\" 10\n"),
         4,
         1,
+        new_perf_history(),
     );
     let (completions_tx, mut completions_rx) = mpsc::channel(8);
 
@@ -337,6 +353,7 @@ fn utf8_multibyte_sequence_waits_until_complete() {
         test_tokenizer_with_vocab("1 b\"\\xE4\" 1\n2 b\"\\xB8\" 1\n3 b\"\\x96\" 1\n"),
         4,
         1,
+        new_perf_history(),
     );
     let (completions_tx, mut completions_rx) = mpsc::channel(8);
 
@@ -399,6 +416,7 @@ fn finish_item_flushes_stop_tail_without_new_detokenize_result() {
         test_tokenizer_with_vocab("1 \"abc\" 3\n"),
         4,
         1,
+        new_perf_history(),
     );
     let (completions_tx, mut completions_rx) = mpsc::channel(8);
 

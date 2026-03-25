@@ -1,18 +1,30 @@
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::path::{Path, PathBuf};
+
+use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
 
-use crate::datasets::knowledge::gpqa::join_subject_parts;
-use crate::datasets::knowledge::{
-    answer_index_from_letter, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
-};
-use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
-use crate::datasets::utils::jsonl::read_jsonl_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
+    ALL_BENCHMARKS,
+    Benchmark,
+    BenchmarkInfo,
+    BenchmarkName,
+    CoTMode,
+    Field,
+    Record,
+    SamplingConfig,
+    knowledge::{
+        answer_index_from_letter,
+        get_expect_context,
+        get_final_answer_with_cot_mode,
+        get_ref_answer,
+        gpqa::join_subject_parts,
+    },
+    utils::{
+        hf::downloader::{UrlDownloadFile, download_url_files},
+        jsonl::read_jsonl_items,
+    },
 };
 
 const LOCAL_ROOT_NAME: &str = "supergpqa";

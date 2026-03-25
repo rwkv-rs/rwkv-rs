@@ -1,14 +1,15 @@
-use burn::backend::{
-    Autodiff,
-    autodiff::{
-        NodeId,
-        checkpoint::{base::Checkpointer, strategy::CheckpointStrategy},
-        grads::Gradients,
-        ops::{Backward, Ops, OpsKind},
+use burn::{
+    backend::{
+        Autodiff,
+        autodiff::{
+            NodeId,
+            checkpoint::{base::Checkpointer, strategy::CheckpointStrategy},
+            grads::Gradients,
+            ops::{Backward, Ops, OpsKind},
+        },
     },
+    tensor::{Tensor, TensorPrimitive, ops::FloatTensor},
 };
-use burn::tensor::ops::FloatTensor;
-use burn::tensor::{Tensor, TensorPrimitive};
 
 use crate::kernels::addcmul::{Addcmul5Output, Addcmul5OutputPrimitive, AddcmulBackend};
 

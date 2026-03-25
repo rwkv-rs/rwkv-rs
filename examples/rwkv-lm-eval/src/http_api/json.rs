@@ -2,8 +2,10 @@ use std::collections::BTreeMap;
 
 use sonic_rs::{Value, from_str, prelude::*};
 
-use super::error::ApiError;
-use super::schema::{ApiCotMode, SamplingSummary, ScoreSummary};
+use super::{
+    error::ApiError,
+    schema::{ApiCotMode, SamplingSummary, ScoreSummary},
+};
 use crate::db::TaskRecord;
 
 pub(crate) fn parse_sampling_summary(raw: &str) -> Result<SamplingSummary, ApiError> {
@@ -108,10 +110,13 @@ fn parse_pass_at_k(value: &Value) -> BTreeMap<String, f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_sampling_summary, parse_score_summary};
-    use crate::db::{TaskRecord, TaskStatus};
-    use crate::http_api::schema::ApiCotMode;
     use sonic_rs::JsonValueTrait;
+
+    use super::{parse_sampling_summary, parse_score_summary};
+    use crate::{
+        db::{TaskRecord, TaskStatus},
+        http_api::schema::ApiCotMode,
+    };
 
     #[test]
     fn parses_sampling_summary_with_sonic() {

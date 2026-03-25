@@ -1,20 +1,26 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
-use rwkv_eval::checkers::run_checker;
-use rwkv_eval::datasets::{Benchmark, CoTMode};
+use async_openai::{Client, config::OpenAIConfig};
+use rwkv_eval::{
+    checkers::run_checker,
+    datasets::{Benchmark, CoTMode},
+};
 use tokio::task::JoinSet;
 
 use crate::db::{
-    CheckerInsert, CompletionInsert, CompletionStatus, Db, EvalInsert, insert_checker,
+    CheckerInsert,
+    CompletionInsert,
+    CompletionStatus,
+    Db,
+    EvalInsert,
+    insert_checker,
     insert_completion_and_eval,
 };
-
-use super::client::ClientWithConfig;
-use super::runtime::{AttemptKey, AttemptOutcome, CheckerRuntime, PendingChecker};
-use super::sampling::AvgKExecutionPlan;
+use super::{
+    client::ClientWithConfig,
+    runtime::{AttemptKey, AttemptOutcome, CheckerRuntime, PendingChecker},
+    sampling::AvgKExecutionPlan,
+};
 
 pub(crate) async fn execute_attempts(
     benchmark: Arc<dyn Benchmark>,

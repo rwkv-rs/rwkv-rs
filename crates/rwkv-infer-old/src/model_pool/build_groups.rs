@@ -1,10 +1,8 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use rwkv_config::raw::infer::GenerationConfig;
 
-use crate::inference_core::InferenceSubmitHandle;
-use crate::model_pool::request_router::LoadedModelGroup;
+use crate::{inference_core::InferenceSubmitHandle, model_pool::request_router::LoadedModelGroup};
 
 pub fn build_model_groups(
     model_group_engines: HashMap<String, Vec<Arc<InferenceSubmitHandle>>>,

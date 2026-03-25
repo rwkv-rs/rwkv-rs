@@ -13,13 +13,15 @@ use std::{
 
 use parquet::record::{Field, Row, RowAccessor};
 use rwkv_data::processor::{
-    Processor, Step,
+    Processor,
+    Step,
     file::{
         reader::parquet::{FromParquetRow, ParquetReader},
         writer::json::JsonWriter,
     },
     pool::dedup::{
-        exact_hash_sample::ExactHashSampleDedup, exact_hash_sentence::ExactHashSentenceDedup,
+        exact_hash_sample::ExactHashSampleDedup,
+        exact_hash_sentence::ExactHashSentenceDedup,
     },
     stream::{
         filter::{

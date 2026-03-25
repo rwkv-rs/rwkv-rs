@@ -1,5 +1,3 @@
-use burn::tensor::TensorMetadata;
-use burn::tensor::ops::FloatTensor;
 use burn::{
     backend::{
         Autodiff,
@@ -10,7 +8,7 @@ use burn::{
             ops::{Backward, Ops, OpsKind},
         },
     },
-    tensor::backend::AutodiffBackend,
+    tensor::{TensorMetadata, backend::AutodiffBackend, ops::FloatTensor},
 };
 
 use crate::kernels::wkv7_statepass::{Wkv7StatePassAutodiffBackend, Wkv7StatePassBackend};

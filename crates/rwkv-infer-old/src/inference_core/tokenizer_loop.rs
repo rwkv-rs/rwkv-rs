@@ -3,10 +3,16 @@ use std::collections::HashMap;
 use rwkv_data::tokenizer::Tokenizer;
 use tokio::sync::mpsc;
 
-use super::byte_decoder::ByteDecoder;
 use super::{
-    END_TOKEN_ID, EngineEvent, EntryId, FinishMetadata, InferenceOutput, InferenceOutputCandidate,
-    InferenceSubmitCommand, OutputToken,
+    END_TOKEN_ID,
+    EngineEvent,
+    EntryId,
+    FinishMetadata,
+    InferenceOutput,
+    InferenceOutputCandidate,
+    InferenceSubmitCommand,
+    OutputToken,
+    byte_decoder::ByteDecoder,
 };
 
 pub enum TokenizerCommand {

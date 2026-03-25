@@ -4,7 +4,6 @@ mod records;
 mod status;
 
 use sqlx::PgPool;
-
 pub use commands::*;
 pub use queries::*;
 pub use records::*;

@@ -4,8 +4,16 @@ use rwkv_data::tokenizer::Tokenizer;
 use tokio::sync::mpsc;
 
 use super::{
-    END_TOKEN_ID, Queue, QueueEvent, QueueFinishMeta, QueueFinishReason, QueueItem,
-    QueueItemStatus, QueueOutput, QueueOutputCandidate, QueueOutputToken,
+    END_TOKEN_ID,
+    Queue,
+    QueueEvent,
+    QueueFinishMeta,
+    QueueFinishReason,
+    QueueItem,
+    QueueItemStatus,
+    QueueOutput,
+    QueueOutputCandidate,
+    QueueOutputToken,
 };
 use crate::cores::forward::{Logprob, TokenId};
 

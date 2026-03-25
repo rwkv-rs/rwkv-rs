@@ -1,5 +1,4 @@
-use sqlx::Row;
-use sqlx::postgres::PgRow;
+use sqlx::{Row, postgres::PgRow};
 
 use crate::db::{CheckerRecord, CompletionStatus, TaskRecord, TaskStatus};
 

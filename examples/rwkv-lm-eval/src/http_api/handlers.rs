@@ -1,24 +1,53 @@
-use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::{
+    Json,
+    extract::{Path, Query, State},
+};
 use utoipa::OpenApi;
 
-use super::catalog::benchmark_names_for_field;
-use super::error::{ApiError, ApiResult};
-use super::mappers::{
-    to_benchmark_resource, to_completion_detail_response, to_model_resource,
-    to_review_queue_resource, to_task_attempt_resource, to_task_resource,
+use super::{
+    catalog::benchmark_names_for_field,
+    error::{ApiError, ApiResult},
+    mappers::{
+        to_benchmark_resource,
+        to_completion_detail_response,
+        to_model_resource,
+        to_review_queue_resource,
+        to_task_attempt_resource,
+        to_task_resource,
+    },
+    openapi::ApiDoc,
+    schema::{
+        ApiCompletionStatus,
+        ApiCotMode,
+        ApiTaskStatus,
+        BenchmarkField,
+        BenchmarkResource,
+        CompletionDetailResponse,
+        HealthResponse,
+        IndexResponse,
+        ListTasksParams,
+        MetaResponse,
+        ModelResource,
+        ReviewQueueParams,
+        ReviewQueueResponse,
+        TaskAttemptsParams,
+        TaskAttemptsResponse,
+        TaskDetailResponse,
+        TaskListResponse,
+    },
+    state::AppState,
 };
-use super::openapi::ApiDoc;
-use super::schema::{
-    ApiCompletionStatus, ApiCotMode, ApiTaskStatus, BenchmarkField, BenchmarkResource,
-    CompletionDetailResponse, HealthResponse, IndexResponse, ListTasksParams, MetaResponse,
-    ModelResource, ReviewQueueParams, ReviewQueueResponse, TaskAttemptsParams,
-    TaskAttemptsResponse, TaskDetailResponse, TaskListResponse,
-};
-use super::state::AppState;
 use crate::db::{
-    ReviewQueueQuery, TaskAttemptsQuery, TaskListQuery, get_completion_detail, get_task_detail,
-    list_benchmarks, list_models, list_review_queue, list_task_attempts, list_tasks,
+    ReviewQueueQuery,
+    TaskAttemptsQuery,
+    TaskListQuery,
+    get_completion_detail,
+    get_task_detail,
+    list_benchmarks,
+    list_models,
+    list_review_queue,
+    list_task_attempts,
+    list_tasks,
 };
 
 const DEFAULT_LIMIT: i64 = 50;

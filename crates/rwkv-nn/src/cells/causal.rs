@@ -1,17 +1,21 @@
-use crate::functions::context_mask::apply_context_mask;
-use crate::kernels::wkv7_common::Wkv7Kernel;
-use crate::kernels::{addcmul::AddcmulBackend, token_shift_diff::TokenShiftDiffBackend};
-use crate::modules::channel_mixer::ChannelMixerIO;
-use crate::modules::time_mixer::TimeMixerIO;
-use crate::modules::{
-    channel_mixer::{ChannelMixer, ChannelMixerConfig},
-    time_mixer::{TimeMixer, TimeMixerConfig},
-};
 use burn::{
     config::Config,
     module::Module,
     nn::{LayerNorm, LayerNormConfig},
     prelude::{Backend, Tensor},
+};
+
+use crate::{
+    functions::context_mask::apply_context_mask,
+    kernels::{
+        addcmul::AddcmulBackend,
+        token_shift_diff::TokenShiftDiffBackend,
+        wkv7_common::Wkv7Kernel,
+    },
+    modules::{
+        channel_mixer::{ChannelMixer, ChannelMixerConfig, ChannelMixerIO},
+        time_mixer::{TimeMixer, TimeMixerConfig, TimeMixerIO},
+    },
 };
 
 #[derive(Config, Debug)]

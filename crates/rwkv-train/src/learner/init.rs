@@ -5,11 +5,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use burn::backend::Autodiff;
-use burn::backend::autodiff::checkpoint::strategy::CheckpointStrategy;
+use burn::{
+    backend::{Autodiff, autodiff::checkpoint::strategy::CheckpointStrategy},
+    prelude::Backend,
+};
 #[cfg(feature = "wgpu")]
 use burn::backend::wgpu::WgpuDevice;
-use burn::prelude::Backend;
 #[cfg(feature = "cubecl")]
 use burn_cubecl::cubecl::device::{Device as CubeDevice, DeviceId};
 #[cfg(feature = "cubecl")]
@@ -37,7 +38,10 @@ use wandb::LogData;
 
 use crate::{
     logger::wandb::{
-        WandbLogger, WandbLoggerConfig, init_logger_blocking, init_metric_logger_blocking,
+        WandbLogger,
+        WandbLoggerConfig,
+        init_logger_blocking,
+        init_metric_logger_blocking,
     },
     renderer::BarMetricsRenderer,
     utils::{auto_create_directory, read_record_file},

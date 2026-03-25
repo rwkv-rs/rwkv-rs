@@ -11,7 +11,9 @@ pub struct ModelsReloadReq {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModelsReloadResp {
+    pub changed_model_names: Vec<String>,
     pub rebuilt_model_names: Vec<String>,
     pub removed_model_names: Vec<String>,
     pub active_model_names: Vec<String>,
+    pub message: String,
 }

@@ -1,9 +1,18 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
-use crate::inference_core::{ConstraintSpec, InferenceSubmitHandle, InferenceSubmitResult};
-use crate::inference_core::{RequestedTokenLogprobsConfig, SamplingConfig};
+use crate::inference_core::{
+    ConstraintSpec,
+    InferenceSubmitHandle,
+    InferenceSubmitResult,
+    RequestedTokenLogprobsConfig,
+    SamplingConfig,
+};
 
 #[derive(Clone)]
 pub struct LoadedModelGroup {
