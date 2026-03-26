@@ -290,8 +290,8 @@ fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
 fn main() -> io::Result<()> {
     type MyBackend = Cpu<bf16, i32>;
     // Edit these paths before running the example.
-    let input_dir = Path::new("examples/rwkv-lm/weights");
-    let output_dir = Path::new("examples/rwkv-lm/weights");
+    let input_dir = Path::new("/public/home/ssjxzkz/Weights/BlinkDL__rwkv7-g1");
+    let output_dir = Path::new("/public/home/ssjxzkz/Weights/Caizus__rwkv-rs-g1");
 
     println!("input dir: {}", input_dir.display());
     println!("output dir: {}", output_dir.display());
