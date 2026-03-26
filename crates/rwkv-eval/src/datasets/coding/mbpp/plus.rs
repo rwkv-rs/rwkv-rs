@@ -1,6 +1,12 @@
-use std::path::{Path, PathBuf};
-
-use async_openai::{Client, config::OpenAIConfig};
+use super::get_expected_context;
+use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
+use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
+use crate::datasets::{
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
+};
+use crate::evaluators::coding::run_python_verdict_script;
+use async_openai::Client;
+use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
@@ -73,6 +79,23 @@ struct RawMbppPlusItem {
     atol: Option<f64>,
 }
 
+fn read_mbpp_plus_items<P: AsRef<Path>>(path: P) -> Vec<RawMbppPlusItem> {
+    use flate2::read::GzDecoder;
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+
+    let file = File::open(path.as_ref()).unwrap();
+    let reader = BufReader::new(GzDecoder::new(file));
+
+    reader
+        .lines()
+        .map(|line| line.unwrap())
+        .filter(|line| !line.trim().is_empty())
+        .filter(|line| !(line.contains("Infinity") || line.contains("-Infinity")))
+        .map(|line| sonic_rs::from_str(&line).unwrap())
+        .collect()
+}
+
 impl MbppPlus {
     pub fn new<P: AsRef<Path>>(dataset_root: P) -> Self {
         Self {
@@ -95,7 +118,7 @@ impl Benchmark for MbppPlus {
             return true;
         }
 
-        self.test = read_gzip_jsonl_items::<RawMbppPlusItem, _>(path)
+        self.test = read_mbpp_plus_items(path)
             .into_iter()
             .map(|item| MbppPlusItem {
                 task_id: item.task_id,
