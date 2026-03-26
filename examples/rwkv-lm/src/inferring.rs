@@ -9,6 +9,8 @@ use itertools::izip;
 use serde::de::DeserializeOwned;
 use rwkv::{
     config::{
+        default_cfg_dir,
+        get_arg_value,
         raw::{
             infer::{GenerationConfig, RawInferConfig},
             model::RawModelConfig,
@@ -18,9 +20,8 @@ use rwkv::{
     custom::{
         Tensor,
         cubecl::device::DeviceId,
-        module::Module,
         prelude::{Backend, DeviceOps, Int, TensorData},
-        record::{FullPrecisionSettings, NamedMpkFileRecorder},
+        store::{BurnpackStore, ModuleSnapshot},
         tensor::{DType, IndexingUpdateOp},
     },
     data::tokenizer::Tokenizer,
@@ -54,6 +55,15 @@ use crate::model::{AutoRegressiveModel, AutoRegressiveModelConfig, UnembedMode};
 rwkv::custom_mode!();
 
 const GUIDED_MASKED_LOGIT: f32 = -1.0e30;
+
+pub fn infer_cli_args(args: &[String]) -> (PathBuf, String) {
+    let config_dir = get_arg_value(args, "--config-dir")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_cfg_dir);
+    let infer_cfg =
+        get_arg_value(args, "--infer-cfg").unwrap_or_else(|| "rwkv-7.2b-g1e".to_string());
+    (config_dir, infer_cfg)
+}
 
 pub struct RwkvLmForward<B: Backend> {
     model: AutoRegressiveModel<B>,
@@ -354,7 +364,8 @@ where
                     )
                     .int();
                 if let Some(ref updated_penalties) = sample_output.penalties {
-                    self.penalties = (self.penalties.clone() * batch_masks_2d).select_assign(
+                    let penalties_mask_2d = batch_masks_2d.clone().cast(DType::F32);
+                    self.penalties = (self.penalties.clone() * penalties_mask_2d).select_assign(
                         0,
                         batch_ids_tensor.clone(),
                         updated_penalties.clone(),
@@ -594,14 +605,9 @@ where
                 model_cfg.num_heads,
                 model_cfg.head_size_auto,
             );
-            let model_runtime = model_config.init::<B>(&device);
-            let model_runtime = model_runtime
-                .load_file(
-                    &generation_cfg.weights_path,
-                    &NamedMpkFileRecorder::<FullPrecisionSettings>::new(),
-                    &device,
-                )
-                .unwrap();
+            let mut model_runtime = model_config.init::<B>(&device);
+            let mut store = BurnpackStore::from_file(&generation_cfg.weights_path).zero_copy(true);
+            model_runtime.load_from(&mut store).unwrap();
             let executor = RwkvLmForward::<B>::new(
                 model_runtime,
                 model_cfg.clone(),
@@ -679,6 +685,24 @@ fn validate_generation_models(models: &[GenerationConfig]) -> ServiceResult<()> 
                 "weights_path cannot be empty for model {}",
                 model.model_name
             )));
+        }
+        match Path::new(&model.weights_path)
+            .extension()
+            .and_then(|extension| extension.to_str())
+        {
+            Some("bpk") => {}
+            Some("mpk") => {
+                return Err(ServiceError::bad_request(format!(
+                    "weights_path for model {} points to unsupported .mpk file {}; convert it to .bpk first",
+                    model.model_name, model.weights_path
+                )));
+            }
+            _ => {
+                return Err(ServiceError::bad_request(format!(
+                    "weights_path for model {} must point to a .bpk file, got {}",
+                    model.model_name, model.weights_path
+                )));
+            }
         }
         if model.tokenizer_vocab_path.trim().is_empty() {
             return Err(ServiceError::bad_request(format!(

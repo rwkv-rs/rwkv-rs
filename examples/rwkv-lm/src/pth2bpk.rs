@@ -1,21 +1,19 @@
 use rwkv::custom::{
     cubecl::device::DeviceId,
-    module::Module,
     prelude::{Backend, DeviceOps},
-    record::{HalfPrecisionSettings, NamedMpkFileRecorder},
-    store::{ModuleSnapshot, PytorchStore},
+    store::{BurnpackStore, ModuleSnapshot, PytorchStore},
 };
 
 use crate::model::AutoRegressiveModelConfig;
 
 #[derive(Clone, Debug)]
-pub struct ConvertPthToMpkOptions {
+pub struct ConvertPthToBpkOptions {
     model_path: String,
     output_path: String,
     device_id: DeviceId,
 }
 
-impl ConvertPthToMpkOptions {
+impl ConvertPthToBpkOptions {
     pub fn new(model_path: impl Into<String>, output_path: impl Into<String>) -> Self {
         Self {
             model_path: model_path.into(),
@@ -30,11 +28,11 @@ impl ConvertPthToMpkOptions {
     }
 }
 
-pub fn convert_pth_to_mpk<B: Backend>(
-    options: &ConvertPthToMpkOptions,
+pub fn convert_pth_to_bpk<B: Backend>(
+    options: &ConvertPthToBpkOptions,
     model_config: AutoRegressiveModelConfig,
 ) -> Result<(), String> {
-    pth2mpk_on_device::<B>(
+    pth2bpk_on_device::<B>(
         &options.model_path,
         &options.output_path,
         model_config,
@@ -42,15 +40,15 @@ pub fn convert_pth_to_mpk<B: Backend>(
     )
 }
 
-pub fn pth2mpk<B: Backend>(
+pub fn pth2bpk<B: Backend>(
     model_path: &str,
     output_path: &str,
     model_config: AutoRegressiveModelConfig,
 ) -> Result<(), String> {
-    pth2mpk_on_device::<B>(model_path, output_path, model_config, DeviceId::new(0, 0))
+    pth2bpk_on_device::<B>(model_path, output_path, model_config, DeviceId::new(0, 0))
 }
 
-pub fn pth2mpk_on_device<B: Backend>(
+pub fn pth2bpk_on_device<B: Backend>(
     model_path: &str,
     output_path: &str,
     model_config: AutoRegressiveModelConfig,
@@ -236,7 +234,7 @@ pub fn pth2mpk_on_device<B: Backend>(
 
     if !result.errors.is_empty() || !unexpected_missing.is_empty() || !unexpected_unused.is_empty()
     {
-        let mut message = String::from("pth2mpk found unexpected tensor mapping issues:\n");
+        let mut message = String::from("pth2bpk found unexpected tensor mapping issues:\n");
 
         if !result.errors.is_empty() {
             message.push_str(&format!("  - errors: {}\n", result.errors.len()));
@@ -304,13 +302,9 @@ pub fn pth2mpk_on_device<B: Backend>(
     //         .fold(f32::NEG_INFINITY, f32::max),
     //     unembed_weight.iter().sum::<f32>() / unembed_weight.len() as f32
     // );
-    model
-        .save_file(
-            output_path,
-            &NamedMpkFileRecorder::<HalfPrecisionSettings>::new(),
-        )
-        .map_err(|error| {
-            format!("failed to save converted checkpoint to {output_path}: {error}")
-        })?;
+    let mut store = BurnpackStore::from_file(output_path);
+    model.save_into(&mut store).map_err(|error| {
+        format!("failed to save converted checkpoint to {output_path}: {error}")
+    })?;
     Ok(())
 }

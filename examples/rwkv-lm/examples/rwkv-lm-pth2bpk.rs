@@ -8,14 +8,14 @@ use std::{
 
 use rayon::{ThreadPoolBuilder, prelude::*};
 use rwkv::custom::{
-    backend::Cuda,
+    backend::{Cpu, Cuda},
     cubecl::device::{Device as CubeDevice, DeviceId},
     prelude::Backend,
     tensor::bf16,
 };
 use rwkv_lm::{
     model::AutoRegressiveModelConfig,
-    pth2mpk::{ConvertPthToMpkOptions, convert_pth_to_mpk},
+    pth2bpk::{ConvertPthToBpkOptions, convert_pth_to_bpk},
 };
 
 const VOCAB_SIZE: usize = 65536;
@@ -220,7 +220,7 @@ fn build_jobs(model_paths: Vec<PathBuf>, output_dir: &Path) -> io::Result<JobBui
     });
 
     for parsed in selected {
-        let output_path = output_dir.join(format!("{}.mpk", parsed.file_stem));
+        let output_path = output_dir.join(format!("{}.bpk", parsed.file_stem));
         if output_path.exists() {
             skipped_existing_outputs += 1;
             println!(
@@ -288,10 +288,10 @@ fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
 }
 
 fn main() -> io::Result<()> {
-    type MyBackend = Cuda<bf16, i32>;
+    type MyBackend = Cpu<bf16, i32>;
     // Edit these paths before running the example.
-    let input_dir = Path::new("/public/home/ssjxzkz/Weights/BlinkDL__rwkv7-g1");
-    let output_dir = Path::new("/public/home/ssjxzkz/Weights/Caizus__rwkv-rs-g1");
+    let input_dir = Path::new("examples/rwkv-lm/weights");
+    let output_dir = Path::new("examples/rwkv-lm/weights");
 
     println!("input dir: {}", input_dir.display());
     println!("output dir: {}", output_dir.display());
@@ -354,13 +354,13 @@ fn main() -> io::Result<()> {
                         worker.device_id.index_id
                     );
 
-                    let option = ConvertPthToMpkOptions::new(
+                    let option = ConvertPthToBpkOptions::new(
                         job.model_path.to_string_lossy().into_owned(),
                         job.output_path.to_string_lossy().into_owned(),
                     )
                     .with_device_id(worker.device_id);
                     let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                        convert_pth_to_mpk::<MyBackend>(&option, job.model_config)
+                        convert_pth_to_bpk::<MyBackend>(&option, job.model_config)
                     }));
 
                     match result {

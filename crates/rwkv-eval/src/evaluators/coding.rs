@@ -93,8 +93,9 @@ pub async fn run_python_verdict_script(script: &str) -> Result<SandboxVerdict, S
 
     match execution {
         Ok(execution) => {
-            let stdout = String::from_utf8_lossy(&execution.stdout).into_owned();
-            let stderr = String::from_utf8_lossy(&execution.stderr).into_owned();
+            let stdout = String::from_utf8_lossy(execution.stdout_bytes()).into_owned();
+            let stderr = String::from_utf8_lossy(execution.stderr_bytes()).into_owned();
+            let status = execution.status();
 
             if let Some(verdict) = parse_verdict_line(&stdout) {
                 return Ok(SandboxVerdict {
@@ -109,11 +110,8 @@ pub async fn run_python_verdict_script(script: &str) -> Result<SandboxVerdict, S
                 stderr.clone()
             } else if !stdout.trim().is_empty() {
                 format!("invalid sandbox verdict: {stdout}")
-            } else if !execution.status.success {
-                format!(
-                    "sandbox execution failed with status {}",
-                    execution.status.code
-                )
+            } else if !status.success {
+                format!("sandbox execution failed with status {}", status.code)
             } else {
                 "sandbox returned no verdict".to_string()
             };

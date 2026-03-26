@@ -8,11 +8,10 @@ fn main() {
     );
 }
 
-use std::{fs::create_dir_all, path::PathBuf};
+use std::fs::create_dir_all;
 
 use axum::serve;
 use rwkv::{
-    config::{default_cfg_dir, get_arg_value},
     custom::prelude::Backend,
     infer::routes::HttpApiRouterBuilder,
     nn::kernels::{
@@ -24,7 +23,10 @@ use rwkv::{
 };
 #[cfg(feature = "ipc")]
 use rwkv::infer::routes::IpcServer;
-use rwkv_lm::{inferring::build_http_runtime, paths};
+use rwkv_lm::{
+    inferring::{build_http_runtime, infer_cli_args},
+    paths,
+};
 #[cfg(feature = "ipc")]
 use rwkv_lm::inferring::build_ipc_server_config;
 #[cfg(feature = "trace")]
@@ -51,11 +53,7 @@ where
         + 'static,
 {
     let args: Vec<String> = std::env::args().collect();
-    let config_dir = get_arg_value(&args, "--config-dir")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_cfg_dir);
-    let infer_cfg =
-        get_arg_value(&args, "--infer-cfg").unwrap_or_else(|| "rwkv-7.2b-g1e".to_string());
+    let (config_dir, infer_cfg) = infer_cli_args(&args);
 
     let log_dir = paths::logs_dir();
     create_dir_all(&log_dir).unwrap_or_else(|e| {

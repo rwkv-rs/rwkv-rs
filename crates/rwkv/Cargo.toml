@@ -23,7 +23,14 @@ dataset = ["burn/dataset"]
 collective = ["burn/collective", "rwkv-train?/collective"]
 data = ["dep:rwkv-data"]
 nn = ["dep:rwkv-nn"]
-store = ["burn/store", "dep:burn-store", "burn-store/std", "burn-store/pytorch"]
+store = [
+    "burn/store",
+    "dep:burn-store",
+    "burn-store/std",
+    "burn-store/pytorch",
+    "burn-store/burnpack",
+    "burn-store/memmap",
+]
 
 autodiff = ["burn/autodiff"]
 fusion = ["burn/fusion", "rwkv-nn?/fusion", "rwkv-train?/fusion"]

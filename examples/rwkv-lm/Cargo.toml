@@ -14,29 +14,10 @@ workspace = true
 bench = false
 
 [[bench]]
-name = "serve_bench"
-path = "benches/serve_bench.rs"
+name = "rwkv-lm-infer-bench"
+path = "benches/rwkv-lm-infer-bench.rs"
 harness = false
-
-[[bench]]
-name = "sweep_bench"
-path = "benches/sweep_bench.rs"
-harness = false
-
-[[bench]]
-name = "report_bench"
-path = "benches/report_bench.rs"
-harness = false
-
-[[bench]]
-name = "profile_tracy_bench"
-path = "benches/profile_tracy_bench.rs"
-harness = false
-
-[[bench]]
-name = "train_command_bench"
-path = "benches/train_command_bench.rs"
-harness = false
+required-features = ["inferring"]
 
 [features]
 default = [
@@ -45,7 +26,7 @@ default = [
     "fusion",
     "cuda",
     "ddp",
-    "pth2mpk",
+    "pth2bpk",
     "std"
 ]
 statetune = []
@@ -67,7 +48,7 @@ cuda = ["rwkv/cuda"]
 rocm = ["rwkv/rocm"]
 metal = ["rwkv/metal"]
 ddp = ["rwkv/collective"]
-pth2mpk = ["rwkv/store", "rwkv/cubecl", "nn", "std"]
+pth2bpk = ["rwkv/store", "rwkv/cubecl", "nn", "std"]
 training = ["rwkv/train", "rwkv/cubecl", "metrics", "std"]
 trace = ["rwkv/trace", "dep:tracing"]
 ipc = ["rwkv/infer-ipc"]
@@ -76,6 +57,7 @@ inferring = [
     "dep:axum",
     "dep:clia-tracing-config",
     "rwkv/infer",
+    "rwkv/store",
     "cubecl",
     "nn",
     "std"
@@ -99,5 +81,5 @@ toml = { workspace = true }
 derive-new = { workspace = true }
 
 [dev-dependencies]
-clap = { workspace = true }
+kuva = { workspace = true }
 tokio = { workspace = true }

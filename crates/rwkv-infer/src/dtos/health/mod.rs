@@ -84,7 +84,7 @@ mod tests {
             queues: vec![QueueHealthSeries {
                 model_name: "rwkv".to_string(),
                 device_id: 0,
-                weights_path: "/tmp/model.mpk".to_string(),
+                weights_path: "/tmp/model.bpk".to_string(),
                 accepting: true,
                 pending: 1,
                 max_batch_size: 4,

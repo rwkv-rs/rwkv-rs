@@ -52,6 +52,7 @@ burn-optim = { workspace = true, default-features = false, features = [] }
 burn-fusion = { workspace = true, default-features = false, optional = true }
 burn-cubecl = { workspace = true, default-features = false, optional = true }
 burn-ndarray = { workspace = true, default-features = false, optional = true }
+burn-store = { workspace = true, default-features = false, features = ["std", "burnpack"] }
 
 # === Serialization ===
 serde = { workspace = true }
