@@ -39,9 +39,9 @@ api_key = "env_override_required"
 model = "env_override_required"
 
 [space_db]
-username = "env_override_required"
-password = "env_override_required"
-host = "env_override_required"
+username = "postgres"
+password = "postgres"
+host = "127.0.0.1"
 port = "5432"
-database_name = "env_override_required"
+database_name = "rwkv_eval"
 sslmode = "disable"

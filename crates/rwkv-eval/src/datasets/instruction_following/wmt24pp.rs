@@ -10,10 +10,13 @@ use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_trait::async_trait;
 use linkme::distributed_slice;
+use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
 const WMT24PP_PASS_THRESHOLD: f64 = 70.0;
+const WMT24PP_UNIFORM_SAMPLE_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 const WMT24PP_LANGUAGE_PAIRS: &[&str] = &[
     "en-ar_EG",
     "en-ar_SA",
@@ -72,6 +75,29 @@ const WMT24PP_LANGUAGE_PAIRS: &[&str] = &[
     "en-zu_ZA",
 ];
 
+#[derive(Debug, Clone, Copy)]
+struct Wmt24ppSamplingConfig {
+    approx_total: usize,
+    seed: u64,
+}
+
+static WMT24PP_SAMPLING_CONFIG: Lazy<RwLock<Option<Wmt24ppSamplingConfig>>> =
+    Lazy::new(|| RwLock::new(None));
+
+pub fn configure_uniform_random_sampling(sample_limit: Option<usize>) {
+    let mut guard = WMT24PP_SAMPLING_CONFIG.write().unwrap();
+    *guard = sample_limit
+        .filter(|limit| *limit > 0)
+        .map(|approx_total| Wmt24ppSamplingConfig {
+            approx_total,
+            seed: WMT24PP_UNIFORM_SAMPLE_SEED,
+        });
+}
+
+fn uniform_random_sampling_config() -> Option<Wmt24ppSamplingConfig> {
+    *WMT24PP_SAMPLING_CONFIG.read().unwrap()
+}
+
 #[distributed_slice(ALL_BENCHMARKS)]
 static WMT24PP_INFO: BenchmarkInfo = BenchmarkInfo {
     name: BenchmarkName("wmt24pp"),
@@ -121,10 +147,81 @@ pub struct Wmt24pp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[tokio::test(flavor = "current_thread")]
     async fn downloads_and_reads_dataset() {
         crate::datasets::assert_benchmark_download_load_and_read(&WMT24PP_INFO).await;
+    }
+
+    #[test]
+    fn uniform_sampling_keeps_equal_counts_per_language_pair() {
+        let sampled = sample_uniform_language_pairs(
+            make_groups(),
+            Wmt24ppSamplingConfig {
+                approx_total: 8,
+                seed: WMT24PP_UNIFORM_SAMPLE_SEED,
+            },
+        );
+
+        let counts = sampled
+            .into_iter()
+            .fold(BTreeMap::new(), |mut counts, item| {
+                *counts.entry(item.lp).or_insert(0usize) += 1;
+                counts
+            });
+
+        assert_eq!(counts.values().copied().collect::<Vec<_>>(), vec![3, 3, 3]);
+    }
+
+    #[test]
+    fn uniform_sampling_is_deterministic() {
+        let left = sample_uniform_language_pairs(
+            make_groups(),
+            Wmt24ppSamplingConfig {
+                approx_total: 8,
+                seed: WMT24PP_UNIFORM_SAMPLE_SEED,
+            },
+        );
+        let right = sample_uniform_language_pairs(
+            make_groups(),
+            Wmt24ppSamplingConfig {
+                approx_total: 8,
+                seed: WMT24PP_UNIFORM_SAMPLE_SEED,
+            },
+        );
+
+        let left_ids = left
+            .iter()
+            .map(|item| format!("{}:{}", item.lp, item.segment_id))
+            .collect::<Vec<_>>();
+        let right_ids = right
+            .iter()
+            .map(|item| format!("{}:{}", item.lp, item.segment_id))
+            .collect::<Vec<_>>();
+        assert_eq!(left_ids, right_ids);
+    }
+
+    fn make_groups() -> Vec<Wmt24ppLanguagePairItems> {
+        ["en-aa_AA", "en-bb_BB", "en-cc_CC"]
+            .into_iter()
+            .map(|lp| Wmt24ppLanguagePairItems {
+                lp: lp.to_string(),
+                items: (0..4).map(|segment_id| make_item(lp, segment_id)).collect(),
+            })
+            .collect()
+    }
+
+    fn make_item(lp: &str, segment_id: i64) -> Wmt24ppItem {
+        Wmt24ppItem {
+            lp: lp.to_string(),
+            domain: "test".to_string(),
+            document_id: format!("{lp}-{segment_id}"),
+            segment_id,
+            source: format!("source-{segment_id}"),
+            target: format!("target-{segment_id}"),
+            original_target: None,
+        }
     }
 }
 
@@ -136,6 +233,11 @@ pub struct Wmt24ppItem {
     source: String,
     target: String,
     original_target: Option<String>,
+}
+
+struct Wmt24ppLanguagePairItems {
+    lp: String,
+    items: Vec<Wmt24ppItem>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,6 +264,159 @@ impl Wmt24pp {
             dataset_root: dataset_root.as_ref().to_path_buf(),
             test: Vec::new(),
         }
+    }
+}
+
+fn load_language_pair_items(path: &Path) -> Wmt24ppLanguagePairItems {
+    let lp = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_else(|| panic!("invalid WMT24++ path `{}`", path.display()))
+        .to_string();
+    let items = read_jsonl_items::<RawWmt24ppItem, _>(path)
+        .into_iter()
+        .filter(|row| !row.is_bad_source)
+        .map(|row| Wmt24ppItem {
+            lp: row.lp,
+            domain: row.domain,
+            document_id: row.document_id,
+            segment_id: row.segment_id,
+            source: row.source,
+            target: row.target,
+            original_target: row.original_target,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        items.iter().all(|item| item.lp == lp),
+        "WMT24++ file `{}` contains mixed language pairs",
+        path.display()
+    );
+
+    Wmt24ppLanguagePairItems { lp, items }
+}
+
+fn sample_uniform_language_pairs(
+    groups: Vec<Wmt24ppLanguagePairItems>,
+    config: Wmt24ppSamplingConfig,
+) -> Vec<Wmt24ppItem> {
+    let total_items = groups.iter().map(|group| group.items.len()).sum::<usize>();
+    if config.approx_total >= total_items {
+        return groups
+            .into_iter()
+            .flat_map(|group| group.items)
+            .collect::<Vec<_>>();
+    }
+
+    let group_count = groups.len();
+    assert!(group_count > 0, "WMT24++ has no language pairs to sample");
+
+    assert!(
+        config.approx_total >= group_count,
+        "WMT24++ uniform sampling requires sample_limit >= number of language pairs ({group_count}), got {}",
+        config.approx_total
+    );
+
+    let per_group = config.approx_total.div_ceil(group_count);
+    assert!(
+        per_group > 0,
+        "WMT24++ uniform sampling requires sample_limit >= number of language pairs ({group_count}), got {}",
+        config.approx_total
+    );
+
+    let min_group_len = groups
+        .iter()
+        .map(|group| group.items.len())
+        .min()
+        .unwrap_or(0);
+    let per_group = per_group.min(min_group_len);
+    let actual_total = per_group * group_count;
+
+    println!(
+        "wmt24pp uniform sampling enabled: approx_total={} language_pairs={} per_pair={} actual_total={} seed={:#x}",
+        config.approx_total, group_count, per_group, actual_total, config.seed
+    );
+
+    groups
+        .into_iter()
+        .flat_map(|group| sample_language_pair_items(group, per_group, config.seed))
+        .collect()
+}
+
+fn sample_language_pair_items(
+    group: Wmt24ppLanguagePairItems,
+    sample_size: usize,
+    seed: u64,
+) -> Vec<Wmt24ppItem> {
+    if sample_size >= group.items.len() {
+        return group.items;
+    }
+
+    let selected_indices = deterministic_sample_indices(
+        group.items.len(),
+        sample_size,
+        seed ^ fnv1a_hash64(group.lp.as_bytes()),
+    );
+    let mut selected_iter = selected_indices.into_iter().peekable();
+
+    group
+        .items
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, item)| match selected_iter.peek().copied() {
+            Some(next_index) if next_index == index => {
+                selected_iter.next();
+                Some(item)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn deterministic_sample_indices(total_len: usize, sample_size: usize, seed: u64) -> Vec<usize> {
+    assert!(
+        sample_size <= total_len,
+        "sample_size={sample_size} exceeds total_len={total_len}"
+    );
+
+    let mut indices = (0..total_len).collect::<Vec<_>>();
+    let mut rng = SplitMix64::new(seed);
+
+    for start in 0..sample_size {
+        let remaining = total_len - start;
+        let offset = (rng.next_u64() % remaining as u64) as usize;
+        indices.swap(start, start + offset);
+    }
+
+    indices.truncate(sample_size);
+    indices.sort_unstable();
+    indices
+}
+
+fn fnv1a_hash64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3_u64);
+    }
+    hash
+}
+
+struct SplitMix64 {
+    state: u64,
+}
+
+impl SplitMix64 {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(0x9E3779B97F4A7C15);
+        let mut z = self.state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^ (z >> 31)
     }
 }
 
@@ -427,22 +682,14 @@ impl Benchmark for Wmt24pp {
             return true;
         }
 
-        for path in paths {
-            self.test.extend(
-                read_jsonl_items::<RawWmt24ppItem, _>(&path)
-                    .into_iter()
-                    .filter(|row| !row.is_bad_source)
-                    .map(|row| Wmt24ppItem {
-                        lp: row.lp,
-                        domain: row.domain,
-                        document_id: row.document_id,
-                        segment_id: row.segment_id,
-                        source: row.source,
-                        target: row.target,
-                        original_target: row.original_target,
-                    }),
-            );
-        }
+        let groups = paths
+            .into_iter()
+            .map(|path| load_language_pair_items(&path))
+            .collect::<Vec<_>>();
+        self.test = match uniform_random_sampling_config() {
+            Some(config) => sample_uniform_language_pairs(groups, config),
+            None => groups.into_iter().flat_map(|group| group.items).collect(),
+        };
 
         self.test.is_empty()
     }

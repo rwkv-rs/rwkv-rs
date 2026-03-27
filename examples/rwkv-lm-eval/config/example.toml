@@ -1,6 +1,7 @@
 experiment_name = "your_experiment_name"
 experiment_desc = "desc desc"
 run_mode = "new"  # new / resume / rerun
+continue_on_benchmark_error = false
 skip_checker = false
 attempt_concurrency = 8
 judger_concurrency = 8

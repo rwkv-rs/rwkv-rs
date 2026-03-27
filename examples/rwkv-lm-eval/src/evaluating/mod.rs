@@ -13,10 +13,13 @@ mod task_persistence;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
+use futures::FutureExt;
 use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfigBuilder};
-use rwkv_eval::datasets::Benchmark;
+use rwkv_eval::datasets::instruction_following::wmt24pp::configure_uniform_random_sampling;
+use rwkv_eval::datasets::{Benchmark, Field};
 use rwkv_eval::datasets::maths::set_llm_judger_semaphore;
 use tokio::sync::Semaphore;
 
@@ -42,6 +45,20 @@ use self::sampling::build_avg_k_execution_plan;
 use self::task_persistence::{ensure_existing_results_match_plan, fail_task, prepare_task_execution};
 
 const EVALUATOR_NAME: &str = "rwkv-lm-eval";
+
+fn effective_benchmark_len(
+    benchmark_name: &str,
+    benchmark_len: usize,
+    sample_limit: Option<usize>,
+) -> usize {
+    if benchmark_name == "wmt24pp" {
+        benchmark_len
+    } else {
+        sample_limit
+            .map(|limit| limit.min(benchmark_len))
+            .unwrap_or(benchmark_len)
+    }
+}
 
 pub async fn evaluating(
     eval_cfg_builder: FinalEvalConfigBuilder,
@@ -109,6 +126,10 @@ pub async fn evaluating(
 
     println!("experiment: {experiment_name}");
     println!("run mode: {}", options.run_mode.as_str());
+    println!(
+        "continue on benchmark error: {}",
+        options.continue_on_benchmark_error
+    );
     println!("skip checker: {}", options.skip_checker);
     println!("attempt concurrency: {}", options.attempt_concurrency);
     println!("judger concurrency: {}", options.judger_concurrency);
@@ -147,76 +168,111 @@ pub async fn evaluating(
 
     let benchmark_infos = collect_benchmarks();
     assert!(!benchmark_infos.is_empty(), "no benchmark selected");
-    ensure_microsandbox_for_coding_benchmarks(&benchmark_infos).await;
 
     for benchmark_info in benchmark_infos {
-        validate_benchmark_info(benchmark_info);
+        let benchmark_future = async {
+            validate_benchmark_info(benchmark_info);
+            ensure_microsandbox_for_coding_benchmarks(std::slice::from_ref(&benchmark_info)).await;
 
-        println!("prepare benchmark: {}", benchmark_info.name.0);
-        let mut benchmark_box = (benchmark_info.create)(datasets_path.clone());
-        prepare_benchmark(benchmark_info, benchmark_box.as_mut()).await;
-        let benchmark: Arc<dyn Benchmark> = Arc::from(benchmark_box);
+            println!("prepare benchmark: {}", benchmark_info.name.0);
+            if benchmark_info.name.0 == "wmt24pp" {
+                configure_uniform_random_sampling(sample_limit);
+            }
+            let mut benchmark_box = (benchmark_info.create)(datasets_path.clone());
+            prepare_benchmark(benchmark_info, benchmark_box.as_mut()).await;
+            let benchmark: Arc<dyn Benchmark> = Arc::from(benchmark_box);
 
-        let benchmark_id = if let Some(db) = db.as_ref() {
-            let effective_benchmark_len = sample_limit
-                .map(|limit| limit.min(benchmark.len()))
-                .unwrap_or_else(|| benchmark.len());
-            let benchmark_id = upsert_benchmark(
-                db,
-                &BenchmarkInsert {
-                    benchmark_name: benchmark_info.name.0.to_string(),
-                    benchmark_split: "test".to_string(),
-                    url: None,
-                    status: "Completed".to_string(),
-                    num_samples: effective_benchmark_len as i32,
-                },
-            )
-            .await
-            .unwrap_or_else(|err| panic!("failed to persist benchmark metadata: {err}"));
-            Some(benchmark_id)
-        } else {
-            None
+            let benchmark_id = if let Some(db) = db.as_ref() {
+                let effective_benchmark_len =
+                    effective_benchmark_len(benchmark_info.name.0, benchmark.len(), sample_limit);
+                let benchmark_id = upsert_benchmark(
+                    db,
+                    &BenchmarkInsert {
+                        benchmark_name: benchmark_info.name.0.to_string(),
+                        benchmark_split: "test".to_string(),
+                        url: None,
+                        status: "Completed".to_string(),
+                        num_samples: effective_benchmark_len as i32,
+                    },
+                )
+                .await
+                .unwrap_or_else(|err| panic!("failed to persist benchmark metadata: {err}"));
+                Some(benchmark_id)
+            } else {
+                None
+            };
+
+            let max_pass_k = benchmark_info
+                .pass_ks
+                .iter()
+                .copied()
+                .max()
+                .unwrap_or_else(|| {
+                    panic!("benchmark `{}` has empty pass_ks", benchmark_info.name.0)
+                });
+            let judger_client = benchmark_info
+                .with_llm_judger
+                .then(|| Arc::clone(&llm_judger_client));
+            let judger_model_name = benchmark_info
+                .with_llm_judger
+                .then_some(llm_judger_cfg.model.clone());
+            let checker_model_name = checker_runtime
+                .as_ref()
+                .map(|runtime| runtime.model_name.clone());
+
+            for target_model in &clients_with_cfg {
+                run_target_model(
+                    benchmark_info,
+                    Arc::clone(&benchmark),
+                    benchmark_id,
+                    max_pass_k,
+                    judger_model_name.as_deref(),
+                    judger_client.clone(),
+                    checker_model_name.as_deref(),
+                    checker_runtime.clone(),
+                    target_model,
+                    &model_ids,
+                    &db,
+                    &options,
+                    sample_limit,
+                    &config_path,
+                    &logs_path,
+                    &experiment_name,
+                    &experiment_desc,
+                    &git_hash,
+                )
+                .await;
+            }
         };
 
-        let max_pass_k = benchmark_info
-            .pass_ks
-            .iter()
-            .copied()
-            .max()
-            .unwrap_or_else(|| panic!("benchmark `{}` has empty pass_ks", benchmark_info.name.0));
-        let judger_client = benchmark_info
-            .with_llm_judger
-            .then(|| Arc::clone(&llm_judger_client));
-        let judger_model_name = benchmark_info
-            .with_llm_judger
-            .then_some(llm_judger_cfg.model.clone());
-        let checker_model_name = checker_runtime
-            .as_ref()
-            .map(|runtime| runtime.model_name.clone());
-
-        for target_model in &clients_with_cfg {
-            run_target_model(
-                benchmark_info,
-                Arc::clone(&benchmark),
-                benchmark_id,
-                max_pass_k,
-                judger_model_name.as_deref(),
-                judger_client.clone(),
-                checker_model_name.as_deref(),
-                checker_runtime.clone(),
-                target_model,
-                &model_ids,
-                &db,
-                &options,
-                sample_limit,
-                &config_path,
-                &logs_path,
-                &experiment_name,
-                &experiment_desc,
-                &git_hash,
-            )
-            .await;
+        if options.continue_on_benchmark_error {
+            if let Err(err) = AssertUnwindSafe(benchmark_future).catch_unwind().await {
+                println!(
+                    "skip benchmark={} because it failed: {}",
+                    benchmark_info.name.0,
+                    render_panic_payload(err),
+                );
+                if benchmark_info.field == Field::Coding {
+                    println!(
+                        "coding benchmark `{}` skipped; check microsandbox/runtime dependencies later",
+                        benchmark_info.name.0
+                    );
+                }
+                continue;
+            }
+        } else {
+            benchmark_future.await;
         }
+    }
+}
+
+fn render_panic_payload(err: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(text) = err.downcast_ref::<&str>() {
+        (*text).to_string()
+    } else if let Some(text) = err.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "non-string panic payload".to_string()
     }
 }
 
@@ -245,9 +301,8 @@ async fn run_target_model(
         "run benchmark={} model={}",
         benchmark_info.name.0, target_model.api_cfg.model,
     );
-    let effective_benchmark_len = sample_limit
-        .map(|limit| limit.min(benchmark.len()))
-        .unwrap_or_else(|| benchmark.len());
+    let effective_benchmark_len =
+        effective_benchmark_len(benchmark_info.name.0, benchmark.len(), sample_limit);
 
     let model_id = model_ids
         .get(&model_cache_key(&target_model.api_cfg))
@@ -266,6 +321,8 @@ async fn run_target_model(
                     cot_mode,
                     n_shot,
                     avg_k,
+                    sample_limit,
+                    effective_benchmark_len,
                     judger_model_name,
                     checker_model_name,
                 );
@@ -380,7 +437,7 @@ async fn run_target_model(
                         checker_runtime.clone().unwrap_or_else(|| {
                             panic!("pending checker work requires checker runtime")
                         }),
-                        options.attempt_concurrency.max(1),
+                        options.checker_concurrency.max(1),
                     )
                     .await
                     {

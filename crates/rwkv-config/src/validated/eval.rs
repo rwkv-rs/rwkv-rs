@@ -12,6 +12,7 @@ pub struct FinalEvalConfig {
     pub experiment_name: String,
     pub experiment_desc: String,
     pub run_mode: String,
+    pub continue_on_benchmark_error: bool,
     pub skip_checker: bool,
     pub attempt_concurrency: usize,
     pub judger_concurrency: usize,

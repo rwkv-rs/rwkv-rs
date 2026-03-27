@@ -1,0 +1,45 @@
+experiment_name = "all_math_knowledge_rwkv7_g1e_7_2b_gpu2"
+experiment_desc = "All maths and knowledge benchmarks on RWKV-7.2B-g1e via GPU2 service"
+run_mode = "resume"
+skip_checker = false
+attempt_concurrency = 8
+judger_concurrency = 4
+checker_concurrency = 4
+db_pool_max_connections = 8
+
+model_arch_versions = ["rwkv7"]
+model_data_versions = ["g1e"]
+model_num_params = ["7.2b"]
+
+benchmark_field = ["Knowledge", "Math"]
+extra_benchmark_name = []
+
+upload_to_space = true
+git_hash = "70c421f865fec0d41b446d58800b7123c91f3050"
+
+[[models]]
+model_arch_version = "rwkv7"
+model_data_version = "g1e"
+model_num_params = "7.2b"
+base_url = "http://127.0.0.1:8080"
+api_key = "local"
+model = "rwkv-7.2b-g1e"
+max_batch_size = 1
+
+[llm_judger]
+base_url = "https://api.ablai.top"
+api_key = "sk-a2fQTz3DeX7BKpvcOSBd9xLab3eHcbeYLCNeVsD5fzi6MqBP"
+model = "gpt-4o"
+
+[llm_checker]
+base_url = "https://api.ablai.top"
+api_key = "sk-a2fQTz3DeX7BKpvcOSBd9xLab3eHcbeYLCNeVsD5fzi6MqBP"
+model = "gpt-4o"
+
+[space_db]
+username = "postgres"
+password = "postgres"
+host = "127.0.0.1"
+port = "5432"
+database_name = "rwkv_eval"
+sslmode = "disable"

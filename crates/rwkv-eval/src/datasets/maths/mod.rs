@@ -230,16 +230,88 @@ async fn get_final_answer(
     prompt_for_final_answer: &str,
     sampling_config: &SamplingConfig,
 ) -> String {
-    generate_text_completion(
-        model_client,
-        model_name,
-        &prompt_for_final_answer,
-        vec![],
-        128,
-        sampling_config,
+    sanitize_generated_final_answer(
+        &generate_text_completion(
+            model_client,
+            model_name,
+            &prompt_for_final_answer,
+            final_answer_stop_suffixes(),
+            128,
+            sampling_config,
+        )
+        .await
+        .unwrap(),
     )
-    .await
-    .unwrap()
+}
+
+fn final_answer_stop_suffixes() -> Vec<String> {
+    ["<think>", "</think>", "\nUser:", "\nAssistant:"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn sanitize_generated_final_answer(raw_answer: &str) -> String {
+    let normalized = raw_answer.replace('\r', "");
+    let mut answer = normalized.trim().to_string();
+
+    if let Some(cutoff) = final_answer_stop_suffixes()
+        .iter()
+        .filter_map(|marker| answer.find(marker))
+        .min()
+    {
+        answer.truncate(cutoff);
+    }
+    answer = answer.trim().to_string();
+
+    if answer.contains('\n') {
+        if let Some(first_non_empty_line) =
+            answer.lines().map(str::trim).find(|line| !line.is_empty())
+        {
+            answer = first_non_empty_line.to_string();
+        }
+    }
+
+    if let Some(boxed) = extract_last_boxed_answer(&answer) {
+        return boxed;
+    }
+
+    trim_template_tail(&answer)
+}
+
+fn trim_template_tail(answer: &str) -> String {
+    let mut cleaned = answer.trim().to_string();
+
+    loop {
+        let mut changed = false;
+
+        for suffix in [r"\).", r"\)"] {
+            if cleaned.ends_with(suffix) {
+                cleaned.truncate(cleaned.len() - suffix.len());
+                cleaned = cleaned.trim_end().to_string();
+                changed = true;
+                break;
+            }
+        }
+
+        while cleaned.ends_with('}') && has_extra_trailing_closing_brace(&cleaned) {
+            cleaned.pop();
+            cleaned = cleaned.trim_end().to_string();
+            changed = true;
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    cleaned
+}
+
+fn has_extra_trailing_closing_brace(text: &str) -> bool {
+    let open_count = text.chars().filter(|&ch| ch == '{').count();
+    let close_count = text.chars().filter(|&ch| ch == '}').count();
+    close_count > open_count
 }
 
 pub async fn judge_with_retry(
@@ -379,7 +451,7 @@ struct JudgeResult {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_last_boxed_answer;
+    use super::{extract_last_boxed_answer, sanitize_generated_final_answer, trim_template_tail};
 
     #[test]
     fn extracts_nested_boxed_answer() {
@@ -397,5 +469,23 @@ mod tests {
             extract_last_boxed_answer(text).as_deref(),
             Some(r"\sqrt{2}")
         );
+    }
+
+    #[test]
+    fn sanitizes_final_answer_before_think_tail() {
+        let raw = "1000</think> To solve the problem, we need to find...";
+        assert_eq!(sanitize_generated_final_answer(raw), "1000");
+    }
+
+    #[test]
+    fn sanitizes_final_answer_with_template_closers() {
+        let raw = r"1000}\).";
+        assert_eq!(trim_template_tail(raw), "1000");
+    }
+
+    #[test]
+    fn keeps_valid_latex_fraction_answer() {
+        let raw = r"\frac{13}{4}";
+        assert_eq!(sanitize_generated_final_answer(raw), r"\frac{13}{4}");
     }
 }

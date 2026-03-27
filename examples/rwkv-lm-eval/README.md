@@ -74,6 +74,40 @@ cargo run -p rwkv-lm-eval --example rwkv-lm-eval-test --release -- \
   --eval-config example
 ```
 
+### Run Coding Benchmarks On Native Linux
+
+`Coding` benchmarks require a native Linux host with working `/dev/kvm`.
+WSL2 is not enough unless it exposes a usable KVM device to the guest.
+
+Recommended flow:
+
+```bash
+git clone https://github.com/rwkv-rs/rwkv-rs.git
+cd rwkv-rs
+
+curl -fsSL https://get.microsandbox.dev | sh
+
+bash examples/rwkv-lm-eval/scripts/run_native_coding_bench.sh \
+  --config-dir examples/rwkv-lm-eval/config \
+  --eval-config all_coding_gpu3
+```
+
+Quick environment-only validation:
+
+```bash
+bash examples/rwkv-lm-eval/scripts/run_native_coding_bench.sh \
+  --config-dir examples/rwkv-lm-eval/config \
+  --eval-config all_coding_gpu3 \
+  --check-only
+```
+
+Notes:
+
+- The helper script verifies `/dev/kvm`, `msb`, the microsandbox server, and the target model endpoint before launching the evaluator.
+- `all_coding_gpu3.toml` is a coding-only config; `all_coding_function_gpu3.toml` keeps the mixed coding + function-calling run.
+- If the native machine cannot reach `http://127.0.0.1:8081`, update the `base_url` in the TOML to an address reachable from that machine.
+- If PostgreSQL is not running on the native machine, either start it there or set `upload_to_space = false` for a dry run.
+
 ### Run HTTP API
 
 The package now also exposes a read-only Axum API over the persisted evaluation data.
@@ -124,6 +158,7 @@ Relevant fields in `example.toml`:
 experiment_name = "your_experiment_name"
 experiment_desc = "desc desc"
 run_mode = "new"
+continue_on_benchmark_error = false
 skip_checker = false
 attempt_concurrency = 8
 judger_concurrency = 8
@@ -134,6 +169,7 @@ git_hash = "a8dc285c786fc425c9effee232453213b4b5ce8e"
 ```
 
 - `run_mode` must be one of `new`, `resume`, `rerun`.
+- `continue_on_benchmark_error = true` skips a benchmark after it fails and continues with the remaining benchmarks.
 - `skip_checker = true` disables checker requests and skips retrying missing checker rows on `resume`.
 - `attempt_concurrency` must be `> 0`.
 - `judger_concurrency` must be `> 0`.

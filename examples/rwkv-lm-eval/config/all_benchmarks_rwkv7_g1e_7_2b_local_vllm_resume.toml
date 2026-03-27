@@ -1,0 +1,47 @@
+experiment_name = "all_benchmarks_rwkv7_g1e_7_2b_local_vllm"
+experiment_desc = "All benchmarks on RWKV-7.2B-g1e using local SSH forwarding and local vLLM judger/checker"
+run_mode = "resume"
+continue_on_benchmark_error = true
+skip_checker = false
+attempt_concurrency = 192
+judger_concurrency = 48
+checker_concurrency = 24
+db_pool_max_connections = 80
+
+model_arch_versions = ["rwkv7"]
+model_data_versions = ["g1e"]
+model_num_params = ["7.2b"]
+
+benchmark_field = ["Knowledge", "Math", "Coding", "Instruction Following", "Function Call"]
+extra_benchmark_name = []
+
+upload_to_space = true
+startup_recovery = true
+git_hash = "be11a9a6213782b9eebc5b690449a3d84caccb98"
+
+[[models]]
+model_arch_version = "rwkv7"
+model_data_version = "g1e"
+model_num_params = "7.2b"
+base_url = "http://127.0.0.1:28080"
+api_key = "local"
+model = "rwkv-7.2b-g1e"
+max_batch_size = 512
+
+[llm_judger]
+base_url = "http://127.0.0.1:28091"
+api_key = "change-me"
+model = "qwen3-8b-gpu1"
+
+[llm_checker]
+base_url = "http://127.0.0.1:28090"
+api_key = "change-me"
+model = "qwen3-4b-gpu0"
+
+[space_db]
+username = "postgres"
+password = "7532"
+host = "127.0.0.1"
+port = "25432"
+database_name = "rwkv_eval"
+sslmode = "disable"
