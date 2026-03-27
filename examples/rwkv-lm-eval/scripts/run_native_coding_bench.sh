@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 CONFIG_DIR="${ROOT_DIR}/examples/rwkv-lm-eval/config"
-EVAL_CONFIG="all_coding_gpu3"
+EVAL_CONFIG=""
 CHECK_ONLY=0
 SKIP_BUILD=0
 SKIP_MSB_PROBE=0
@@ -15,7 +15,7 @@ Usage: run_native_coding_bench.sh [options]
 
 Options:
   --config-dir <dir>       Config directory. Default: examples/rwkv-lm-eval/config
-  --eval-config <name>     Eval config stem. Default: all_coding_gpu3
+  --eval-config <name>     Eval config stem. Required.
   --check-only             Only validate the host environment and microsandbox setup
   --skip-build             Do not rebuild the release evaluator binary
   --skip-msb-probe         Skip the minimal `msb exe` runtime probe
@@ -71,6 +71,8 @@ need_cmd() {
 echo "repo root: ${ROOT_DIR}"
 echo "config dir: ${CONFIG_DIR}"
 echo "eval config: ${EVAL_CONFIG}"
+
+[[ -n "${EVAL_CONFIG}" ]] || fail "missing required --eval-config <name>"
 
 [[ "$(uname -s)" == "Linux" ]] || fail "coding benchmarks require Linux"
 [[ -e /dev/kvm ]] || fail "/dev/kvm is missing; microsandbox coding benchmarks require KVM"
