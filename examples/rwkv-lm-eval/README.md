@@ -89,7 +89,7 @@ curl -fsSL https://get.microsandbox.dev | sh
 
 bash examples/rwkv-lm-eval/scripts/run_native_coding_bench.sh \
   --config-dir examples/rwkv-lm-eval/config \
-  --eval-config all_coding_gpu3
+  --eval-config <your_coding_eval_config>
 ```
 
 Quick environment-only validation:
@@ -97,14 +97,14 @@ Quick environment-only validation:
 ```bash
 bash examples/rwkv-lm-eval/scripts/run_native_coding_bench.sh \
   --config-dir examples/rwkv-lm-eval/config \
-  --eval-config all_coding_gpu3 \
+  --eval-config <your_coding_eval_config> \
   --check-only
 ```
 
 Notes:
 
 - The helper script verifies `/dev/kvm`, `msb`, the microsandbox server, and the target model endpoint before launching the evaluator.
-- `all_coding_gpu3.toml` is a coding-only config; `all_coding_function_gpu3.toml` keeps the mixed coding + function-calling run.
+- Provide a coding-capable eval config and point `--eval-config` at its stem name.
 - If the native machine cannot reach `http://127.0.0.1:8081`, update the `base_url` in the TOML to an address reachable from that machine.
 - If PostgreSQL is not running on the native machine, either start it there or set `upload_to_space = false` for a dry run.
 

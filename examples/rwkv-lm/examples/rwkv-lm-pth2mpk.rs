@@ -7,7 +7,6 @@ use rwkv::custom::tensor::bf16;
 use rwkv_lm::model::AutoRegressiveModelConfig;
 use rwkv_lm::pth2mpk::{ConvertPthToMpkOptions, convert_pth_to_mpk};
 use std::collections::HashMap;
-use std::env;
 use std::fs;
 use std::io;
 use std::panic::{self, AssertUnwindSafe};
@@ -284,24 +283,14 @@ fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
 
 fn main() -> io::Result<()> {
     type MyBackend = Cuda<bf16, i32>;
-    let args = env::args().collect::<Vec<_>>();
-    let input_dir = args
-        .windows(2)
-        .find(|window| window[0] == "--input-dir")
-        .map(|window| PathBuf::from(&window[1]))
-        .or_else(|| env::var_os("RWKV_PTH_INPUT_DIR").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("/public/home/ssjxzkz/Weights/BlinkDL__rwkv7-g1"));
-    let output_dir = args
-        .windows(2)
-        .find(|window| window[0] == "--output-dir")
-        .map(|window| PathBuf::from(&window[1]))
-        .or_else(|| env::var_os("RWKV_MPK_OUTPUT_DIR").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("/public/home/ssjxzkz/Weights/Caizus__rwkv-rs-g1"));
+    // Edit these paths before running the example.
+    let input_dir = Path::new("/public/home/ssjxzkz/Weights/BlinkDL__rwkv7-g1");
+    let output_dir = Path::new("/public/home/ssjxzkz/Weights/Caizus__rwkv-rs-g1");
 
     println!("input dir: {}", input_dir.display());
     println!("output dir: {}", output_dir.display());
 
-    fs::create_dir_all(&output_dir)?;
+    fs::create_dir_all(output_dir)?;
 
     let device_count = <<MyBackend as Backend>::Device as CubeDevice>::device_count_total();
     if device_count == 0 {
@@ -315,7 +304,7 @@ fn main() -> io::Result<()> {
     println!("detected CUDA devices: {device_count}");
     println!("parallel slots: {}", slot_devices.len());
 
-    let result = build_jobs(collect_pth_files(&input_dir)?, &output_dir)?;
+    let result = build_jobs(collect_pth_files(input_dir)?, output_dir)?;
     let job_count = result.jobs.len();
 
     println!("found {} .pth file(s)", result.total_pth_files);

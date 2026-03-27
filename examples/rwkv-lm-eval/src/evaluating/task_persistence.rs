@@ -48,12 +48,7 @@ pub(crate) async fn prepare_task_execution(
                 .filter(|task| matches!(task.status, TaskStatus::Running | TaskStatus::Failed))
                 .collect::<Vec<_>>();
             if resumable.is_empty() {
-                let task_id = insert_task(db, &insert).await?;
-                return Ok(TaskExecutionState {
-                    task_id: Some(task_id),
-                    results: BTreeMap::new(),
-                    pending_checks: Vec::new(),
-                });
+                return Err("run_mode=resume could not find a matching running/failed task".into());
             }
             if resumable.len() != 1 {
                 return Err(format!(
