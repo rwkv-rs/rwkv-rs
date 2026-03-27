@@ -22,8 +22,15 @@ use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfigBuilder};
 use rwkv_eval::datasets::{Benchmark, maths::set_llm_judger_semaphore};
 use tokio::sync::Semaphore;
 
-use crate::db::{BenchmarkInsert, Db, ModelInsert, TaskInsert, TaskStatus, upsert_benchmark, upsert_model};
-
+use crate::db::{
+    BenchmarkInsert,
+    Db,
+    ModelInsert,
+    TaskInsert,
+    TaskStatus,
+    upsert_benchmark,
+    upsert_model,
+};
 use self::{
     attempts::build_attempt_keys,
     benchmark::{
@@ -273,8 +280,11 @@ async fn build_task_runs(
             for &cot_mode in benchmark_info.cot_mode {
                 for &n_shot in benchmark_info.n_shots {
                     for &avg_k in benchmark_info.avg_ks {
-                        let avg_k_plan =
-                            build_avg_k_execution_plan(benchmark_info.name.0, benchmark.len(), avg_k);
+                        let avg_k_plan = build_avg_k_execution_plan(
+                            benchmark_info.name.0,
+                            benchmark.len(),
+                            avg_k,
+                        );
                         let sampling_config_json = build_task_sampling_config_json(
                             benchmark_info,
                             cot_mode,
@@ -347,8 +357,7 @@ async fn build_task_runs(
                         };
 
                         let all_attempts = build_attempt_keys(&avg_k_plan, max_pass_k);
-                        let all_attempt_set =
-                            all_attempts.iter().copied().collect::<BTreeSet<_>>();
+                        let all_attempt_set = all_attempts.iter().copied().collect::<BTreeSet<_>>();
                         ensure_existing_results_match_plan(
                             &task_state.results,
                             &all_attempt_set,

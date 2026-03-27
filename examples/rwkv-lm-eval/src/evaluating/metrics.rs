@@ -5,7 +5,7 @@ use rwkv_eval::datasets::BenchmarkInfo;
 use super::{runtime::AttemptKey, sampling::AvgKExecutionPlan};
 
 pub(crate) struct ComputedMetrics {
-    pub pass_at_k_hits: BTreeMap<u8, usize>,
+    pub pass_at_k: BTreeMap<u8, f64>,
     pub passed: usize,
     pub total: usize,
 }
@@ -16,12 +16,13 @@ pub(crate) fn compute_metrics(
     max_pass_k: u8,
     results: &BTreeMap<AttemptKey, bool>,
 ) -> Result<ComputedMetrics, String> {
-    let mut pass_at_k_hits = BTreeMap::<u8, usize>::new();
+    let mut pass_at_k_sums = BTreeMap::<u8, f64>::new();
     let mut passed = 0usize;
+    let sampled_attempt_count = usize::from(max_pass_k);
 
     for avg_repeat_index in 0..avg_k_plan.repeat_count {
         for &index in &avg_k_plan.indices {
-            let mut sample_attempts = Vec::with_capacity(max_pass_k as usize);
+            let mut success_count = 0usize;
             for pass_index in 0..max_pass_k {
                 let key = AttemptKey {
                     sample_index: index,
@@ -34,31 +35,66 @@ pub(crate) fn compute_metrics(
                         key.sample_index, key.avg_repeat_index, key.pass_index
                     )
                 })?;
-                sample_attempts.push(is_passed);
+                if is_passed {
+                    success_count += 1;
+                }
             }
 
-            if sample_attempts.iter().any(|&passed| passed) {
+            if success_count > 0 {
                 passed += 1;
             }
             for &pass_k in benchmark_info.pass_ks {
-                if sample_attempts
-                    .iter()
-                    .take(pass_k as usize)
-                    .any(|&passed| passed)
-                {
-                    *pass_at_k_hits.entry(pass_k).or_insert(0) += 1;
-                }
+                let estimate = estimate_pass_at_k(sampled_attempt_count, success_count, pass_k)?;
+                *pass_at_k_sums.entry(pass_k).or_insert(0.0) += estimate;
             }
         }
     }
 
     let total = avg_k_plan.repeat_count * avg_k_plan.indices.len();
+    let pass_at_k = benchmark_info
+        .pass_ks
+        .iter()
+        .copied()
+        .map(|pass_k| {
+            (
+                pass_k,
+                pass_at_k_sums.get(&pass_k).copied().unwrap_or(0.0) / total as f64,
+            )
+        })
+        .collect();
 
     Ok(ComputedMetrics {
-        pass_at_k_hits,
+        pass_at_k,
         passed,
         total,
     })
+}
+
+fn estimate_pass_at_k(n: usize, c: usize, k: u8) -> Result<f64, String> {
+    let k = usize::from(k);
+    if k == 0 {
+        return Err("pass@0 is invalid".to_string());
+    }
+    if k > n {
+        return Err(format!("pass@{k} exceeds sampled attempt count n={n}"));
+    }
+    if c > n {
+        return Err(format!(
+            "success count c={c} exceeds sampled attempt count n={n}"
+        ));
+    }
+    if c == 0 {
+        return Ok(0.0);
+    }
+    if n - c < k {
+        return Ok(1.0);
+    }
+
+    let mut fail_prob = 1.0;
+    for offset in 0..k {
+        fail_prob *= (n - c - offset) as f64 / (n - offset) as f64;
+    }
+    Ok(1.0 - fail_prob)
 }
 
 #[cfg(test)]
@@ -74,11 +110,11 @@ mod tests {
         SamplingConfig,
     };
 
-    use super::compute_metrics;
+    use super::{compute_metrics, estimate_pass_at_k};
     use crate::evaluating::{runtime::AttemptKey, sampling::AvgKExecutionPlan};
 
     #[test]
-    fn computes_pass_at_k_counts() {
+    fn computes_pass_at_k_with_combination_estimator() {
         let benchmark_info = BenchmarkInfo {
             name: BenchmarkName("demo"),
             field: Field::Maths,
@@ -140,8 +176,16 @@ mod tests {
         let metrics = compute_metrics(&benchmark_info, &plan, 2, &results).unwrap();
         assert_eq!(metrics.passed, 2);
         assert_eq!(metrics.total, 2);
-        assert_eq!(metrics.pass_at_k_hits.get(&1), Some(&1));
-        assert_eq!(metrics.pass_at_k_hits.get(&2), Some(&2));
+        assert_eq!(metrics.pass_at_k.get(&2), Some(&1.0));
+        assert!((metrics.pass_at_k.get(&1).copied().unwrap() - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn estimates_pass_at_k_from_success_count() {
+        assert!((estimate_pass_at_k(3, 1, 1).unwrap() - (1.0 / 3.0)).abs() < 1e-12);
+        assert!((estimate_pass_at_k(3, 1, 2).unwrap() - (2.0 / 3.0)).abs() < 1e-12);
+        assert_eq!(estimate_pass_at_k(3, 0, 2).unwrap(), 0.0);
+        assert_eq!(estimate_pass_at_k(3, 2, 2).unwrap(), 1.0);
     }
 
     fn dummy_create(_: PathBuf) -> Box<dyn Benchmark> {

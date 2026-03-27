@@ -36,7 +36,7 @@ pub(crate) fn build_metrics_json(
     benchmark_info: &BenchmarkInfo,
     avg_k_plan: &AvgKExecutionPlan,
     max_pass_k: u8,
-    pass_at_k_hits: &BTreeMap<u8, usize>,
+    pass_at_k: &BTreeMap<u8, f64>,
     passed: usize,
     total: usize,
 ) -> String {
@@ -46,11 +46,7 @@ pub(crate) fn build_metrics_json(
         .map(|&pass_k| {
             (
                 format!("pass@{pass_k}"),
-                pass_at_k_hits
-                    .get(&pass_k)
-                    .copied()
-                    .map(|hits| hits as f64 / total as f64)
-                    .unwrap_or(0.0),
+                pass_at_k.get(&pass_k).copied().unwrap_or(0.0),
             )
         })
         .collect::<BTreeMap<_, _>>();

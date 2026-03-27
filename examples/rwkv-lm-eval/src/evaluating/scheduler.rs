@@ -9,7 +9,6 @@ use rwkv_eval::datasets::{Benchmark, BenchmarkInfo, CoTMode};
 use tokio::{sync::Semaphore, task::JoinSet};
 
 use crate::db::{Db, ScoreInsert, TaskStatus, insert_score, update_task_status};
-
 use super::{
     attempts::{execute_attempt, execute_pending_checks},
     client::ClientWithConfig,
@@ -334,7 +333,11 @@ fn compare_task_priority(
         .then_with(|| left.cot_mode.cmp(&right.cot_mode))
         .then_with(|| left.n_shot.cmp(&right.n_shot))
         .then_with(|| left.avg_k.total_cmp(&right.avg_k))
-        .then_with(|| left.task_id.unwrap_or(i32::MAX).cmp(&right.task_id.unwrap_or(i32::MAX)))
+        .then_with(|| {
+            left.task_id
+                .unwrap_or(i32::MAX)
+                .cmp(&right.task_id.unwrap_or(i32::MAX))
+        })
         .then_with(|| left_id.cmp(&right_id))
 }
 
@@ -352,7 +355,10 @@ async fn drive_ready_tasks(
             let task_run = task_runs
                 .get_mut(&task_run_id)
                 .unwrap_or_else(|| panic!("missing task state for {:?}", task_run_id));
-            if task_run.is_terminal() || task_run.inflight_attempts > 0 || !task_run.pending_attempts.is_empty() {
+            if task_run.is_terminal()
+                || task_run.inflight_attempts > 0
+                || !task_run.pending_attempts.is_empty()
+            {
                 ReadyAction::None
             } else if task_run.checker_running {
                 ReadyAction::None
@@ -360,9 +366,10 @@ async fn drive_ready_tasks(
                 let db = db.clone().unwrap_or_else(|| {
                     panic!("pending checker work requires database persistence")
                 });
-                let checker_runtime = task_run.checker_runtime.clone().unwrap_or_else(|| {
-                    panic!("pending checker work requires checker runtime")
-                });
+                let checker_runtime = task_run
+                    .checker_runtime
+                    .clone()
+                    .unwrap_or_else(|| panic!("pending checker work requires checker runtime"));
                 let pending_checks = std::mem::take(&mut task_run.pending_checks);
                 task_run.checker_running = true;
                 ReadyAction::RunChecks {
@@ -400,13 +407,8 @@ async fn drive_ready_tasks(
                     .get_mut(&task_run_id)
                     .unwrap_or_else(|| panic!("missing task state for {:?}", task_run_id));
                 if let Err(err) = finalize_task(task_run, db.as_ref()).await {
-                    handle_task_error(
-                        task_runs,
-                        db,
-                        TaskRunError { task_run_id, err },
-                        false,
-                    )
-                    .await;
+                    handle_task_error(task_runs, db, TaskRunError { task_run_id, err }, false)
+                        .await;
                 }
             }
         }
@@ -445,7 +447,7 @@ async fn finalize_task(task_run: &mut TaskRunState, db: Option<&Db>) -> Result<(
                     task_run.benchmark_info,
                     &task_run.avg_k_plan,
                     task_run.max_pass_k,
-                    &metrics.pass_at_k_hits,
+                    &metrics.pass_at_k,
                     metrics.passed,
                     metrics.total,
                 ),
@@ -508,7 +510,14 @@ mod tests {
     use std::{collections::BTreeMap, path::PathBuf};
 
     use rwkv_config::raw::eval::IntApiConfig;
-    use rwkv_eval::datasets::{Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig};
+    use rwkv_eval::datasets::{
+        Benchmark,
+        BenchmarkInfo,
+        BenchmarkName,
+        CoTMode,
+        Field,
+        SamplingConfig,
+    };
 
     use super::*;
     use crate::evaluating::client::build_client;
@@ -518,15 +527,7 @@ mod tests {
         let task_runs = BTreeMap::from([
             (
                 TaskRunId(0),
-                make_task_run(
-                    "alpha",
-                    vec![0, 1],
-                    1,
-                    CoTMode::NoCoT,
-                    0,
-                    1.0,
-                    Some(10),
-                ),
+                make_task_run("alpha", vec![0, 1], 1, CoTMode::NoCoT, 0, 1.0, Some(10)),
             ),
             (
                 TaskRunId(1),
