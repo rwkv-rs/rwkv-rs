@@ -15,90 +15,97 @@ version = "0.1.0"
 
 [workspace.dependencies]
 # === Core Infrastructure ===
-tokio = { version = "1.49.0", features = ["full"] }
+tokio = { version = "1.50.0", features = ["full"] }
 tokio-stream = { version = "0.1.18", features = ["sync"] }
 rayon = { version = "1.11.0" }
-futures = { version = "0.3.31" }
+futures = { version = "0.3.32" }
 async-trait = { version = "0.1.89" }
 axum = { version = "0.8.8", features = ["macros", "tokio"] }
 tower-http = { version = "0.6.8", features = ["cors"] }
 tower = { version = "0.5.3" }
-uuid = { version = "1.20.0", features = ["v4", "serde"] }
-bytes = { version = "1.11.0" }
+iceoryx2 = { version = "0.8.1", features = ["libc_platform"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls", "query", "stream"] }
+async-openai = { version = "0.34.0", default-features = false, features = ["rustls", "completions", "chat-completion", "byot"] }
+uuid = { version = "1.22.0", features = ["v4", "serde"] }
+bytes = { version = "1.11.1" }
+linkme = { version = "0.3.35" }
 
 # === Data Structures ===
-once_cell = { version = "1.21.3" }
+once_cell = { version = "1.21.4" }
 dashmap = { version = "7.0.0-rc2" }
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 
 # === File & Serialization ===
-bytemuck = { version = "1.24.0", features = ["derive", "extern_crate_alloc"] }
+bytemuck = { version = "1.25.0", features = ["derive", "extern_crate_alloc"] }
 bio = { version = "3.0.0" }
 csv = { version = "1.4.0" }
-memmap2 = "0.9.9"
+memmap2 = "0.9.10"
 memfd = { version = "0.6.5" }
 glob = "0.3.3"
 serde = { version = "1.0.228", features = ["derive"] }
-sonic-rs = { version = "0.5.6" }
+sonic-rs = { version = "0.5.8" }
 hashbrown = { version = "0.16.1" }
+indexmap = { version = "2.13.0" }
 csv-async = { version = "1.3.1", features = ["tokio"] }
-parquet = { version = "57.2.0", features = ["async"] }
-toml = { version = "0.9.11+spec-1.1.0" }
-tempfile = { version = "3.24.0" }
+parquet = { version = "58.1.0", features = ["async"] }
+toml = { version = "1.1.0" }
+tempfile = { version = "3.27.0" }
 divan = { version = "0.1.21" }
 
 safetensors = { version = "0.7.0" }
 gguf-rs-lib = { version = "0.2.5" }
 
 # === Database ===
-redis = { version = "1.0.2", features = ["default", "r2d2", "ahash", "tokio-comp"] }
-redb = { version = "3.1.0" }
+redis = { version = "1.1.0", features = ["default", "r2d2", "ahash", "tokio-comp"] }
+redb = { version = "3.1.1" }
+sqlx = { version = "0.9.0-alpha.1", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls"] }
 
 # === Utilities ===
 dialoguer = { version = "0.12.0" }
 primes = { version = "0.4.0" }
-regex = { version = "1.12.2" }
+regex = { version = "1.12.3" }
+langdetect-rs = "0.2.3"
 unescape = { version = "0.1.0" }
 zstd = { version = "0.13.3" }
 itertools = { version = "0.14.0" }
 walkdir = { version = "2.5.0" }
 derive-new = { version = "0.7.0" }
+flate2 = { version = "1.1.9" }
+microsandbox = { version = "0.3.2", features = ["prebuilt"] }
 
-unicode-segmentation = "1.12.0"
+unicode-segmentation = "1.13.1"
 unicode-script = "0.5.8"
 unicode-normalization = "0.1.25"
 
 proc-macro2 = "1.0.106"
-quote = "1.0.44"
-syn = { version = "2.0.114", features = ["full"] }
+quote = "1.0.45"
+syn = { version = "2.0.117", features = ["full"] }
 
 # === CLI & Monitoring ===
-clap = { version = "4.5.55", features = ["derive"] }
+clap = { version = "4.6.0", features = ["derive"] }
+utoipa = { version = "5.4.0", features = ["axum_extras"] }
 log = "0.4.29"
-tracing = { version = "0.1.41" }
-tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
+tracing = { version = "0.1.44" }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 tracing-tracy = { version = "0.11.4" }
-chrono = { version = "0.4.43", features = ["clock"] }
-clia-tracing-config = "0.2.7"
-indicatif = { version = "0.18.3", features = ["tokio"] }
-thiserror = "2.0.17"
-nvtx = "1.3.0"
-wandb = { git = "https://github.com/rwkv-rs/wandb-rs", rev = "1633ca27afb4e09caca2e00d148ea239bc639a69" }
-plotters = { version = "0.3.7", default-features = false }
-reqwest = { version = "0.12.24", default-features = false }
-serde_json = "1.0.145"
 tracy-client = "0.18.4"
-iceoryx2 = { version = "0.8.1", features = ["libc_platform"] }
+chrono = { version = "0.4.44", features = ["clock"] }
+clia-tracing-config = "0.2.7"
+indicatif = { version = "0.18.4", features = ["tokio"] }
+thiserror = "2.0.18"
+wandb = { git = "https://github.com/rwkv-rs/wandb-rs", rev = "1633ca27afb4e09caca2e00d148ea239bc639a69" }
+all-smi = { version = "0.17.3" }
+kuva = { version = "0.1.4" }
 
 # === Deep Learning Core ===
-burn = { version = "0.20.1", default-features = false }
-burn-train = { version = "0.20.1", default-features = false }
-burn-fusion = { version = "0.20.1", default-features = false }
-burn-cubecl = { version = "0.20.1", default-features = false }
-burn-ir = { version = "0.20.1", default-features = false }
-burn-store = { version = "0.20.1", default-features = false }
-burn-optim = { version = "0.20.1", default-features = false }
-burn-ndarray = { version = "0.20.1", default-features = false }
+burn = { version = "0.21.0-pre.2", default-features = false }
+burn-train = { version = "0.21.0-pre.2", default-features = false }
+burn-fusion = { version = "0.21.0-pre.2", default-features = false }
+burn-cubecl = { version = "0.21.0-pre.2", default-features = false }
+burn-ir = { version = "0.21.0-pre.2", default-features = false }
+burn-store = { version = "0.21.0-pre.2", default-features = false }
+burn-optim = { version = "0.21.0-pre.2", default-features = false }
+burn-ndarray = { version = "0.21.0-pre.2", default-features = false }
 
 ndarray = { version = "0.17.2" }
 ndarray-npy = { version = "0.10.0" }

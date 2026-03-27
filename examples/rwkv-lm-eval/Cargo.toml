@@ -12,3 +12,16 @@ workspace = true
 
 [dependencies]
 rwkv-eval = { path = "../../crates/rwkv-eval" }
+rwkv-config = { path = "../../crates/rwkv-config" }
+async-openai = { workspace = true }
+tokio = { workspace = true }
+sonic-rs = { workspace = true }
+serde = { workspace = true }
+axum = { workspace = true }
+clap = { workspace = true }
+tower-http = { workspace = true }
+utoipa = { workspace = true }
+sqlx = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }

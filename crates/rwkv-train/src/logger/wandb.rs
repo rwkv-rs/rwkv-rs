@@ -1,14 +1,20 @@
-use burn::train::{
-    logger::{AsyncLogger, Logger, MetricLogger},
-    metric::store::{EpochSummary, MetricsUpdate, Split},
-    metric::{MetricDefinition, MetricId, NumericEntry, SerializedEntry},
-};
-use log::warn;
-use rwkv_config::validated::train::TRAIN_CFG;
 use std::{
     collections::HashMap,
     sync::{Arc, OnceLock},
 };
+
+use burn::train::{
+    logger::{AsyncLogger, Logger, MetricLogger},
+    metric::{
+        MetricDefinition,
+        MetricId,
+        NumericEntry,
+        SerializedEntry,
+        store::{EpochSummary, MetricsUpdate, Split},
+    },
+};
+use log::warn;
+use rwkv_config::validated::train::TRAIN_CFG;
 use tokio::{runtime::Runtime, sync::Mutex};
 use wandb::{BackendOptions, LogData, Run, RunInfo, WandB};
 
@@ -242,18 +248,12 @@ impl Logger<LogData> for WandbLogger {
 }
 
 impl MetricLogger for WandbLogger {
-    fn log(
-        &mut self,
-        update: MetricsUpdate,
-        _epoch: usize,
-        split: Split,
-        tag: Option<Arc<String>>,
-    ) {
+    fn log(&mut self, update: MetricsUpdate, epoch: usize, split: &Split) {
         self.global_step += 1;
 
         let mut log = LogData::new();
         log.insert("_step", self.global_step);
-        // log.insert("epoch", epoch as u64);
+        log.insert("epoch", epoch as u64);
 
         let tokens_per_step = TRAIN_CFG
             .get()
@@ -262,7 +262,11 @@ impl MetricLogger for WandbLogger {
             .map(|cfg| (cfg.context_length * cfg.batch_size_per_device) as f64)
             .unwrap_or(0.0);
 
-        let metric_prefix = match tag.as_deref() {
+        let tag = match split {
+            Split::Test(Some(tag)) => Some(tag.as_str()),
+            _ => None,
+        };
+        let metric_prefix = match tag {
             Some(tag) => {
                 let tag = tag.trim().replace(' ', "-").to_lowercase();
                 format!("{split}/{tag}/")
@@ -270,7 +274,7 @@ impl MetricLogger for WandbLogger {
             None => format!("{split}/"),
         };
 
-        if let Some(tag) = tag.as_deref() {
+        if let Some(tag) = tag {
             log.insert("tag", tag.to_string());
         }
 
@@ -328,7 +332,7 @@ impl MetricLogger for WandbLogger {
 
             // Derive "kilo tokens per second" from the existing Iteration Speed metric.
             // This mirrors the RWKV-LM v7 convention of logging Kt/s for throughput.
-            if split == Split::Train
+            if matches!(split, &Split::Train)
                 && tokens_per_step > 0.0
                 && metric_name == ITERATION_SPEED_METRIC_NAME
                 && value > 0.0
@@ -354,7 +358,7 @@ impl MetricLogger for WandbLogger {
         &mut self,
         _name: &str,
         _epoch: usize,
-        _split: Split,
+        _split: &Split,
     ) -> Result<Vec<NumericEntry>, String> {
         Ok(Vec::new())
     }

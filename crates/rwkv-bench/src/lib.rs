@@ -3,16 +3,13 @@
 pub mod error;
 pub mod metrics;
 pub mod profile;
-pub mod report;
 pub mod serving;
 pub mod trace;
 
 pub use error::{BenchError, Result};
-
 #[cfg(feature = "trace")]
 #[doc(hidden)]
 pub use tracy_client as __tracy_client;
-
 #[cfg(feature = "trace")]
 #[doc(hidden)]
 pub use tracing as __tracing;

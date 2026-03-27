@@ -8,22 +8,30 @@ fn main() {
     );
 }
 
-use axum::serve;
-use rwkv::config::{default_cfg_dir, get_arg_value};
-use rwkv::custom::prelude::Backend;
-use rwkv::infer::access::http_api::{HttpApiRouterBuilder, HttpApiState};
-#[cfg(feature = "ipc-iceoryx2")]
-use rwkv::infer::access::ipc_api::IpcServer;
-use rwkv::infer::auth::AuthConfig;
-use rwkv::infer::model_pool::LoadedModelRegistry;
-use rwkv::nn::kernels::rapid_sample::RapidSampleBackend;
-use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
-use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::net::TcpListener;
+use std::fs::create_dir_all;
 
-use rwkv_lm::inferring::RwkvLmEngineFactory;
-use rwkv_lm::paths;
+use axum::serve;
+use rwkv::{
+    custom::prelude::Backend,
+    infer::routes::HttpApiRouterBuilder,
+    nn::kernels::{
+        addcmul::AddcmulBackend,
+        rapid_sample::RapidSampleBackend,
+        token_shift_diff::TokenShiftDiffBackend,
+        wkv7_common::Wkv7Backend,
+    },
+};
+#[cfg(feature = "ipc")]
+use rwkv::infer::routes::IpcServer;
+use rwkv_lm::{
+    inferring::{build_http_runtime, infer_cli_args},
+    paths,
+};
+#[cfg(feature = "ipc")]
+use rwkv_lm::inferring::build_ipc_server_config;
+#[cfg(feature = "trace")]
+use rwkv_bench::trace::init_tracing;
+use tokio::net::TcpListener;
 
 #[cfg(not(any(feature = "f32", feature = "flex32", feature = "f16")))]
 type ElemType = rwkv::custom::tensor::bf16;
@@ -34,27 +42,30 @@ type ElemType = rwkv::custom::tensor::flex32;
 #[cfg(feature = "f16")]
 type ElemType = rwkv::custom::tensor::f16;
 
-pub async fn launch<B>() -> rwkv::infer::Result<()>
+pub async fn launch<B: Backend>()
 where
-    B: Backend + Wkv7Backend + RapidSampleBackend + Send + Sync + 'static,
+    B: Wkv7Backend
+        + TokenShiftDiffBackend
+        + AddcmulBackend
+        + RapidSampleBackend
+        + Send
+        + Sync
+        + 'static,
 {
     let args: Vec<String> = std::env::args().collect();
-    let config_dir = get_arg_value(&args, "--config-dir")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_cfg_dir);
-    let infer_cfg = get_arg_value(&args, "--infer-cfg").unwrap_or_else(|| "rwkv-lm-7.2b".into());
+    let (config_dir, infer_cfg) = infer_cli_args(&args);
 
     let log_dir = paths::logs_dir();
-    std::fs::create_dir_all(&log_dir).map_err(|e| {
-        rwkv::infer::Error::Internal(format!(
+    create_dir_all(&log_dir).unwrap_or_else(|e| {
+        panic!(
             "failed to create infer log directory {}: {e}",
             log_dir.display()
-        ))
-    })?;
+        )
+    });
     #[cfg(not(feature = "trace"))]
     let log_dir_text = log_dir.to_string_lossy().to_string();
     #[cfg(feature = "trace")]
-    let trace_mode = rwkv::infer::trace::init_tracing("rwkv-lm-infer")?;
+    let trace_mode = init_tracing("rwkv-lm-infer").unwrap();
 
     #[cfg(feature = "trace")]
     let _log_guard: Option<clia_tracing_config::WorkerGuard> = None;
@@ -76,98 +87,96 @@ where
     #[cfg(feature = "trace")]
     println!("trace mode: {trace_mode:?}");
 
-    let loaded_model_registry = Arc::new(LoadedModelRegistry::bootstrap(
-        config_dir,
-        infer_cfg,
-        Arc::new(RwkvLmEngineFactory::<B>::new()),
-    )?);
+    let (app_state, bind_addr) = build_http_runtime::<B>(config_dir.clone(), &infer_cfg);
 
-    let app = HttpApiState {
-        auth_cfg: AuthConfig {
-            api_key: loaded_model_registry.api_key(),
-        },
-        runtime_manager: loaded_model_registry.clone(),
-    };
-
-    #[cfg(feature = "ipc-iceoryx2")]
-    let _ipc_server_thread = if loaded_model_registry.ipc_enabled() {
-        let server =
-            IpcServer::from_runtime_manager(loaded_model_registry.clone(), app.auth_cfg.clone())?;
-        log::info!(
-            "starting iceoryx2 ipc service: {}",
-            loaded_model_registry.ipc_service_name()
-        );
-        Some(server.spawn()?)
-    } else {
-        None
-    };
-
-    #[cfg(not(feature = "ipc-iceoryx2"))]
-    if loaded_model_registry.ipc_enabled() {
-        return Err(rwkv::infer::Error::bad_request(
-            "ipc is enabled in infer config but feature `ipc-iceoryx2` is not enabled",
-        ));
+    #[cfg(feature = "ipc")]
+    if let Some(ipc_config) = build_ipc_server_config(config_dir.clone(), &infer_cfg) {
+        let ipc_server = IpcServer::new(
+            ipc_config.clone(),
+            app_state.auth_cfg.clone(),
+            app_state.queues.clone(),
+            app_state.gpu_metrics.clone(),
+            app_state.reload_lock.clone(),
+            app_state.infer_cfg_path.clone(),
+            app_state.build_queues.clone(),
+        )
+        .unwrap_or_else(|e| {
+            panic!(
+                "failed to create ipc server {}: {e}",
+                ipc_config.service_name
+            )
+        });
+        ipc_server.spawn().unwrap_or_else(|e| {
+            panic!(
+                "failed to spawn ipc server {}: {e}",
+                ipc_config.service_name
+            )
+        });
+        println!("ipc service: {}", ipc_config.service_name);
     }
 
-    let router = HttpApiRouterBuilder::new(app).build().await?;
+    let router = HttpApiRouterBuilder::new(app_state).build().await;
 
-    let bind_addr = loaded_model_registry.http_bind_addr();
-    let listener = TcpListener::bind(&bind_addr).await.map_err(|e| {
-        rwkv::infer::Error::Internal(format!("failed to bind http listener {}: {e}", bind_addr))
-    })?;
-    serve(listener, router).await.map_err(|e| {
-        rwkv::infer::Error::Internal(format!("inference server exited with IO error: {e}"))
-    })?;
-    Ok(())
+    let listener = TcpListener::bind(&bind_addr)
+        .await
+        .unwrap_or_else(|e| panic!("failed to bind http listener {}: {e}", bind_addr));
+    serve(listener, router)
+        .await
+        .unwrap_or_else(|e| panic!("inference server exited with IO error: {e}"));
 }
 
 #[cfg(feature = "wgpu")]
 mod wgpu {
-    use super::{ElemType, launch};
     use rwkv::custom::backend::Wgpu;
 
+    use super::{ElemType, launch};
+
     pub async fn run() {
-        launch::<Wgpu<ElemType, i32>>().await.unwrap();
+        launch::<Wgpu<ElemType, i32>>().await;
     }
 }
 
 #[cfg(feature = "vulkan")]
 mod vulkan {
-    use super::{ElemType, launch};
     use rwkv::custom::backend::Vulkan;
 
+    use super::{ElemType, launch};
+
     pub async fn run() {
-        launch::<Vulkan<ElemType, i32>>().await.unwrap();
+        launch::<Vulkan<ElemType, i32>>().await;
     }
 }
 
 #[cfg(feature = "cuda")]
 mod cuda {
-    use super::{ElemType, launch};
     use rwkv::custom::backend::Cuda;
 
+    use super::{ElemType, launch};
+
     pub async fn run() {
-        launch::<Cuda<ElemType, i32>>().await.unwrap();
+        launch::<Cuda<ElemType, i32>>().await;
     }
 }
 
 #[cfg(feature = "rocm")]
 mod rocm {
-    use super::{ElemType, launch};
     use rwkv::custom::backend::Hip;
 
+    use super::{ElemType, launch};
+
     pub async fn run() {
-        launch::<Hip<ElemType, i32>>().await.unwrap();
+        launch::<Hip<ElemType, i32>>().await;
     }
 }
 
 #[cfg(feature = "metal")]
 mod metal {
-    use super::{ElemType, launch};
     use rwkv::custom::backend::Metal;
 
+    use super::{ElemType, launch};
+
     pub async fn run() {
-        launch::<Metal<ElemType, i32>>().await.unwrap();
+        launch::<Metal<ElemType, i32>>().await;
     }
 }
 

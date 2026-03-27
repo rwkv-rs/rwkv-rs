@@ -76,7 +76,7 @@ cargo build -p rwkv-lm --example rwkv-lm-infer --release --features metal
 
 ## 获取预训练权重 / Get Pretrained Weights
 
-rwkv-rs 使用 `.mpk`（MessagePack）格式的权重文件，这是 Burn 框架的原生格式。
+rwkv-rs 使用 `.bpk`（Burnpack）格式的权重文件，这是 Burn 的高性能原生格式。
 
 ```bash
 # 在 examples/rwkv-lm/ 目录下创建 weights 目录
@@ -88,6 +88,6 @@ mkdir -p examples/rwkv-lm/weights
 
 <div class="warning">
 
-目前需要将 HuggingFace 上的 RWKV-7 权重（`.pth` / `.safetensors`）转换为 `.mpk` 格式。转换工具参见 [导出章节](../export/overview.md)。
+目前需要将 HuggingFace 上的 RWKV-7 权重（`.pth` / `.safetensors`）转换为 `.bpk` 格式。转换工具参见 [导出章节](../export/overview.md)。
 
 </div>

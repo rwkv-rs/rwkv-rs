@@ -1,11 +1,12 @@
-use burn::backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement};
-use burn_cubecl::{CubeElement, CubeRuntime};
-
-use crate::kernels::wkv7_common::{
-    Wkv7StateBackwardOutput, Wkv7StatePassForwardOutput,
-    host::{wkv7_backward_impl, wkv7_forward_impl},
+use crate::kernels::{
+    backend::{BoolElement, CubeBackend, CubeElement, CubeRuntime, FloatElement, IntElement},
+    wkv7_common::{
+        Wkv7StateBackwardOutput,
+        Wkv7StatePassForwardOutput,
+        host::{wkv7_backward_impl, wkv7_forward_impl},
+    },
+    wkv7_statepass::Wkv7StatePassBackend,
 };
-use crate::kernels::wkv7_statepass::Wkv7StatePassBackend;
 
 impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> Wkv7StatePassBackend
     for CubeBackend<R, F, I, BT>
@@ -72,13 +73,17 @@ where
 mod fusion_impl {
     use burn::tensor::{DType, Element, Shape, ops::FloatTensor};
     use burn_fusion::{
-        Fusion, FusionBackend, FusionRuntime,
+        Fusion,
+        FusionBackend,
+        FusionRuntime,
         stream::{Operation, OperationStreams},
     };
     use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};
 
-    use crate::kernels::wkv7_common::{Wkv7StateBackwardOutput, Wkv7StatePassForwardOutput};
-    use crate::kernels::wkv7_statepass::Wkv7StatePassBackend;
+    use crate::kernels::{
+        wkv7_common::{Wkv7StateBackwardOutput, Wkv7StatePassForwardOutput},
+        wkv7_statepass::Wkv7StatePassBackend,
+    };
 
     impl<B: FusionBackend + Wkv7StatePassBackend> Wkv7StatePassBackend for Fusion<B> {
         fn wkv7_statepass_forward(

@@ -1,4 +1,3 @@
-use burn::tensor::ops::FloatTensor;
 use burn::{
     backend::{
         Autodiff,
@@ -9,7 +8,7 @@ use burn::{
             ops::{Backward, Ops, OpsKind},
         },
     },
-    tensor::backend::AutodiffBackend,
+    tensor::{backend::AutodiffBackend, ops::FloatTensor},
 };
 
 use crate::kernels::wkv7_statetune::{Wkv7StateTuneAutodiffBackend, Wkv7StateTuneBackend};

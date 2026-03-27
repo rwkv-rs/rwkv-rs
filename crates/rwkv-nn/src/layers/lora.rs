@@ -1,4 +1,7 @@
+use core::fmt;
+
 use burn::{
+    constant,
     module::Param,
     prelude::*,
     tensor::activation::{sigmoid, tanh},
@@ -6,7 +9,10 @@ use burn::{
 use serde::{Deserialize, Serialize};
 
 use crate::functions::init_weights::{
-    calculate_decay_speed, get_learning_rate_lora_bias, get_value_lora_bias, orthogonal_init,
+    calculate_decay_speed,
+    get_learning_rate_lora_bias,
+    get_value_lora_bias,
+    orthogonal_init,
     zeros_init,
 };
 
@@ -118,13 +124,27 @@ impl<B: Backend> LoRA<B> {
     }
 }
 
-#[derive(Module, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 
 pub enum ActivationFn {
     Sigmoid,
     Tanh,
     NoOP,
 }
+
+impl fmt::Display for ActivationFn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Self::Sigmoid => "Sigmoid",
+            Self::Tanh => "Tanh",
+            Self::NoOP => "NoOP",
+        };
+
+        f.write_str(name)
+    }
+}
+
+burn::constant!(ActivationFn);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 

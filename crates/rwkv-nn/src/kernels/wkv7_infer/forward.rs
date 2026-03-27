@@ -1,9 +1,8 @@
-use burn::backend::wgpu::{BoolElement, CubeBackend, FloatElement, IntElement};
 use burn::tensor::ops::FloatTensor;
-use burn_cubecl::{CubeElement, CubeRuntime};
 
-use crate::kernels::wkv7_infer::{
-    Wkv7InferBackend, Wkv7InferForwardOutput, host::wkv7_infer_forward_impl,
+use crate::kernels::{
+    backend::{BoolElement, CubeBackend, CubeElement, CubeRuntime, FloatElement, IntElement},
+    wkv7_infer::{Wkv7InferBackend, Wkv7InferForwardOutput, host::wkv7_infer_forward_impl},
 };
 
 impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> Wkv7InferBackend
@@ -38,7 +37,9 @@ where
 mod fusion_impl {
     use burn::tensor::{Element, Shape};
     use burn_fusion::{
-        Fusion, FusionBackend, FusionRuntime,
+        Fusion,
+        FusionBackend,
+        FusionRuntime,
         stream::{Operation, OperationStreams},
     };
     use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};

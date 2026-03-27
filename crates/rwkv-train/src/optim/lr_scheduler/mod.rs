@@ -1,5 +1,8 @@
 use burn::{
-    config::Config, lr_scheduler::LrScheduler, optim::LearningRate, tensor::backend::Backend,
+    config::Config,
+    lr_scheduler::LrScheduler,
+    optim::LearningRate,
+    tensor::backend::Backend,
 };
 
 #[derive(Config, Debug)]

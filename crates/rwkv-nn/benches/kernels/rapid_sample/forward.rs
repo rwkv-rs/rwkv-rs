@@ -1,7 +1,9 @@
 use std::hint::black_box;
 
-use burn::prelude::Backend;
-use burn::tensor::{Int, Tensor};
+use burn::{
+    prelude::Backend,
+    tensor::{Int, Tensor},
+};
 use divan::Bencher;
 use rwkv_nn::kernels::rapid_sample::rapid_sample;
 

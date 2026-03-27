@@ -3,11 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use burn::{
-    module::Module,
-    record::{FullPrecisionSettings, NamedMpkFileRecorder},
-    tensor::backend::AutodiffBackend,
-};
+use burn::tensor::backend::AutodiffBackend;
+use burn_store::{BurnpackStore, ModuleSnapshot};
 use dialoguer::Confirm;
 use regex::Regex;
 
@@ -58,7 +55,7 @@ pub fn read_record_file(
 }
 
 fn find_last_record_path(full_records_dir_path: &Path) -> Option<PathBuf> {
-    let re = Regex::new(r"^E(\d+)S(\d+)\.mpk$").unwrap();
+    let re = Regex::new(r"^E(\d+)S(\d+)\.bpk$").unwrap();
 
     read_dir(full_records_dir_path)
         .unwrap()
@@ -84,7 +81,7 @@ fn find_last_record_path(full_records_dir_path: &Path) -> Option<PathBuf> {
         })
 }
 
-pub fn save_model_weights<B: AutodiffBackend, M: Module<B>>(
+pub fn save_model_weights<B: AutodiffBackend, M: ModuleSnapshot<B>>(
     model: &M,
     full_experiment_log_path: &Path,
     mini_epoch: usize,
@@ -92,14 +89,10 @@ pub fn save_model_weights<B: AutodiffBackend, M: Module<B>>(
 ) {
     let full_records_dir_path = auto_create_directory(full_experiment_log_path.join("records"));
 
-    let filename = format!("E{}S{}.mpk", mini_epoch, step);
+    let filename = format!("E{}S{}.bpk", mini_epoch, step);
 
     let save_path = full_records_dir_path.join(filename);
 
-    let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
-
-    model
-        .clone()
-        .save_file(save_path.clone(), &recorder)
-        .unwrap();
+    let mut store = BurnpackStore::from_file(&save_path);
+    model.save_into(&mut store).unwrap();
 }

@@ -6,13 +6,16 @@ use burn::{
         ops::{Backward, Ops, OpsKind},
     },
     tensor::{
-        ElementConversion, Tensor, TensorMetadata, TensorPrimitive,
+        Tensor,
+        TensorMetadata,
+        TensorPrimitive,
         backend::{AutodiffBackend, Backend},
     },
 };
-use burn_cubecl::{BoolElement, CubeBackend, CubeRuntime, FloatElement, IntElement};
 #[cfg(feature = "fusion")]
 use burn_fusion::{Fusion, FusionBackend};
+
+use crate::kernels::backend::{BoolElement, CubeBackend, CubeRuntime, FloatElement, IntElement};
 
 pub trait L2WrapBackend: Backend {
     fn apply_l2wrap(
@@ -50,13 +53,13 @@ impl<B: Backend, C: CheckpointStrategy> L2WrapBackend for Autodiff<B, C> {
                         return;
                     }
 
-                    let factor = B::FloatElem::from_elem(1e-4 / num_tokens_per_batch as f64);
                     let shape = saved_logits.shape();
-                    let last_dim = shape.dims.len() - 1;
+                    let last_dim = shape.num_dims() - 1;
 
                     // Inject factor * max(logits) into the gradient at the argmax position.
                     let (max_vals, max_ids) = B::float_max_dim_with_indices(saved_logits, last_dim);
-                    let inject_vals = B::float_mul_scalar(max_vals, factor);
+                    let inject_vals =
+                        B::float_mul_scalar(max_vals, (1e-4 / num_tokens_per_batch as f64).into());
                     let grad_adjusted =
                         B::float_scatter_add(last_dim, grad_output, max_ids, inject_vals);
 

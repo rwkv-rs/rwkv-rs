@@ -6,7 +6,7 @@ pub mod data;
 pub mod inferring;
 pub mod model;
 pub mod paths;
-#[cfg(feature = "pth2mpk")]
-pub mod pth2mpk;
+#[cfg(feature = "pth2bpk")]
+pub mod pth2bpk;
 #[cfg(feature = "training")]
 pub mod training;

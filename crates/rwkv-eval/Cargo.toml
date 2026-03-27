@@ -6,3 +6,23 @@ description = "Evaluation harness placeholder for running benchmark suites again
 license = "Apache-2.0"
 
 [dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
+walkdir = { workspace = true }
+indicatif = { workspace = true }
+parquet = { workspace = true }
+csv = { workspace = true }
+sonic-rs = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+rwkv-config = { path = "../rwkv-config" }
+async-openai = { workspace = true }
+linkme = { workspace = true }
+once_cell = { workspace = true }
+regex = { workspace = true }
+langdetect-rs = { workspace = true }
+flate2 = { workspace = true }
+microsandbox = { workspace = true }
