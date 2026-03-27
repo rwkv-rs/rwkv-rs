@@ -1,14 +1,18 @@
+use core::fmt;
+
 use burn::{
     constant,
     module::Param,
     prelude::*,
     tensor::activation::{sigmoid, tanh},
 };
-use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::functions::init_weights::{
-    calculate_decay_speed, get_learning_rate_lora_bias, get_value_lora_bias, orthogonal_init,
+    calculate_decay_speed,
+    get_learning_rate_lora_bias,
+    get_value_lora_bias,
+    orthogonal_init,
     zeros_init,
 };
 

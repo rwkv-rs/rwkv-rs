@@ -22,3 +22,6 @@ clap = { workspace = true }
 tower-http = { workspace = true }
 utoipa = { workspace = true }
 sqlx = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }

@@ -23,7 +23,14 @@ dataset = ["burn/dataset"]
 collective = ["burn/collective", "rwkv-train?/collective"]
 data = ["dep:rwkv-data"]
 nn = ["dep:rwkv-nn"]
-store = ["burn/store", "dep:burn-store", "burn-store/std", "burn-store/pytorch"]
+store = [
+    "burn/store",
+    "dep:burn-store",
+    "burn-store/std",
+    "burn-store/pytorch",
+    "burn-store/burnpack",
+    "burn-store/memmap",
+]
 
 autodiff = ["burn/autodiff"]
 fusion = ["burn/fusion", "rwkv-nn?/fusion", "rwkv-train?/fusion"]
@@ -41,9 +48,8 @@ rocm = ["burn/rocm"]
 cpu = ["burn/cpu"]
 
 infer = ["dep:rwkv-infer", "rwkv-infer/http", "data"]
-infer-ipc = ["infer", "rwkv-infer/ipc-iceoryx2"]
+infer-ipc = ["infer", "rwkv-infer/ipc"]
 trace = ["rwkv-infer?/trace", "rwkv-train?/trace", "rwkv-nn?/trace"]
-nsys = ["rwkv-infer?/nsys", "rwkv-train?/nsys"]
 
 [dependencies]
 burn = { workspace = true, default-features = false, features = [] }

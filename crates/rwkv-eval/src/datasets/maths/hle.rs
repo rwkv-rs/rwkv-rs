@@ -1,18 +1,26 @@
-use crate::datasets::maths::{
-    get_expect_context, get_final_answer_with_cot_mode, judge_with_retry,
-};
-use crate::datasets::utils::collect_files_with_extension;
-use crate::datasets::utils::hf::downloader::download_hf_files;
-use crate::datasets::utils::parquet::{get_optional_string, get_string, read_parquet_items};
-use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
-};
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::path::{Path, PathBuf};
+
+use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
-use std::path::{Path, PathBuf};
+
+use crate::datasets::{
+    ALL_BENCHMARKS,
+    Benchmark,
+    BenchmarkInfo,
+    BenchmarkName,
+    CoTMode,
+    Field,
+    Record,
+    SamplingConfig,
+    maths::{get_expect_context, get_final_answer_with_cot_mode, judge_with_retry},
+    utils::{
+        collect_files_with_extension,
+        hf::downloader::download_hf_files,
+        parquet::{get_optional_string, get_string, read_parquet_items},
+    },
+};
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static HLE_INFO: BenchmarkInfo = BenchmarkInfo {

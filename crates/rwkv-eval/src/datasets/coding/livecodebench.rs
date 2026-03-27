@@ -1,17 +1,29 @@
-use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
-use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
-use crate::datasets::utils::jsonl::read_jsonl_items;
-use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
-    SamplingConfig, apply_user_assistant_template,
-};
-use crate::evaluators::coding::run_python_verdict_script;
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::path::{Path, PathBuf};
+
+use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+
+use crate::{
+    datasets::{
+        ALL_BENCHMARKS,
+        Benchmark,
+        BenchmarkInfo,
+        BenchmarkName,
+        CoTMode,
+        Field,
+        Record,
+        SamplingConfig,
+        apply_user_assistant_template,
+        coding::{extract_code, get_code_completion_with_cot_mode},
+        utils::{
+            hf::downloader::{UrlDownloadFile, download_url_files},
+            jsonl::read_jsonl_items,
+        },
+    },
+    evaluators::coding::run_python_verdict_script,
+};
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static LIVECODEBENCH_INFO: BenchmarkInfo = BenchmarkInfo {

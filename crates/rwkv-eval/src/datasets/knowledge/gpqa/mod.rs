@@ -2,8 +2,10 @@ mod diamond;
 mod extended;
 mod main;
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
 

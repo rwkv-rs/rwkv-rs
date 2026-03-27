@@ -1,8 +1,12 @@
-use crate::datasets::SamplingConfig;
-use async_openai::types::chat::{Prompt, StopConfiguration};
-use async_openai::types::completions::CreateCompletionRequest as BaseCompletionRequest;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+use async_openai::types::{
+    chat::{Prompt, StopConfiguration},
+    completions::CreateCompletionRequest as BaseCompletionRequest,
+};
+use serde::{Deserialize, Serialize};
+
+use crate::datasets::SamplingConfig;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CompletionRequest {

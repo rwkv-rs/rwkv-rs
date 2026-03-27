@@ -1,18 +1,30 @@
-use super::get_expected_context;
-use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
-use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
-use crate::datasets::utils::jsonl::read_gzip_jsonl_items;
-use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
-};
-use crate::evaluators::coding::run_python_verdict_script;
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::path::{Path, PathBuf};
+
+use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
 use sonic_rs::Value;
-use std::path::{Path, PathBuf};
+
+use super::get_expected_context;
+use crate::{
+    datasets::{
+        ALL_BENCHMARKS,
+        Benchmark,
+        BenchmarkInfo,
+        BenchmarkName,
+        CoTMode,
+        Field,
+        Record,
+        SamplingConfig,
+        coding::{extract_code, get_code_completion_with_cot_mode},
+        utils::{
+            hf::downloader::{UrlDownloadFile, download_url_files},
+            jsonl::read_gzip_jsonl_items,
+        },
+    },
+    evaluators::coding::run_python_verdict_script,
+};
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static HUMAN_EVAL_PLUS_INFO: BenchmarkInfo = BenchmarkInfo {

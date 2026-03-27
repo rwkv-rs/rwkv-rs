@@ -1,10 +1,12 @@
-use std::collections::{BTreeMap, VecDeque};
-use std::error::Error as _;
-use std::io::IsTerminal;
-use std::path::Path;
-use std::process::Command;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    error::Error as _,
+    io::IsTerminal,
+    path::Path,
+    process::Command,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use chrono::Utc;
 use futures::{StreamExt, stream::FuturesUnordered};
@@ -13,8 +15,11 @@ use serde::{Deserialize, Serialize};
 use sonic_rs::{Value, from_str, json, prelude::*, to_string_pretty};
 use tokio::sync::{Semaphore, mpsc};
 
-use crate::metrics::{AggregateMetrics, RequestMetrics, StageBreakdownMs, aggregate_metrics};
-use crate::{BenchError, Result};
+use crate::{
+    BenchError,
+    Result,
+    metrics::{AggregateMetrics, RequestMetrics, StageBreakdownMs, aggregate_metrics},
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

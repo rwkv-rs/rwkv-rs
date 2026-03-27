@@ -1,16 +1,21 @@
-use rwkv::custom::Tensor;
-use rwkv::custom::config::Config;
-use rwkv::custom::module::Module;
-use rwkv::custom::nn::{
-    Embedding, EmbeddingConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig,
-};
-use rwkv::custom::prelude::Int;
-use rwkv::custom::tensor::backend::Backend;
-use rwkv::nn::cells::causal::{MultiCausalCells, MultiCausalCellsConfig, MultiCausalCellsIO};
-use rwkv::nn::functions::init_weights::{orthogonal_init, uniform_init};
-use rwkv::nn::kernels::wkv7_common::{KernelInfer, Wkv7Backend};
-use rwkv::nn::modules::time_mixer::param_state::{StateModule, StateModuleConfig};
 use std::mem::take;
+
+use rwkv::{
+    custom::{
+        Tensor,
+        config::Config,
+        module::Module,
+        nn::{Embedding, EmbeddingConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig},
+        prelude::Int,
+        tensor::backend::Backend,
+    },
+    nn::{
+        cells::causal::{MultiCausalCells, MultiCausalCellsConfig, MultiCausalCellsIO},
+        functions::init_weights::{orthogonal_init, uniform_init},
+        kernels::wkv7_common::{KernelInfer, Wkv7Backend},
+        modules::time_mixer::param_state::{StateModule, StateModuleConfig},
+    },
+};
 
 /// Controls the unembed layer computation mode.
 /// Cf. albatross `full_output`, extended with `Skip` for chunked prefill.
@@ -26,21 +31,21 @@ pub enum UnembedMode {
 }
 
 #[cfg(feature = "training")]
-use crate::data::batcher::AutoRegressiveBatch;
-#[cfg(feature = "training")]
 use rwkv::custom::nn::loss::CrossEntropyLossConfig;
 #[cfg(feature = "training")]
 use rwkv::custom::tensor::backend::AutodiffBackend;
 #[cfg(feature = "training")]
 use rwkv::custom::train::{InferenceStep, TrainOutput, TrainStep};
-use rwkv::nn::kernels::addcmul::AddcmulBackend;
+use rwkv::nn::kernels::{addcmul::AddcmulBackend, token_shift_diff::TokenShiftDiffBackend};
 #[cfg(feature = "training")]
 use rwkv::nn::kernels::l2wrap::{L2WrapBackend, l2wrap};
-use rwkv::nn::kernels::token_shift_diff::TokenShiftDiffBackend;
 #[cfg(feature = "training")]
 use rwkv::nn::kernels::wkv7_common::Wkv7Kernel;
 #[cfg(feature = "training")]
 use rwkv::train::learner::next_token_prediction::NextTokenPredictionOutput;
+
+#[cfg(feature = "training")]
+use crate::data::batcher::AutoRegressiveBatch;
 
 rwkv::custom_mode!();
 
@@ -305,8 +310,10 @@ impl<B: AutodiffBackend + TokenShiftDiffBackend + AddcmulBackend + Wkv7Backend +
     #[cfg(feature = "statepass")]
     fn step(&self, item: AutoRegressiveBatch<B>) -> TrainOutput<NextTokenPredictionOutput<B>> {
         // Run forward pass, calculate gradients and return them along with the output
-        use rwkv::config::validated::train::TRAIN_CFG;
-        use rwkv::nn::kernels::wkv7_common::KernelStatePass;
+        use rwkv::{
+            config::validated::train::TRAIN_CFG,
+            nn::kernels::wkv7_common::KernelStatePass,
+        };
 
         let [batch_size, context_length] = item.inputs.dims();
         let device = &item.inputs.device();

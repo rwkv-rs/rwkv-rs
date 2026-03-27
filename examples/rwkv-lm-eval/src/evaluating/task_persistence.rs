@@ -1,12 +1,21 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::db::{
-    Db, TaskIdentity, TaskInsert, TaskLookup, TaskStatus, delete_score_by_task_id,
-    find_tasks_by_identity, insert_task, list_attempt_records, update_task_status,
+    Db,
+    TaskIdentity,
+    TaskInsert,
+    TaskLookup,
+    TaskStatus,
+    delete_score_by_task_id,
+    find_tasks_by_identity,
+    insert_task,
+    list_attempt_records,
+    update_task_status,
 };
-
-use super::options::RunMode;
-use super::runtime::{AttemptKey, PendingChecker, TaskExecutionState};
+use super::{
+    options::RunMode,
+    runtime::{AttemptKey, PendingChecker, TaskExecutionState},
+};
 
 pub(crate) async fn prepare_task_execution(
     db: &Db,
@@ -110,13 +119,6 @@ pub(crate) fn ensure_existing_results_match_plan(
         extras.is_empty(),
         "stored attempts do not match current execution plan for benchmark `{benchmark_name}` model `{model_name}`: {extras:?}"
     );
-}
-
-pub(crate) async fn fail_task(db: Option<Db>, task_id: Option<i32>, err: String) -> ! {
-    if let (Some(db), Some(task_id)) = (db.as_ref(), task_id) {
-        let _ = update_task_status(db, task_id, TaskStatus::Failed).await;
-    }
-    panic!("{err}");
 }
 
 fn render_task_lookup_list(tasks: &[TaskLookup]) -> String {

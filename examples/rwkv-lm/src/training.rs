@@ -5,43 +5,60 @@
 // to build a learner, which is used to train the model. The trained model and the configuration are
 // then saved to the specified directory.
 
-use crate::data::batcher::AutoRegressiveBatcher;
-use crate::model::AutoRegressiveModelConfig;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
 use log::info;
 #[cfg(not(feature = "tui"))]
 use log::warn;
-use rwkv::config::validated::train::{FinalTrainConfigBuilder, TRAIN_CFG};
-use rwkv::config::{
-    DatasetFormatOptions,
-    validated::model::{FinalModelConfigBuilder, MODEL_CFG},
+use rwkv::{
+    config::{
+        DatasetFormatOptions,
+        validated::{
+            model::{FinalModelConfigBuilder, MODEL_CFG},
+            train::{FinalTrainConfigBuilder, TRAIN_CFG},
+        },
+    },
+    custom::{
+        data::dataloader::DataLoaderBuilder,
+        optim::LearningRate,
+        prelude::Module,
+        record::{CompactRecorder, Recorder},
+        tensor::backend::AutodiffBackend,
+        train::{
+            Interrupter,
+            Learner,
+            SupervisedTraining,
+            logger::FileMetricLogger,
+            metric::{CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric},
+        },
+    },
+    data::mmap::sample::Sampler,
+    nn::kernels::{
+        addcmul::AddcmulBackend,
+        l2wrap::L2WrapBackend,
+        token_shift_diff::TokenShiftDiffBackend,
+        wkv7_common::Wkv7Backend,
+    },
+    train::{
+        data::sliding::{MmapBinReader, SlidingDataset},
+        learner::init::init_wandb_metric_logger,
+        optim::{
+            lr_scheduler::WsdLrSchedulerConfig,
+            optimizer::{GroupedOptimizerConfig, ParamGroupingMode},
+        },
+        renderer::BarMetricsRenderer,
+    },
 };
 #[cfg(feature = "ddp")]
 use rwkv::custom::collective::{AllReduceStrategy, CollectiveConfig};
-use rwkv::custom::data::dataloader::DataLoaderBuilder;
-use rwkv::custom::optim::LearningRate;
-use rwkv::custom::prelude::Module;
-use rwkv::custom::record::{CompactRecorder, Recorder};
-use rwkv::custom::tensor::backend::AutodiffBackend;
 #[cfg(not(feature = "ddp"))]
 use rwkv::custom::train::MultiDeviceOptim;
-use rwkv::custom::train::{
-    Interrupter, Learner, SupervisedTraining,
-    logger::FileMetricLogger,
-    metric::{CudaMetric, IterationSpeedMetric, LearningRateMetric, LossMetric},
-};
-use rwkv::data::mmap::sample::Sampler;
-use rwkv::nn::kernels::addcmul::AddcmulBackend;
-use rwkv::nn::kernels::l2wrap::L2WrapBackend;
-use rwkv::nn::kernels::token_shift_diff::TokenShiftDiffBackend;
-use rwkv::nn::kernels::wkv7_common::Wkv7Backend;
-use rwkv::train::data::sliding::{MmapBinReader, SlidingDataset};
-use rwkv::train::learner::init::init_wandb_metric_logger;
-use rwkv::train::optim::lr_scheduler::WsdLrSchedulerConfig;
-use rwkv::train::optim::optimizer::{GroupedOptimizerConfig, ParamGroupingMode};
-use rwkv::train::renderer::BarMetricsRenderer;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+
+use crate::{data::batcher::AutoRegressiveBatcher, model::AutoRegressiveModelConfig};
 
 rwkv::custom_mode!();
 
@@ -50,7 +67,7 @@ pub fn train<B: AutodiffBackend>(
     devices: Vec<B::Device>, // Device on which to perform computation (e.g., CPU or CUDA device)
     model_cfg_builder: FinalModelConfigBuilder,
     mut train_cfg_builder: FinalTrainConfigBuilder,
-    exp_log_path: &Path, // Experiment log directory (also used for artifacts)
+    experiment_log_path: &Path, // Experiment log directory (also used for artifacts)
 ) where
     B: TokenShiftDiffBackend + AddcmulBackend + Wkv7Backend + L2WrapBackend,
     B::InnerBackend: TokenShiftDiffBackend + AddcmulBackend + Wkv7Backend + L2WrapBackend,
@@ -178,7 +195,7 @@ pub fn train<B: AutodiffBackend>(
 
     let mut training = {
         rwkv_bench::trace_scope!("rwkv.train.learner.build");
-        SupervisedTraining::new(exp_log_path, dataloader_train, dataloader_valid)
+        SupervisedTraining::new(experiment_log_path, dataloader_train, dataloader_valid)
             .metric_train(CudaMetric::new())
             .metric_train_numeric(IterationSpeedMetric::new())
             .metric_train_numeric(LossMetric::new())
@@ -190,7 +207,7 @@ pub fn train<B: AutodiffBackend>(
             .with_application_logger(None)
     };
 
-    training = training.with_metric_logger(FileMetricLogger::new(exp_log_path));
+    training = training.with_metric_logger(FileMetricLogger::new(experiment_log_path));
 
     if let Some(wandb_logger) = init_wandb_metric_logger() {
         training = training.with_metric_logger(wandb_logger);
@@ -238,8 +255,6 @@ pub fn train<B: AutodiffBackend>(
     // Train the model
     let result = {
         rwkv_bench::trace_scope!("rwkv.train.step");
-        #[cfg(feature = "nsys")]
-        let _nvtx_step = nvtx::range!("rwkv.train.step");
         training.launch(Learner::new(model, optim, lr_scheduler))
     };
 
@@ -249,17 +264,18 @@ pub fn train<B: AutodiffBackend>(
         "train": TRAIN_CFG.get().unwrap().as_ref(),
     });
     fs::write(
-        exp_log_path.join("config.json"),
+        experiment_log_path.join("config.json"),
         sonic_rs::to_string_pretty(&config_json).unwrap(),
     )
     .unwrap();
 
     {
         rwkv_bench::trace_scope!("rwkv.train.checkpoint.save");
-        #[cfg(feature = "nsys")]
-        let _nvtx_ckpt = nvtx::range!("rwkv.train.checkpoint.save");
         CompactRecorder::new()
-            .record(result.model.into_record(), exp_log_path.join("model"))
+            .record(
+                result.model.into_record(),
+                experiment_log_path.join("model"),
+            )
             .unwrap();
     }
 }

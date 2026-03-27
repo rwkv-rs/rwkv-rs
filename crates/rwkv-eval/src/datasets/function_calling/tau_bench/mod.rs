@@ -3,12 +3,15 @@ mod benchmark;
 mod retail;
 mod telecom;
 
-use super::{FunctionCall, ToolRequestor};
+use std::{
+    fmt::{self, Display},
+    path::Path,
+};
+
 use serde::{Deserialize, Serialize};
 use sonic_rs::{Array, Object as Map, Value, prelude::*};
-use std::fmt::{self, Display};
-use std::path::Path;
 
+use super::{FunctionCall, ToolRequestor};
 use self::{airline::AirlineEnv, retail::RetailEnv, telecom::TelecomEnv};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

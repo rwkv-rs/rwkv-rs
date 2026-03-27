@@ -1,8 +1,12 @@
 use burn::tensor::ops::{FloatTensor, IntTensor};
 
-use crate::kernels::backend::{BoolElement, CubeBackend, CubeRuntime, FloatElement, IntElement};
-use crate::kernels::rapid_sample::{
-    RapidSampleBackend, RapidSampleOutputPrimitive, host::rapid_sample_topk_topp_impl,
+use crate::kernels::{
+    backend::{BoolElement, CubeBackend, CubeRuntime, FloatElement, IntElement},
+    rapid_sample::{
+        RapidSampleBackend,
+        RapidSampleOutputPrimitive,
+        host::rapid_sample_topk_topp_impl,
+    },
 };
 
 impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> RapidSampleBackend
@@ -36,14 +40,18 @@ impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> RapidSampl
 mod fusion_impl {
     use burn::tensor::{DType, Shape};
     use burn_fusion::{
-        Fusion, FusionBackend, FusionRuntime,
+        Fusion,
+        FusionBackend,
+        FusionRuntime,
         stream::{Operation, OperationStreams},
     };
     use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};
 
     use super::*;
     use crate::kernels::rapid_sample::{
-        RapidSampleBackend, RapidSampleOutput, RapidSampleOutputPrimitive,
+        RapidSampleBackend,
+        RapidSampleOutput,
+        RapidSampleOutputPrimitive,
     };
 
     impl<B: FusionBackend + RapidSampleBackend> RapidSampleBackend for Fusion<B> {

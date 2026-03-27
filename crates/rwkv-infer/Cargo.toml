@@ -23,7 +23,6 @@ once_cell = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true, optional = true }
-nvtx = { workspace = true, optional = true }
 
 # Optional tokenizer for text endpoints (RWKV vocab)
 rwkv-data = { path = "../rwkv-data" }
@@ -32,13 +31,17 @@ rwkv-bench = { path = "../rwkv-bench", default-features = false }
 clia-tracing-config = { workspace = true }
 iceoryx2 = { workspace = true, optional = true }
 itertools = { workspace = true }
+indexmap = { workspace = true }
+all-smi = { workspace = true }
 
 burn = { workspace = true, default-features = false, features = ["std", "autodiff", "cubecl"] }
+
+[dev-dependencies]
+tower = { workspace = true }
 
 [features]
 default = ["http"]
 http = []
-ipc-iceoryx2 = ["dep:iceoryx2"]
+ipc = ["dep:iceoryx2"]
 trace = ["dep:tracing", "rwkv-bench/trace"]
-nsys = ["trace", "dep:nvtx"]
 

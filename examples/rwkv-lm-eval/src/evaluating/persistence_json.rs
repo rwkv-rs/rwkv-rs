@@ -3,8 +3,7 @@ use std::collections::BTreeMap;
 use rwkv_eval::datasets::{BenchmarkInfo, CoTMode};
 use sonic_rs::json;
 
-use super::paths::cot_mode_name;
-use super::sampling::AvgKExecutionPlan;
+use super::{paths::cot_mode_name, sampling::AvgKExecutionPlan};
 
 pub(crate) fn build_task_sampling_config_json(
     benchmark_info: &BenchmarkInfo,

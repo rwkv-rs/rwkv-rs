@@ -1,11 +1,13 @@
-use std::collections::BTreeMap;
-use std::process::{Command, Stdio};
+use std::{
+    collections::BTreeMap,
+    process::{Command, Stdio},
+};
 
 use rwkv_config::validated::eval::EVAL_CFG;
-use rwkv_eval::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, Field, get_benchmarks_with_field,
+use rwkv_eval::{
+    datasets::{ALL_BENCHMARKS, Benchmark, BenchmarkInfo, Field, get_benchmarks_with_field},
+    evaluators::coding::ensure_microsandbox_available,
 };
-use rwkv_eval::evaluators::coding::ensure_microsandbox_available;
 use tokio::time::{Duration, sleep};
 
 pub(crate) fn collect_benchmarks() -> Vec<&'static BenchmarkInfo> {

@@ -1,10 +1,17 @@
-use crate::datasets::{
-    CoTMode, SamplingConfig, apply_user_assistant_template, get_completions_of_cot,
-    get_prompt_for_cot, get_prompt_for_final_answer, render_context,
+use async_openai::{Client, config::OpenAIConfig};
+
+use crate::{
+    datasets::{
+        CoTMode,
+        SamplingConfig,
+        apply_user_assistant_template,
+        get_completions_of_cot,
+        get_prompt_for_cot,
+        get_prompt_for_final_answer,
+        render_context,
+    },
+    inferers::{CompletionRequest, CompletionResponse},
 };
-use crate::inferers::{CompletionRequest, CompletionResponse};
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
 
 pub mod ceval;
 pub mod cmmlu;

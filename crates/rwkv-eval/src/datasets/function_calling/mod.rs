@@ -1,10 +1,12 @@
-use crate::datasets::SamplingConfig;
-use crate::inferers::{CompletionRequest, CompletionResponse};
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use async_openai::{Client, config::OpenAIConfig};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sonic_rs::{Object as Map, Value, json};
+
+use crate::{
+    datasets::SamplingConfig,
+    inferers::{CompletionRequest, CompletionResponse},
+};
 
 pub mod tau_bench;
 

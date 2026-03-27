@@ -43,7 +43,6 @@ trace = [
     "dep:rwkv-bench",
     "rwkv-bench/trace",
 ]
-nsys = ["trace", "dep:nvtx"]
 
 [dependencies]
 # === Deep Learning Core ===
@@ -53,6 +52,7 @@ burn-optim = { workspace = true, default-features = false, features = [] }
 burn-fusion = { workspace = true, default-features = false, optional = true }
 burn-cubecl = { workspace = true, default-features = false, optional = true }
 burn-ndarray = { workspace = true, default-features = false, optional = true }
+burn-store = { workspace = true, default-features = false, features = ["std", "burnpack"] }
 
 # === Serialization ===
 serde = { workspace = true }
@@ -87,7 +87,6 @@ derive-new = { workspace = true }
 # === Monitoring ===
 wandb = { workspace = true }
 indicatif = { workspace = true }
-nvtx = { workspace = true, optional = true }
 
 # === Local Dependencies ===
 rwkv-nn = { path = "../rwkv-nn", default-features = false, optional = true }

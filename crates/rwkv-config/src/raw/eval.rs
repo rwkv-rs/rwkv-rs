@@ -8,7 +8,6 @@ pub struct RawEvalConfig {
     pub experiment_desc: String,
     pub run_mode: Option<String>,
     pub skip_checker: Option<bool>,
-    pub attempt_concurrency: Option<usize>,
     pub judger_concurrency: Option<usize>,
     pub checker_concurrency: Option<usize>,
     pub db_pool_max_connections: Option<u32>,
@@ -32,7 +31,6 @@ impl RawEvalConfig {
             upload_to_space: false,
             run_mode: "new".to_string(),
             skip_checker: false,
-            attempt_concurrency: 8,
             judger_concurrency: 8,
             checker_concurrency: 8,
             db_pool_max_connections: 32

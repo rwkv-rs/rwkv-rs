@@ -1,14 +1,28 @@
-use super::catalog::catalog_for_benchmark;
-use super::error::ApiError;
-use super::json::{parse_sampling_summary, parse_score_summary};
-use super::schema::{
-    ApiCompletionStatus, ApiTaskStatus, BenchmarkField, BenchmarkResource, CheckerSummary,
-    CompletionDetailResponse, ModelResource, ReviewQueueResource, TaskAttemptResource,
-    TaskResource,
+use super::{
+    catalog::catalog_for_benchmark,
+    error::ApiError,
+    json::{parse_sampling_summary, parse_score_summary},
+    schema::{
+        ApiCompletionStatus,
+        ApiTaskStatus,
+        BenchmarkField,
+        BenchmarkResource,
+        CheckerSummary,
+        CompletionDetailResponse,
+        ModelResource,
+        ReviewQueueResource,
+        TaskAttemptResource,
+        TaskResource,
+    },
 };
 use crate::db::{
-    BenchmarkRecord, CheckerRecord, CompletionDetailRecord, ModelRecord, ReviewQueueRecord,
-    TaskAttemptRecord, TaskRecord,
+    BenchmarkRecord,
+    CheckerRecord,
+    CompletionDetailRecord,
+    ModelRecord,
+    ReviewQueueRecord,
+    TaskAttemptRecord,
+    TaskRecord,
 };
 
 pub(crate) fn to_model_resource(model: &ModelRecord) -> ModelResource {

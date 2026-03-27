@@ -1,19 +1,28 @@
 use std::mem::size_of;
 
 use burn::tensor::{DType, Shape, ops::FloatTensor};
-use burn_cubecl::cubecl::{CubeCount, CubeDim, tensor_line_size_parallel};
 use burn_cubecl::{
-    CubeElement, CubeRuntime,
+    CubeElement,
+    CubeRuntime,
+    cubecl::{CubeCount, CubeDim, tensor_line_size_parallel},
     kernel::{cast, into_contiguous},
     ops::numeric::{empty_device, zeros_client},
 };
 
-use crate::kernels::backend::{BoolElement, CubeBackend, FloatElement, IntElement};
-use crate::kernels::wkv7_common::{
-    Wkv7StateBackwardOutput, Wkv7StatePassForwardOutput,
-    kernel::{
-        Wkv7BackwardInputsLaunch, Wkv7BackwardOutputsLaunch, Wkv7Config, Wkv7ForwardInputsLaunch,
-        Wkv7ForwardOutputsLaunch, wkv7_backward_kernel, wkv7_forward_kernel,
+use crate::kernels::{
+    backend::{BoolElement, CubeBackend, FloatElement, IntElement},
+    wkv7_common::{
+        Wkv7StateBackwardOutput,
+        Wkv7StatePassForwardOutput,
+        kernel::{
+            Wkv7BackwardInputsLaunch,
+            Wkv7BackwardOutputsLaunch,
+            Wkv7Config,
+            Wkv7ForwardInputsLaunch,
+            Wkv7ForwardOutputsLaunch,
+            wkv7_backward_kernel,
+            wkv7_forward_kernel,
+        },
     },
 };
 

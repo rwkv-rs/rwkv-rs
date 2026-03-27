@@ -13,7 +13,6 @@ pub struct FinalEvalConfig {
     pub experiment_desc: String,
     pub run_mode: String,
     pub skip_checker: bool,
-    pub attempt_concurrency: usize,
     pub judger_concurrency: usize,
     pub checker_concurrency: usize,
     pub db_pool_max_connections: u32,

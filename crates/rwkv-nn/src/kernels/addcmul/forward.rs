@@ -1,16 +1,21 @@
 use burn::tensor::ops::FloatTensor;
 use burn_cubecl::{
-    CubeElement, CubeRuntime,
+    CubeElement,
+    CubeRuntime,
     cubecl::{CubeCount, CubeDim},
     kernel::into_contiguous,
     ops::numeric::empty_device,
 };
 
-use crate::kernels::addcmul::{
-    Addcmul5Output, Addcmul5OutputPrimitive, AddcmulBackend,
-    kernel::{addcmul_kernel, addcmul5_kernel},
+use crate::kernels::{
+    addcmul::{
+        Addcmul5Output,
+        Addcmul5OutputPrimitive,
+        AddcmulBackend,
+        kernel::{addcmul_kernel, addcmul5_kernel},
+    },
+    backend::{BoolElement, CubeBackend, FloatElement, IntElement},
 };
-use crate::kernels::backend::{BoolElement, CubeBackend, FloatElement, IntElement};
 
 const BLOCK_SIZE: u32 = 256;
 
@@ -151,7 +156,9 @@ where
 mod fusion_impl {
     use burn::tensor::{Element, Shape};
     use burn_fusion::{
-        Fusion, FusionBackend, FusionRuntime,
+        Fusion,
+        FusionBackend,
+        FusionRuntime,
         stream::{Operation, OperationStreams},
     };
     use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};

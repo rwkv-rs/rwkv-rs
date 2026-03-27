@@ -5,14 +5,14 @@ pub mod knowledge;
 pub mod maths;
 pub mod utils;
 
-use crate::inferers::{CompletionRequest, CompletionResponse};
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::{collections::BTreeMap, path::PathBuf};
+
+use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use once_cell::sync::Lazy;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+
+use crate::inferers::{CompletionRequest, CompletionResponse};
 
 pub struct BenchmarkInfo {
     pub name: BenchmarkName,

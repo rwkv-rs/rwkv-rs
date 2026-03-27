@@ -1,8 +1,9 @@
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use async_openai::{Client, config::OpenAIConfig};
 use rwkv_config::raw::eval::IntApiConfig;
-use rwkv_eval::datasets::SamplingConfig;
-use rwkv_eval::inferers::{CompletionRequest, CompletionResponse};
+use rwkv_eval::{
+    datasets::SamplingConfig,
+    inferers::{CompletionRequest, CompletionResponse},
+};
 
 pub(crate) struct ClientWithConfig {
     pub api_cfg: IntApiConfig,

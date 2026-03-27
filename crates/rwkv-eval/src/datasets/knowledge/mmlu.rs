@@ -1,19 +1,25 @@
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::path::{Path, PathBuf};
+
+use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
-use std::path::{Path, PathBuf};
 
-use crate::datasets::knowledge::{
-    Example, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
-};
-use crate::datasets::utils::collect_files_with_extension;
-use crate::datasets::utils::hf::download_hf_parquet_splits;
-use crate::datasets::utils::hf::viewer::get_split_row_count;
-use crate::datasets::utils::parquet::{get_string, get_string_list, get_u8, read_parquet_items};
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
+    ALL_BENCHMARKS,
+    Benchmark,
+    BenchmarkInfo,
+    BenchmarkName,
+    CoTMode,
+    Field,
+    Record,
+    SamplingConfig,
+    knowledge::{Example, get_expect_context, get_final_answer_with_cot_mode, get_ref_answer},
+    utils::{
+        collect_files_with_extension,
+        hf::{download_hf_parquet_splits, viewer::get_split_row_count},
+        parquet::{get_string, get_string_list, get_u8, read_parquet_items},
+    },
 };
 
 #[distributed_slice(ALL_BENCHMARKS)]

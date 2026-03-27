@@ -22,7 +22,9 @@ mod kernel;
 use burn::{
     prelude::Backend,
     tensor::{
-        Int, Tensor, TensorPrimitive,
+        Int,
+        Tensor,
+        TensorPrimitive,
         ops::{FloatTensor, IntTensor},
     },
 };

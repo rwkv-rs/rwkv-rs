@@ -1,19 +1,30 @@
-use super::{get_expected_context, get_judge_script};
-use crate::datasets::coding::{extract_code, get_code_completion_with_cot_mode};
-use crate::datasets::utils::collect_files_with_extension;
-use crate::datasets::utils::hf::download_hf_parquet_splits;
-use crate::datasets::utils::hf::viewer::get_split_row_count;
-use crate::datasets::utils::parquet::{get_i64, get_string, get_string_list, read_parquet_items};
-use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
-};
-use crate::evaluators::coding::run_python_verdict_script;
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::path::{Path, PathBuf};
+
+use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use parquet::record::Row;
-use std::path::{Path, PathBuf};
+
+use super::{get_expected_context, get_judge_script};
+use crate::{
+    datasets::{
+        ALL_BENCHMARKS,
+        Benchmark,
+        BenchmarkInfo,
+        BenchmarkName,
+        CoTMode,
+        Field,
+        Record,
+        SamplingConfig,
+        coding::{extract_code, get_code_completion_with_cot_mode},
+        utils::{
+            collect_files_with_extension,
+            hf::{download_hf_parquet_splits, viewer::get_split_row_count},
+            parquet::{get_i64, get_string, get_string_list, read_parquet_items},
+        },
+    },
+    evaluators::coding::run_python_verdict_script,
+};
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static MBPP_INFO: BenchmarkInfo = BenchmarkInfo {

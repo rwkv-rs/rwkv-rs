@@ -1,8 +1,10 @@
-use flate2::read::GzDecoder;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    path::Path,
+};
 
+use flate2::read::GzDecoder;
 use serde::de::DeserializeOwned;
 
 pub fn read_jsonl_items<T, P>(path: P) -> Vec<T>

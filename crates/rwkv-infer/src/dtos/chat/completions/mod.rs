@@ -1,0 +1,196 @@
+use serde::{Deserialize, Serialize};
+use sonic_rs::Value;
+
+use crate::dtos::stop::StopField;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatCompletionsReq {
+    pub model: String,
+    pub messages: Vec<Message>,
+    pub stream: Option<bool>,
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f32>,
+    pub top_k: Option<i32>,
+    pub top_p: Option<f32>,
+    pub presence_penalty: Option<f32>,
+    pub repetition_penalty: Option<f32>,
+    pub penalty_decay: Option<f32>,
+    pub stop: Option<StopField>,
+    pub logprobs: Option<bool>,
+    pub top_logprobs: Option<u8>,
+    pub candidate_token_texts: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<ResponseFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<Tool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Message {
+    pub role: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub ty: String,
+    pub function: FunctionInContext,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FunctionInContext {
+    pub name: String,
+    pub arguments: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ResponseFormat {
+    Text,
+    JsonObject,
+    JsonSchema { json_schema: JsonSchema },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonSchema {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Tool {
+    #[serde(rename = "type")]
+    pub ty: String,
+    pub function: Function,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Function {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolChoice {
+    Mode(String),
+    Named(NamedToolChoice),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NamedToolChoice {
+    #[serde(rename = "type")]
+    pub ty: String,
+    pub function: NamedToolChoiceFunction,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NamedToolChoiceFunction {
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatCompletionResp {
+    pub id: String,
+    pub object: String,
+    pub created: u64,
+    pub model: String,
+    pub choices: Vec<Choices>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Choices {
+    pub index: u32,
+    pub message: Message,
+    pub finish_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logprobs: Option<Logprobs>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Logprobs {
+    pub content: Vec<Content>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Content {
+    pub token: String,
+    pub bytes: Vec<u8>,
+    pub logprob: f32,
+    pub top_logprobs: Vec<TopLogprobs>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TopLogprobs {
+    pub token: String,
+    pub bytes: Vec<u8>,
+    pub logprob: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatCompletionsChunkResponse {
+    pub id: String,
+    pub object: String,
+    pub created: u64,
+    pub model: String,
+    pub choices: Vec<ChunkChoice>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChunkChoice {
+    pub index: u32,
+    pub delta: Delta,
+    pub finish_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logprobs: Option<Logprobs>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Delta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ChunkToolCall>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChunkToolCall {
+    pub index: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub ty: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function: Option<ChunkToolCallFunction>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ChunkToolCallFunction {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<String>,
+}

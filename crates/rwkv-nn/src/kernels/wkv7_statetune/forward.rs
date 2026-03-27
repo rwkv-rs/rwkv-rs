@@ -1,13 +1,14 @@
 use burn::tensor::ops::FloatTensor;
 
-use crate::kernels::backend::{
-    BoolElement, CubeBackend, CubeElement, CubeRuntime, FloatElement, IntElement,
+use crate::kernels::{
+    backend::{BoolElement, CubeBackend, CubeElement, CubeRuntime, FloatElement, IntElement},
+    wkv7_common::{
+        Wkv7ForwardOutput,
+        Wkv7StateBackwardOutput,
+        host::{wkv7_backward_impl, wkv7_forward_impl},
+    },
+    wkv7_statetune::Wkv7StateTuneBackend,
 };
-use crate::kernels::wkv7_common::{
-    Wkv7ForwardOutput, Wkv7StateBackwardOutput,
-    host::{wkv7_backward_impl, wkv7_forward_impl},
-};
-use crate::kernels::wkv7_statetune::Wkv7StateTuneBackend;
 
 impl<R: CubeRuntime, F: FloatElement, I: IntElement, BT: BoolElement> Wkv7StateTuneBackend
     for CubeBackend<R, F, I, BT>
@@ -79,13 +80,17 @@ where
 mod fusion_impl {
     use burn::tensor::{DType, Element, Shape, ops::FloatTensor};
     use burn_fusion::{
-        Fusion, FusionBackend, FusionRuntime,
+        Fusion,
+        FusionBackend,
+        FusionRuntime,
         stream::{Operation, OperationStreams},
     };
     use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};
 
-    use crate::kernels::wkv7_common::{Wkv7ForwardOutput, Wkv7StateBackwardOutput};
-    use crate::kernels::wkv7_statetune::Wkv7StateTuneBackend;
+    use crate::kernels::{
+        wkv7_common::{Wkv7ForwardOutput, Wkv7StateBackwardOutput},
+        wkv7_statetune::Wkv7StateTuneBackend,
+    };
 
     impl<B: FusionBackend + Wkv7StateTuneBackend> Wkv7StateTuneBackend for Fusion<B> {
         fn wkv7_statetune_forward(

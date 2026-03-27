@@ -1,17 +1,22 @@
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::path::{Path, PathBuf};
+
+use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
 
 use super::{download_gpqa_csv, gpqa_csv_path, join_subject_parts, ordered_gpqa_choices};
-use crate::datasets::knowledge::{
-    get_expect_context, get_final_answer_with_cot_mode, get_ref_answer,
-};
-use crate::datasets::utils::csv::read_csv_items;
 use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
+    ALL_BENCHMARKS,
+    Benchmark,
+    BenchmarkInfo,
+    BenchmarkName,
+    CoTMode,
+    Field,
+    Record,
+    SamplingConfig,
+    knowledge::{get_expect_context, get_final_answer_with_cot_mode, get_ref_answer},
+    utils::csv::read_csv_items,
 };
 
 #[distributed_slice(ALL_BENCHMARKS)]

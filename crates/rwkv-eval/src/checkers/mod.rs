@@ -1,7 +1,6 @@
 use std::future::Future;
 
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use async_openai::{Client, config::OpenAIConfig};
 use serde::{Deserialize, Serialize};
 use sonic_rs::{Value, json};
 
@@ -235,8 +234,10 @@ fn parse_checker_output(content: &str) -> Result<CheckerOutput, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     use super::{parse_checker_output, retry_checker};
 

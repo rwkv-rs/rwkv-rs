@@ -1,14 +1,20 @@
-use burn::train::{
-    logger::{AsyncLogger, Logger, MetricLogger},
-    metric::store::{EpochSummary, MetricsUpdate, Split},
-    metric::{MetricDefinition, MetricId, NumericEntry, SerializedEntry},
-};
-use log::warn;
-use rwkv_config::validated::train::TRAIN_CFG;
 use std::{
     collections::HashMap,
     sync::{Arc, OnceLock},
 };
+
+use burn::train::{
+    logger::{AsyncLogger, Logger, MetricLogger},
+    metric::{
+        MetricDefinition,
+        MetricId,
+        NumericEntry,
+        SerializedEntry,
+        store::{EpochSummary, MetricsUpdate, Split},
+    },
+};
+use log::warn;
+use rwkv_config::validated::train::TRAIN_CFG;
 use tokio::{runtime::Runtime, sync::Mutex};
 use wandb::{BackendOptions, LogData, Run, RunInfo, WandB};
 

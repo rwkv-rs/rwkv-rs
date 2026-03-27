@@ -6,8 +6,7 @@ use burn::{
     tensor::{Tensor, TensorPrimitive, backend::AutodiffBackend, ops::FloatTensor},
 };
 
-use crate::kernels::wkv7_common::Wkv7BackwardOutput;
-use crate::kernels::wkv7_common::{Wkv7ForwardInput, Wkv7ForwardOutput};
+use crate::kernels::wkv7_common::{Wkv7BackwardOutput, Wkv7ForwardInput, Wkv7ForwardOutput};
 
 pub type Wkv7PretrainForwardOutput<B> = Wkv7ForwardOutput<Tensor<B, 4>>;
 pub type Wkv7PretrainBackwardOutput<B> = Wkv7BackwardOutput<Tensor<B, 4>>;

@@ -1,16 +1,17 @@
-use std::env;
-use std::fs::{File, create_dir_all, remove_dir_all};
-use std::future::Future;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    env,
+    fs::{File, create_dir_all, remove_dir_all},
+    future::Future,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    process::Command,
+    sync::Arc,
+    time::Duration,
+};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::{Client, RequestBuilder, Url};
-use tokio::sync::Semaphore;
-use tokio::time::sleep;
+use tokio::{sync::Semaphore, time::sleep};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]

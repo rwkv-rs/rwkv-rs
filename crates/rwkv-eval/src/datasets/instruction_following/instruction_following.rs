@@ -1,18 +1,34 @@
-use crate::datasets::utils::hf::downloader::{UrlDownloadFile, download_url_files};
-use crate::datasets::utils::jsonl::read_jsonl_items;
-use crate::datasets::{
-    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record, SamplingConfig,
-};
-use crate::evaluators::instruction_following::{
-    InstructionSpec, build_prompt, describe_instructions, evaluate_response, generate_response,
-};
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::path::{Path, PathBuf};
+
+use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
 use sonic_rs::Object as Map;
-use std::path::{Path, PathBuf};
+
+use crate::{
+    datasets::{
+        ALL_BENCHMARKS,
+        Benchmark,
+        BenchmarkInfo,
+        BenchmarkName,
+        CoTMode,
+        Field,
+        Record,
+        SamplingConfig,
+        utils::{
+            hf::downloader::{UrlDownloadFile, download_url_files},
+            jsonl::read_jsonl_items,
+        },
+    },
+    evaluators::instruction_following::{
+        InstructionSpec,
+        build_prompt,
+        describe_instructions,
+        evaluate_response,
+        generate_response,
+    },
+};
 
 #[distributed_slice(ALL_BENCHMARKS)]
 static IFEVAL_INFO: BenchmarkInfo = BenchmarkInfo {

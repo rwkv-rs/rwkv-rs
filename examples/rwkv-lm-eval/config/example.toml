@@ -2,7 +2,6 @@ experiment_name = "your_experiment_name"
 experiment_desc = "desc desc"
 run_mode = "new"  # new / resume / rerun
 skip_checker = false
-attempt_concurrency = 8
 judger_concurrency = 8
 checker_concurrency = 8
 db_pool_max_connections = 32
@@ -24,7 +23,7 @@ model_num_params = "7.2b"
 base_url = "10.100.1.98:8080"
 api_key = "xxxxxxxx"
 model = "rwkv7-g1d-7.2b"  # 和推理后端配置的model_name保持一致
-max_batch_size = 320
+max_batch_size = 320  # 该模型的并发槽位上限，调度器会尽量持续喂满
 
 [llm_judger]
 # ExtApiConfig: 外部评审模型，不需要填写 arch/data/params

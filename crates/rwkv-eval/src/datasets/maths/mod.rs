@@ -1,14 +1,21 @@
-use crate::datasets::{
-    CoTMode, SamplingConfig, apply_user_assistant_template, get_completions_of_cot, render_context,
-};
-use crate::inferers::{CompletionRequest, CompletionResponse};
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::sync::Arc;
+
+use async_openai::{Client, config::OpenAIConfig};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use sonic_rs::{Value, json, prelude::*};
-use std::sync::Arc;
 use tokio::sync::Semaphore;
+
+use crate::{
+    datasets::{
+        CoTMode,
+        SamplingConfig,
+        apply_user_assistant_template,
+        get_completions_of_cot,
+        render_context,
+    },
+    inferers::{CompletionRequest, CompletionResponse},
+};
 
 pub mod aime24;
 pub mod aime25;

@@ -1,10 +1,12 @@
-use crate::datasets::SamplingConfig;
-use crate::inferers::{CompletionRequest, CompletionResponse};
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use async_openai::{Client, config::OpenAIConfig};
 use langdetect_rs::detector_factory::DetectorFactory;
 use regex::{Captures, Regex, RegexBuilder};
 use sonic_rs::{Object as Map, Value, prelude::*};
+
+use crate::{
+    datasets::SamplingConfig,
+    inferers::{CompletionRequest, CompletionResponse},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstructionKind {
@@ -720,11 +722,17 @@ fn detect_language_matches(language: &str, value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        InstructionSpec, build_prompt, check_json_format, count_capital_words,
-        count_highlighted_sections, count_sentences, evaluate_response,
-    };
     use sonic_rs::{Object as Map, Value, json, prelude::*};
+
+    use super::{
+        InstructionSpec,
+        build_prompt,
+        check_json_format,
+        count_capital_words,
+        count_highlighted_sections,
+        count_sentences,
+        evaluate_response,
+    };
 
     fn spec(id: &str, args: Value) -> InstructionSpec {
         let Some(args) = args.as_object() else {
