@@ -64,7 +64,7 @@ async fn main() {
         .db_pool_max_connections
         .unwrap_or(eval_cfg.db_pool_max_connections);
 
-    let db = connect(space_db_cfg, max_connections)
+    let db = connect(space_db_cfg, max_connections, false)
         .await
         .unwrap_or_else(|err| panic!("failed to connect to postgres: {err}"));
 

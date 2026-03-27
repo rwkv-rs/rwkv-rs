@@ -1,0 +1,47 @@
+experiment_name = "all_benchmarks_rwkv7_g1d_13_3b_jump"
+experiment_desc = "All benchmarks on RWKV-13.3B-g1d running on the jump host with 157 judger/checker and DB"
+run_mode = "new"
+continue_on_benchmark_error = true
+skip_checker = false
+attempt_concurrency = 256
+judger_concurrency = 48
+checker_concurrency = 24
+db_pool_max_connections = 80
+
+model_arch_versions = ["rwkv7"]
+model_data_versions = ["g1d"]
+model_num_params = ["13.3b"]
+
+benchmark_field = ["Knowledge", "Math", "Coding", "Instruction Following", "Function Call"]
+extra_benchmark_name = []
+
+upload_to_space = true
+startup_recovery = true
+git_hash = "be11a9a6213782b9eebc5b690449a3d84caccb98"
+
+[[models]]
+model_arch_version = "rwkv7"
+model_data_version = "g1d"
+model_num_params = "13.3b"
+base_url = "http://127.0.0.1:18080"
+api_key = "local"
+model = "rwkv-13.3b-g1d"
+max_batch_size = 256
+
+[llm_judger]
+base_url = "http://127.0.0.1:18091"
+api_key = "change-me"
+model = "qwen3-8b-gpu1"
+
+[llm_checker]
+base_url = "http://127.0.0.1:18090"
+api_key = "change-me"
+model = "qwen3-4b-gpu0"
+
+[space_db]
+username = "postgres"
+password = "7532"
+host = "192.168.0.157"
+port = "5432"
+database_name = "rwkv_eval"
+sslmode = "disable"

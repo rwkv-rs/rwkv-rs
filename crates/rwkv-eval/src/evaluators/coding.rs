@@ -3,11 +3,21 @@ use crate::inferers::generate_text_completion;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use microsandbox::sandbox::Sandbox;
+use microsandbox::setup;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 static SANDBOX_COUNTER: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(1));
+static SANDBOX_RUN_ID: Lazy<String> = Lazy::new(|| {
+    let pid = std::process::id();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    format!("{pid}-{ts}")
+});
 
 const DEFAULT_MEMORY_MB: u32 = 512;
 const DEFAULT_CPUS: u8 = 1;
@@ -69,12 +79,25 @@ print(json.dumps({"passed": True, "fail_reason": ""}))
     }
 }
 
+pub async fn ensure_microsandbox_runtime_dependencies() -> Result<(), String> {
+    if setup::is_installed() {
+        return Ok(());
+    }
+
+    setup::install().await.map_err(|err| {
+        format!(
+            "failed to install microsandbox runtime dependencies into ~/.microsandbox/lib: {err}"
+        )
+    })
+}
+
 pub async fn run_python_verdict_script(script: &str) -> Result<SandboxVerdict, String> {
     let name = next_sandbox_name();
     let sandbox = Sandbox::builder(&name)
         .image(PYTHON_IMAGE)
         .memory(DEFAULT_MEMORY_MB)
         .cpus(DEFAULT_CPUS)
+        .force()
         .create()
         .await
         .map_err(|err| format!("create sandbox `{name}` failed: {err}"))?;
@@ -130,7 +153,7 @@ pub async fn run_python_verdict_script(script: &str) -> Result<SandboxVerdict, S
 
 fn next_sandbox_name() -> String {
     let id = SANDBOX_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("rwkv-eval-coding-{id}")
+    format!("rwkv-eval-coding-{}-{id}", SANDBOX_RUN_ID.as_str())
 }
 
 fn parse_verdict_line(stdout: &str) -> Option<SandboxVerdictWire> {

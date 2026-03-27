@@ -1,0 +1,15 @@
+http_bind_addr = "127.0.0.1:18082"
+request_body_limit_bytes = 52428800
+sse_keep_alive_ms = 10000
+
+[[models]]
+model_name = "rwkv-2.9b-g1d"
+model_cfg = "rwkv-lm-2.9b"
+weights_path = "../../weights/rwkv7-g1d-2.9b-20260131-ctx8192.mpk"
+tokenizer_vocab_path = "../../assets/rwkv_vocab_v20230424.txt"
+device_type = 0
+device_ids = [2]
+max_batch_size = 48
+max_context_len = 8192
+paragraph_len = 128
+decode_first = true

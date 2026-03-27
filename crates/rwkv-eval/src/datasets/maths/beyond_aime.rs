@@ -27,8 +27,8 @@ static BEYOND_AIME_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.997,
     },
     n_shots: &[0],
-    avg_ks: &[16.0],
-    pass_ks: &[8],
+    avg_ks: &[10.0],
+    pass_ks: &[5],
     with_llm_judger: true,
     create: |dataset_root| Box::new(BeyondAime::new(dataset_root)),
 };

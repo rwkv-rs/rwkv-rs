@@ -37,6 +37,7 @@ impl RunMode {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct EvaluatingOptions {
     pub run_mode: RunMode,
+    pub continue_on_benchmark_error: bool,
     pub skip_checker: bool,
     pub attempt_concurrency: usize,
     pub judger_concurrency: usize,
@@ -48,6 +49,7 @@ impl Default for EvaluatingOptions {
     fn default() -> Self {
         Self {
             run_mode: RunMode::New,
+            continue_on_benchmark_error: false,
             skip_checker: false,
             attempt_concurrency: DEFAULT_ATTEMPT_CONCURRENCY,
             judger_concurrency: DEFAULT_JUDGER_CONCURRENCY,
@@ -81,6 +83,7 @@ pub(crate) fn build_evaluating_options(eval_cfg: &FinalEvalConfig) -> Evaluating
 
     EvaluatingOptions {
         run_mode,
+        continue_on_benchmark_error: eval_cfg.continue_on_benchmark_error,
         skip_checker: eval_cfg.skip_checker,
         attempt_concurrency: eval_cfg.attempt_concurrency,
         judger_concurrency: eval_cfg.judger_concurrency,

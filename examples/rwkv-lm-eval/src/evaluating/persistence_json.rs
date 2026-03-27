@@ -11,6 +11,8 @@ pub(crate) fn build_task_sampling_config_json(
     cot_mode: CoTMode,
     n_shot: u8,
     avg_k: f32,
+    sample_limit: Option<usize>,
+    effective_sample_count: usize,
     judger_model_name: Option<&str>,
     checker_model_name: Option<&str>,
 ) -> String {
@@ -18,6 +20,8 @@ pub(crate) fn build_task_sampling_config_json(
         "cot_mode": cot_mode_name(cot_mode),
         "n_shot": n_shot,
         "avg_k": avg_k,
+        "sample_limit": sample_limit,
+        "effective_sample_count": effective_sample_count,
         "pass_ks": benchmark_info.pass_ks,
         "sampling_config": {
             "temperature": benchmark_info.sampling_config.temperature,

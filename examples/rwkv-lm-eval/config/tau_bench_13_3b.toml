@@ -1,0 +1,45 @@
+experiment_name = "tau_bench_rwkv7_g1e_13_3b"
+experiment_desc = "Tau-Bench evaluation using .env-provided target/checker settings"
+run_mode = "rerun"
+skip_checker = true
+attempt_concurrency = 1
+judger_concurrency = 1
+checker_concurrency = 1
+db_pool_max_connections = 8
+
+model_arch_versions = ["rwkv7"]
+model_data_versions = ["g1e"]
+model_num_params = ["13.3b"]
+
+benchmark_field = []
+extra_benchmark_name = ["tau_bench"]
+
+upload_to_space = true
+git_hash = "2e58a626747403d80a37ad2268ebb2792f60757b"
+
+[[models]]
+model_arch_version = "rwkv7"
+model_data_version = "g1e"
+model_num_params = "13.3b"
+base_url = "env_override_required"
+api_key = "env_override_required"
+model = "env_override_required"
+max_batch_size = 1
+
+[llm_judger]
+base_url = "env_override_required"
+api_key = "env_override_required"
+model = "env_override_required"
+
+[llm_checker]
+base_url = "env_override_required"
+api_key = "env_override_required"
+model = "env_override_required"
+
+[space_db]
+username = "postgres"
+password = "postgres"
+host = "127.0.0.1"
+port = "5432"
+database_name = "rwkv_eval"
+sslmode = "disable"
