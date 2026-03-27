@@ -121,13 +121,6 @@ pub(crate) fn ensure_existing_results_match_plan(
     );
 }
 
-pub(crate) async fn fail_task(db: Option<Db>, task_id: Option<i32>, err: String) -> ! {
-    if let (Some(db), Some(task_id)) = (db.as_ref(), task_id) {
-        let _ = update_task_status(db, task_id, TaskStatus::Failed).await;
-    }
-    panic!("{err}");
-}
-
 fn render_task_lookup_list(tasks: &[TaskLookup]) -> String {
     tasks
         .iter()

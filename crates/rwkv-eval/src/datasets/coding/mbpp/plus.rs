@@ -1,5 +1,6 @@
-use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use std::path::{Path, PathBuf};
+
+use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use serde::Deserialize;
@@ -17,10 +18,7 @@ use crate::{
         Record,
         SamplingConfig,
         coding::{extract_code, get_code_completion_with_cot_mode},
-        utils::{
-            hf::downloader::{UrlDownloadFile, download_url_files},
-            jsonl::read_gzip_jsonl_items,
-        },
+        utils::hf::downloader::{UrlDownloadFile, download_url_files},
     },
     evaluators::coding::run_python_verdict_script,
 };
@@ -73,9 +71,12 @@ struct RawMbppPlusItem {
 }
 
 fn read_mbpp_plus_items<P: AsRef<Path>>(path: P) -> Vec<RawMbppPlusItem> {
+    use std::{
+        fs::File,
+        io::{BufRead, BufReader},
+    };
+
     use flate2::read::GzDecoder;
-    use std::fs::File;
-    use std::io::{BufRead, BufReader};
 
     let file = File::open(path.as_ref()).unwrap();
     let reader = BufReader::new(GzDecoder::new(file));

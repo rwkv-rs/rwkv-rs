@@ -9,33 +9,23 @@ mod paths;
 mod persistence_json;
 mod runtime;
 mod sampling;
+mod scheduler;
 mod task_persistence;
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
 use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfigBuilder};
 use rwkv_eval::datasets::{Benchmark, maths::set_llm_judger_semaphore};
 use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
 
-use crate::db::{
-    BenchmarkInsert,
-    Db,
-    ModelInsert,
-    ScoreInsert,
-    TaskInsert,
-    TaskStatus,
-    insert_score,
-    update_task_status,
-    upsert_benchmark,
-    upsert_model,
-};
+use crate::db::{BenchmarkInsert, Db, ModelInsert, TaskInsert, TaskStatus, upsert_benchmark, upsert_model};
+
 use self::{
-    attempts::{build_attempt_keys, execute_attempts, execute_pending_checks},
+    attempts::build_attempt_keys,
     benchmark::{
         collect_benchmarks,
         ensure_microsandbox_for_coding_benchmarks,
@@ -44,14 +34,14 @@ use self::{
     },
     client::{ClientWithConfig, build_client, check_client},
     db::connect_db_if_configured,
-    metrics::compute_metrics,
     models::{collect_models, model_cache_key},
     options::{RunMode, build_evaluating_options},
-    paths::{build_task_log_path, cot_mode_name},
-    persistence_json::{build_metrics_json, build_task_sampling_config_json},
+    paths::build_task_log_path,
+    persistence_json::build_task_sampling_config_json,
     runtime::{CheckerRuntime, TaskExecutionState},
     sampling::build_avg_k_execution_plan,
-    task_persistence::{ensure_existing_results_match_plan, fail_task, prepare_task_execution},
+    scheduler::{ModelRuntime, TaskRunState, run_scheduler},
+    task_persistence::{ensure_existing_results_match_plan, prepare_task_execution},
 };
 
 const EVALUATOR_NAME: &str = "rwkv-lm-eval";
@@ -121,7 +111,6 @@ pub async fn evaluating(
     println!("experiment: {experiment_name}");
     println!("run mode: {}", options.run_mode.as_str());
     println!("skip checker: {}", options.skip_checker);
-    println!("attempt concurrency: {}", options.attempt_concurrency);
     println!("judger concurrency: {}", options.judger_concurrency);
     println!("checker concurrency: {}", options.checker_concurrency);
     println!(
@@ -156,15 +145,90 @@ pub async fn evaluating(
         }
     }
 
+    let model_runtimes = build_model_runtimes(&clients_with_cfg);
+
     let benchmark_infos = collect_benchmarks();
     assert!(!benchmark_infos.is_empty(), "no benchmark selected");
     ensure_microsandbox_for_coding_benchmarks(&benchmark_infos).await;
 
-    for benchmark_info in benchmark_infos {
+    let task_runs = build_task_runs(
+        &benchmark_infos,
+        &datasets_path,
+        &config_path,
+        &logs_path,
+        &clients_with_cfg,
+        &model_ids,
+        &db,
+        &options,
+        &experiment_name,
+        &experiment_desc,
+        &git_hash,
+        &llm_judger_cfg.model,
+        &llm_judger_client,
+        checker_runtime,
+    )
+    .await;
+
+    run_scheduler(task_runs, model_runtimes, db, options.checker_concurrency).await;
+}
+
+fn build_model_runtimes(
+    clients_with_cfg: &[Arc<ClientWithConfig>],
+) -> BTreeMap<String, ModelRuntime> {
+    let mut model_runtimes = BTreeMap::new();
+
+    for target_model in clients_with_cfg {
+        let model_key = model_cache_key(&target_model.api_cfg);
+        let max_batch_size = target_model.api_cfg.max_batch_size.unwrap_or(1);
+        assert!(
+            max_batch_size > 0,
+            "max_batch_size must be >= 1 for model `{}`",
+            target_model.api_cfg.model
+        );
+        println!(
+            "model runtime: {} max_batch_size={}",
+            target_model.api_cfg.model, max_batch_size
+        );
+        let old = model_runtimes.insert(
+            model_key,
+            ModelRuntime {
+                semaphore: Arc::new(Semaphore::new(max_batch_size)),
+            },
+        );
+        assert!(
+            old.is_none(),
+            "duplicate model runtime for `{}`",
+            target_model.api_cfg.model
+        );
+    }
+
+    model_runtimes
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn build_task_runs(
+    benchmark_infos: &[&'static rwkv_eval::datasets::BenchmarkInfo],
+    datasets_path: &Path,
+    config_path: &Path,
+    logs_path: &Path,
+    clients_with_cfg: &[Arc<ClientWithConfig>],
+    model_ids: &BTreeMap<String, i32>,
+    db: &Option<Db>,
+    options: &options::EvaluatingOptions,
+    experiment_name: &str,
+    experiment_desc: &str,
+    git_hash: &str,
+    llm_judger_model_name: &str,
+    llm_judger_client: &Arc<async_openai::Client<async_openai::config::OpenAIConfig>>,
+    checker_runtime: Option<Arc<CheckerRuntime>>,
+) -> Vec<TaskRunState> {
+    let mut task_runs = Vec::new();
+
+    for &benchmark_info in benchmark_infos {
         validate_benchmark_info(benchmark_info);
 
         println!("prepare benchmark: {}", benchmark_info.name.0);
-        let mut benchmark_box = (benchmark_info.create)(datasets_path.clone());
+        let mut benchmark_box = (benchmark_info.create)(datasets_path.to_path_buf());
         prepare_benchmark(benchmark_info, benchmark_box.as_mut()).await;
         let benchmark: Arc<dyn Benchmark> = Arc::from(benchmark_box);
 
@@ -194,270 +258,145 @@ pub async fn evaluating(
             .unwrap_or_else(|| panic!("benchmark `{}` has empty pass_ks", benchmark_info.name.0));
         let judger_client = benchmark_info
             .with_llm_judger
-            .then(|| Arc::clone(&llm_judger_client));
+            .then(|| Arc::clone(llm_judger_client));
         let judger_model_name = benchmark_info
             .with_llm_judger
-            .then_some(llm_judger_cfg.model.clone());
+            .then_some(llm_judger_model_name.to_string());
         let checker_model_name = checker_runtime
             .as_ref()
             .map(|runtime| runtime.model_name.clone());
 
-        let mut model_runs = JoinSet::new();
-        for target_model in &clients_with_cfg {
-            let benchmark = Arc::clone(&benchmark);
-            let judger_model_name = judger_model_name.clone();
-            let judger_client = judger_client.clone();
-            let checker_model_name = checker_model_name.clone();
-            let checker_runtime = checker_runtime.clone();
-            let target_model = Arc::clone(target_model);
-            let model_ids = model_ids.clone();
-            let db = db.clone();
-            let config_path = config_path.clone();
-            let logs_path = logs_path.clone();
-            let experiment_name = experiment_name.clone();
-            let experiment_desc = experiment_desc.clone();
-            let git_hash = git_hash.clone();
+        for target_model in clients_with_cfg {
+            let model_key = model_cache_key(&target_model.api_cfg);
+            let model_id = model_ids.get(&model_key).copied();
 
-            model_runs.spawn(async move {
-                run_target_model(
-                    benchmark_info,
-                    benchmark,
-                    benchmark_id,
-                    max_pass_k,
-                    judger_model_name.as_deref(),
-                    judger_client,
-                    checker_model_name.as_deref(),
-                    checker_runtime,
-                    &target_model,
-                    &model_ids,
-                    &db,
-                    &options,
-                    &config_path,
-                    &logs_path,
-                    &experiment_name,
-                    &experiment_desc,
-                    &git_hash,
-                )
-                .await;
-            });
-        }
+            for &cot_mode in benchmark_info.cot_mode {
+                for &n_shot in benchmark_info.n_shots {
+                    for &avg_k in benchmark_info.avg_ks {
+                        let avg_k_plan =
+                            build_avg_k_execution_plan(benchmark_info.name.0, benchmark.len(), avg_k);
+                        let sampling_config_json = build_task_sampling_config_json(
+                            benchmark_info,
+                            cot_mode,
+                            n_shot,
+                            avg_k,
+                            judger_model_name.as_deref(),
+                            checker_model_name.as_deref(),
+                        );
+                        let log_path = build_task_log_path(
+                            logs_path,
+                            experiment_name,
+                            benchmark_info.name.0,
+                            &target_model.api_cfg.model,
+                            cot_mode,
+                            n_shot,
+                            avg_k,
+                        );
+                        let task_state = if let Some(db) = db.as_ref() {
+                            let model_id = model_id.unwrap_or_else(|| {
+                                panic!(
+                                    "missing cached model_id for `{}`",
+                                    target_model.api_cfg.model
+                                )
+                            });
+                            let benchmark_id = benchmark_id.unwrap_or_else(|| {
+                                panic!(
+                                    "missing cached benchmark_id for `{}`",
+                                    benchmark_info.name.0
+                                )
+                            });
+                            prepare_task_execution(
+                                db,
+                                options.run_mode,
+                                options.skip_checker,
+                                crate::db::TaskIdentity {
+                                    config_path: Some(config_path.display().to_string()),
+                                    evaluator: EVALUATOR_NAME.to_string(),
+                                    git_hash: git_hash.to_string(),
+                                    model_id,
+                                    benchmark_id,
+                                    sampling_config_json: sampling_config_json.clone(),
+                                },
+                                TaskInsert {
+                                    config_path: Some(config_path.display().to_string()),
+                                    evaluator: EVALUATOR_NAME.to_string(),
+                                    is_param_search: false,
+                                    is_tmp: false,
+                                    status: TaskStatus::Running,
+                                    git_hash: git_hash.to_string(),
+                                    model_id,
+                                    benchmark_id,
+                                    desc: Some(experiment_desc.to_string()),
+                                    sampling_config_json: sampling_config_json.clone(),
+                                    log_path: log_path.clone(),
+                                },
+                            )
+                            .await
+                            .unwrap_or_else(|err| {
+                                panic!(
+                                    "failed to prepare task for benchmark `{}` model `{}`: {err}",
+                                    benchmark_info.name.0, target_model.api_cfg.model
+                                )
+                            })
+                        } else {
+                            TaskExecutionState {
+                                task_id: None,
+                                results: BTreeMap::new(),
+                                pending_checks: Vec::new(),
+                            }
+                        };
 
-        while let Some(result) = model_runs.join_next().await {
-            if let Err(join_err) = result {
-                if join_err.is_panic() {
-                    panic!("model evaluation task panicked");
-                }
-                panic!("model evaluation task join failed: {join_err}");
-            }
-        }
-    }
-}
+                        let all_attempts = build_attempt_keys(&avg_k_plan, max_pass_k);
+                        let all_attempt_set =
+                            all_attempts.iter().copied().collect::<BTreeSet<_>>();
+                        ensure_existing_results_match_plan(
+                            &task_state.results,
+                            &all_attempt_set,
+                            benchmark_info.name.0,
+                            &target_model.api_cfg.model,
+                        );
+                        let pending_attempts = all_attempts
+                            .into_iter()
+                            .filter(|key| !task_state.results.contains_key(key))
+                            .collect::<Vec<_>>();
 
-#[allow(clippy::too_many_arguments)]
-async fn run_target_model(
-    benchmark_info: &'static rwkv_eval::datasets::BenchmarkInfo,
-    benchmark: Arc<dyn Benchmark>,
-    benchmark_id: Option<i32>,
-    max_pass_k: u8,
-    judger_model_name: Option<&str>,
-    judger_client: Option<Arc<async_openai::Client<async_openai::config::OpenAIConfig>>>,
-    checker_model_name: Option<&str>,
-    checker_runtime: Option<Arc<CheckerRuntime>>,
-    target_model: &Arc<ClientWithConfig>,
-    model_ids: &BTreeMap<String, i32>,
-    db: &Option<Db>,
-    options: &options::EvaluatingOptions,
-    config_path: &std::path::Path,
-    logs_path: &std::path::Path,
-    experiment_name: &str,
-    experiment_desc: &str,
-    git_hash: &str,
-) {
-    println!(
-        "run benchmark={} model={}",
-        benchmark_info.name.0, target_model.api_cfg.model,
-    );
+                        println!(
+                            "schedule benchmark={} model={} cot_mode={:?} n_shot={} avg_k={} remaining_attempts={}",
+                            benchmark_info.name.0,
+                            target_model.api_cfg.model,
+                            cot_mode,
+                            n_shot,
+                            avg_k,
+                            pending_attempts.len(),
+                        );
 
-    let model_id = model_ids
-        .get(&model_cache_key(&target_model.api_cfg))
-        .copied();
-
-    for &cot_mode in benchmark_info.cot_mode {
-        for &n_shot in benchmark_info.n_shots {
-            for &avg_k in benchmark_info.avg_ks {
-                let avg_k_plan =
-                    build_avg_k_execution_plan(benchmark_info.name.0, benchmark.len(), avg_k);
-                let sampling_config_json = build_task_sampling_config_json(
-                    benchmark_info,
-                    cot_mode,
-                    n_shot,
-                    avg_k,
-                    judger_model_name,
-                    checker_model_name,
-                );
-                let log_path = build_task_log_path(
-                    logs_path,
-                    experiment_name,
-                    benchmark_info.name.0,
-                    &target_model.api_cfg.model,
-                    cot_mode,
-                    n_shot,
-                    avg_k,
-                );
-                let task_state = if let Some(db) = db.as_ref() {
-                    let model_id = model_id.unwrap_or_else(|| {
-                        panic!(
-                            "missing cached model_id for `{}`",
-                            target_model.api_cfg.model
-                        )
-                    });
-                    let benchmark_id = benchmark_id.unwrap_or_else(|| {
-                        panic!(
-                            "missing cached benchmark_id for `{}`",
-                            benchmark_info.name.0
-                        )
-                    });
-                    prepare_task_execution(
-                        db,
-                        options.run_mode,
-                        options.skip_checker,
-                        crate::db::TaskIdentity {
-                            config_path: Some(config_path.display().to_string()),
-                            evaluator: EVALUATOR_NAME.to_string(),
-                            git_hash: git_hash.to_string(),
-                            model_id,
-                            benchmark_id,
-                            sampling_config_json: sampling_config_json.clone(),
-                        },
-                        TaskInsert {
-                            config_path: Some(config_path.display().to_string()),
-                            evaluator: EVALUATOR_NAME.to_string(),
-                            is_param_search: false,
-                            is_tmp: false,
-                            status: TaskStatus::Running,
-                            git_hash: git_hash.to_string(),
-                            model_id,
-                            benchmark_id,
-                            desc: Some(experiment_desc.to_string()),
-                            sampling_config_json: sampling_config_json.clone(),
-                            log_path: log_path.clone(),
-                        },
-                    )
-                    .await
-                    .unwrap_or_else(|err| {
-                        panic!(
-                            "failed to prepare task for benchmark `{}` model `{}`: {err}",
-                            benchmark_info.name.0, target_model.api_cfg.model
-                        )
-                    })
-                } else {
-                    TaskExecutionState {
-                        task_id: None,
-                        results: BTreeMap::new(),
-                        pending_checks: Vec::new(),
-                    }
-                };
-
-                let all_attempts = build_attempt_keys(&avg_k_plan, max_pass_k);
-                let all_attempt_set = all_attempts.iter().copied().collect::<BTreeSet<_>>();
-                ensure_existing_results_match_plan(
-                    &task_state.results,
-                    &all_attempt_set,
-                    benchmark_info.name.0,
-                    &target_model.api_cfg.model,
-                );
-                let pending_attempts = all_attempts
-                    .into_iter()
-                    .filter(|key| !task_state.results.contains_key(key))
-                    .collect::<Vec<_>>();
-
-                let mut task_results = task_state.results;
-                let task_id = task_state.task_id;
-                let pending_checks = task_state.pending_checks;
-
-                if !pending_attempts.is_empty() {
-                    if let Err(err) = execute_attempts(
-                        Arc::clone(&benchmark),
-                        Arc::clone(target_model),
-                        judger_model_name,
-                        judger_client.clone(),
-                        checker_runtime.clone(),
-                        cot_mode,
-                        n_shot,
-                        pending_attempts,
-                        db.clone(),
-                        task_id,
-                        options.attempt_concurrency.max(1),
-                        &mut task_results,
-                    )
-                    .await
-                    {
-                        fail_task(db.clone(), task_id, err).await;
-                    }
-                }
-
-                if !pending_checks.is_empty() {
-                    let db = db.clone().unwrap_or_else(|| {
-                        panic!("pending checker work requires database persistence")
-                    });
-                    if let Err(err) = execute_pending_checks(
-                        pending_checks,
-                        db.clone(),
-                        checker_runtime.clone().unwrap_or_else(|| {
-                            panic!("pending checker work requires checker runtime")
-                        }),
-                        options.attempt_concurrency.max(1),
-                    )
-                    .await
-                    {
-                        fail_task(Some(db), task_id, err).await;
-                    }
-                }
-
-                let metrics =
-                    match compute_metrics(benchmark_info, &avg_k_plan, max_pass_k, &task_results) {
-                        Ok(metrics) => metrics,
-                        Err(err) => fail_task(db.clone(), task_id, err).await,
-                    };
-
-                println!(
-                    "  cot_mode={:?} n_shot={} avg_k={} sample_size={} repeats={} pass_k_max={} passed={}/{}",
-                    cot_mode,
-                    n_shot,
-                    avg_k,
-                    avg_k_plan.indices.len(),
-                    avg_k_plan.repeat_count,
-                    max_pass_k,
-                    metrics.passed,
-                    metrics.total,
-                );
-
-                if let (Some(db), Some(task_id)) = (db.as_ref(), task_id) {
-                    if let Err(err) = insert_score(
-                        db,
-                        &ScoreInsert {
-                            task_id,
-                            cot_mode: cot_mode_name(cot_mode).to_string(),
-                            metrics_json: build_metrics_json(
-                                benchmark_info,
-                                &avg_k_plan,
-                                max_pass_k,
-                                &metrics.pass_at_k_hits,
-                                metrics.passed,
-                                metrics.total,
-                            ),
-                        },
-                    )
-                    .await
-                    {
-                        fail_task(Some(db.clone()), Some(task_id), err).await;
-                    }
-
-                    if let Err(err) = update_task_status(db, task_id, TaskStatus::Completed).await {
-                        fail_task(Some(db.clone()), Some(task_id), err).await;
+                        task_runs.push(TaskRunState {
+                            benchmark_info,
+                            benchmark: Arc::clone(&benchmark),
+                            max_pass_k,
+                            judger_model_name: judger_model_name.clone(),
+                            judger_client: judger_client.clone(),
+                            checker_runtime: checker_runtime.clone(),
+                            target_model: Arc::clone(target_model),
+                            model_key: model_key.clone(),
+                            avg_k_plan,
+                            cot_mode,
+                            n_shot,
+                            avg_k,
+                            task_id: task_state.task_id,
+                            task_results: task_state.results,
+                            pending_attempts: VecDeque::from(pending_attempts),
+                            inflight_attempts: 0,
+                            pending_checks: task_state.pending_checks,
+                            checker_running: false,
+                            completed: false,
+                            failed_error: None,
+                        });
                     }
                 }
             }
         }
     }
+
+    task_runs
 }

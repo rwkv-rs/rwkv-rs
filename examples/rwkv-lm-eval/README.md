@@ -20,7 +20,6 @@ examples/rwkv-lm-eval/
 - Runtime control is now part of `eval/*.toml`, not CLI flags:
   - `run_mode`
   - `skip_checker`
-  - `attempt_concurrency`
   - `judger_concurrency`
   - `checker_concurrency`
   - `db_pool_max_connections`
@@ -123,7 +122,6 @@ experiment_name = "your_experiment_name"
 experiment_desc = "desc desc"
 run_mode = "new"
 skip_checker = false
-attempt_concurrency = 8
 judger_concurrency = 8
 checker_concurrency = 8
 db_pool_max_connections = 32
@@ -132,12 +130,12 @@ git_hash = "a8dc285c786fc425c9effee232453213b4b5ce8e"
 
 - `run_mode` must be one of `new`, `resume`, `rerun`.
 - `skip_checker = true` disables checker requests and skips retrying missing checker rows on `resume`.
-- `attempt_concurrency` must be `> 0`.
 - `judger_concurrency` must be `> 0`.
 - `checker_concurrency` must be `> 0` when checker is enabled.
 - `db_pool_max_connections` must be `> 0`.
 - `upload_to_space = false` is the default dry-run path.
 - `run_mode = resume` requires `upload_to_space = true`.
+- each `[[models]]` entry can set `max_batch_size`; the scheduler treats it as that model's concurrency budget, runs benchmarks in parallel, and keeps each model as full as possible while prioritizing smaller tasks first within the model.
 
 ## Persistence Behavior
 
@@ -147,7 +145,7 @@ git_hash = "a8dc285c786fc425c9effee232453213b4b5ce8e"
 - `checker` is diagnostic only and does not change `eval.is_passed` or `scores`.
 - `skip_checker = true` keeps failed attempts in `eval` but skips checker persistence entirely.
 - On startup, any persisted `Running` task is marked `Failed`; related `Running` completions are also marked `Failed`.
-- If an attempt fails at runtime, the task is marked `Failed` and the process stops.
+- If an attempt or checker fails at runtime, only the affected task is marked `Failed`; other tasks continue running.
 - `scores` are written only after the task has a complete set of successful attempts.
 - `resume` reconstructs progress by reading existing completion/eval rows, reuses finished attempts, and fills both missing attempts and missing checker rows.
 - If persistence is disabled, the evaluator does not connect to PostgreSQL and does not persist checker results.
