@@ -1,0 +1,18 @@
+[test-groups]
+benchmark-shared-datasets = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(/(downloads_or_reuses_shared_dataset|loads_shared_dataset|renders_expected_context)$/)'
+test-group = 'benchmark-shared-datasets'
+
+[[profile.default.overrides]]
+filter = 'test(/downloads_or_reuses_shared_dataset$/)'
+priority = 100
+
+[[profile.default.overrides]]
+filter = 'test(/loads_shared_dataset$/)'
+priority = 50
+
+[[profile.default.overrides]]
+filter = 'test(/renders_expected_context$/)'
+priority = 0

@@ -9063,6 +9063,7 @@ version = "0.1.0"
 dependencies = [
  "async-openai",
  "async-trait",
+ "axum",
  "chrono",
  "csv",
  "flate2",
@@ -9077,9 +9078,12 @@ dependencies = [
  "rwkv-config",
  "serde",
  "sonic-rs",
+ "sqlx 0.9.0-alpha.1",
  "thiserror 2.0.18",
  "tokio",
  "toml 1.1.0+spec-1.1.0",
+ "tower-http",
+ "utoipa",
  "walkdir",
 ]
 
@@ -9150,12 +9154,14 @@ dependencies = [
  "async-trait",
  "axum",
  "clap",
+ "reqwest 0.13.2",
  "rwkv-config",
  "rwkv-eval",
  "serde",
  "sonic-rs",
  "sqlx 0.9.0-alpha.1",
  "tokio",
+ "toml 1.1.0+spec-1.1.0",
  "tower-http",
  "utoipa",
 ]

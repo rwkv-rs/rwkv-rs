@@ -6,6 +6,8 @@ use crate::fill_default;
 pub struct RawEvalConfig {
     pub experiment_name: String,
     pub experiment_desc: String,
+    #[serde(skip_serializing)]
+    pub admin_api_key: Option<String>,
     pub run_mode: Option<String>,
     pub skip_checker: Option<bool>,
     pub judger_concurrency: Option<usize>,

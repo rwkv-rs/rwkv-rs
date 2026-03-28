@@ -1,11 +1,10 @@
 use std::{net::SocketAddr, path::PathBuf};
 
+use axum::serve;
 use clap::Parser;
-use rwkv_config::{
-    load_toml,
-    raw::eval::{RawEvalConfig, SpaceDbConfig},
-};
-use rwkv_lm_eval::{config_path::resolve_eval_cfg_path, db::connect, http_api::serve, paths};
+use rwkv_eval::routes::build_router;
+use rwkv_lm_eval::{init::build_http_runtime, paths};
+use tokio::net::TcpListener;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -19,44 +18,15 @@ struct Args {
     db_pool_max_connections: Option<u32>,
 }
 
-fn validate_space_db_config(cfg: &SpaceDbConfig) -> Result<(), String> {
-    if cfg.host.trim().is_empty() {
-        return Err("space_db.host cannot be empty".to_string());
-    }
-    if cfg.username.trim().is_empty() {
-        return Err("space_db.username cannot be empty".to_string());
-    }
-    if cfg.password.trim().is_empty() {
-        return Err("space_db.password cannot be empty".to_string());
-    }
-    if cfg.port.trim().is_empty() {
-        return Err("space_db.port cannot be empty".to_string());
-    }
-    if cfg.database_name.trim().is_empty() {
-        return Err("space_db.database_name cannot be empty".to_string());
-    }
-
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    let config_path = resolve_eval_cfg_path(&args.config_dir, &args.eval_config);
-    let mut raw_eval_cfg: RawEvalConfig = load_toml(&config_path);
-    raw_eval_cfg.fill_default();
-
-    validate_space_db_config(&raw_eval_cfg.space_db)
-        .unwrap_or_else(|err| panic!("invalid [space_db] config: {err}"));
-
-    let max_connections = args
-        .db_pool_max_connections
-        .or(raw_eval_cfg.db_pool_max_connections)
-        .unwrap_or(32);
-
-    let db = connect(&raw_eval_cfg.space_db, max_connections)
-        .await
-        .unwrap_or_else(|err| panic!("failed to connect to postgres: {err}"));
+    let (app_state, config_path, max_connections) = build_http_runtime(
+        &args.config_dir,
+        &args.eval_config,
+        args.db_pool_max_connections,
+    )
+    .await;
 
     println!(
         "rwkv-lm-eval api starting on {} (config: {}, pool_max_connections: {})",
@@ -66,7 +36,11 @@ async fn main() {
     );
     println!("openapi: http://{}/openapi.json", args.bind);
 
-    serve(args.bind, db)
+    let router = build_router(app_state);
+    let listener = TcpListener::bind(&args.bind)
+        .await
+        .unwrap_or_else(|err| panic!("failed to bind http listener {}: {err}", args.bind));
+    serve(listener, router)
         .await
         .unwrap_or_else(|err| panic!("http api server failed: {err}"));
 }

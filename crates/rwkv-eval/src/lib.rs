@@ -1,5 +1,8 @@
-pub mod checkers;
-pub mod datasets;
-pub mod evaluators;
-pub mod inferers;
-pub mod init;
+pub mod cores;
+pub mod dtos;
+pub mod handlers;
+pub mod routes;
+pub mod sdk;
+pub mod services;
+
+pub(crate) mod db;
