@@ -6,34 +6,42 @@
 //! [`benchmark_dataset_tests!`]. The macro expands to three ignored tests with
 //! distinct responsibilities:
 //!
-//! 1. `downloads_or_reuses_shared_dataset`
-//! 2. `loads_shared_dataset`
-//! 3. `renders_expected_context`
+//! 1. `download_dataset`
+//! 2. `load_dataset`
+//! 3. `show_expected_context`
 //!
 //! These tests intentionally share the dataset cache under
 //! `examples/rwkv-lm-eval/datasets` instead of creating temporary directories.
 //! The first run performs a real download when the benchmark cannot be loaded
 //! from disk; subsequent runs reuse the existing files.
 //!
-//! `loads_shared_dataset` and `renders_expected_context` assume the shared data
+//! `load_dataset` and `show_expected_context` assume the shared data
 //! is already present. If the dataset has not been downloaded yet, they fail
 //! with a message telling the caller to run the download test first.
 //!
 //! # How to run
 //!
 //! Use `cargo nextest`, not plain `cargo test`, for these ignored dataset
-//! tests. The repository-level nextest config serializes them through a shared
-//! test group and gives them the expected `download -> load -> render` priority
-//! when a command matches more than one phase.
+//! tests. The repository-level nextest config gives them the expected
+//! `download -> load -> render` priority when a command matches more than one
+//! phase, and the test helpers take a per-benchmark file lock so different
+//! benchmarks can still run in parallel against the shared cache.
 //!
 //! Recommended commands:
 //!
 //! ```text
-//! cargo nextest run -p rwkv-eval --lib --run-ignored only downloads_or_reuses_shared_dataset --no-capture
-//! cargo nextest run -p rwkv-eval --lib --run-ignored only loads_shared_dataset --no-capture
-//! cargo nextest run -p rwkv-eval --lib --run-ignored only renders_expected_context --no-capture
-//! cargo nextest run -p rwkv-eval --lib --run-ignored only -E 'test(/(downloads_or_reuses_shared_dataset|loads_shared_dataset|renders_expected_context)$/)' --no-capture
+//! cargo nextest run -p rwkv-eval --lib --run-ignored only download_dataset --no-capture
+//! cargo nextest run -p rwkv-eval --lib --run-ignored only load_dataset --no-capture
+//! cargo nextest run -p rwkv-eval --lib --run-ignored only show_expected_context --no-capture
+//! cargo nextest run -p rwkv-eval --lib --run-ignored only -E 'test(/(download_dataset|load_dataset|show_expected_context)$/)' --no-capture
 //! cargo nextest run -p rwkv-eval --lib 'cores::datasets::maths::gsm8k::tests::' --run-ignored only --no-capture
+//! ```
+//!
+//! When multi-file downloads are the bottleneck, increase the downloader
+//! parallelism for that run:
+//!
+//! ```text
+//! RWKV_EVAL_DOWNLOAD_TASKS=8 cargo nextest run -p rwkv-eval --lib --run-ignored only download_dataset --no-capture
 //! ```
 //!
 //! The last command shows the intended single-benchmark workflow: select one
@@ -218,12 +226,32 @@ pub fn render_context(expected_context: &str, replacements: &[(&str, &str)]) -> 
 #[cfg(test)]
 pub(crate) mod test_utils {
     use std::{
-        fs,
+        fs::{self, File, OpenOptions},
         path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    use fs4::fs_std::FileExt;
+
     use super::BenchmarkInfo;
+
+    struct SharedBenchmarkLock {
+        benchmark_name: &'static str,
+        lock_path: PathBuf,
+        file: File,
+    }
+
+    impl Drop for SharedBenchmarkLock {
+        fn drop(&mut self) {
+            self.file.unlock().unwrap_or_else(|err| {
+                panic!(
+                    "failed to unlock shared dataset lock for {} at {}: {err}",
+                    self.benchmark_name,
+                    self.lock_path.display()
+                )
+            });
+        }
+    }
 
     fn pick_sample_index(len: usize) -> usize {
         let nanos = SystemTime::now()
@@ -254,7 +282,48 @@ pub(crate) mod test_utils {
         (info.create)(dataset_root.to_path_buf())
     }
 
-    pub(crate) async fn assert_downloads_or_reuses_shared_dataset(info: &BenchmarkInfo) {
+    fn acquire_shared_benchmark_lock(
+        info: &BenchmarkInfo,
+        dataset_root: &Path,
+    ) -> SharedBenchmarkLock {
+        let lock_dir = dataset_root.join(".locks");
+        fs::create_dir_all(&lock_dir).unwrap_or_else(|err| {
+            panic!(
+                "failed to create shared dataset lock dir {}: {err}",
+                lock_dir.display()
+            )
+        });
+
+        let lock_path = lock_dir.join(format!("{}.lock", info.name.0));
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "failed to open shared dataset lock {}: {err}",
+                    lock_path.display()
+                )
+            });
+
+        file.lock_exclusive().unwrap_or_else(|err| {
+            panic!(
+                "failed to lock shared dataset {} at {}: {err}",
+                info.name.0,
+                lock_path.display()
+            )
+        });
+
+        SharedBenchmarkLock {
+            benchmark_name: info.name.0,
+            lock_path,
+            file,
+        }
+    }
+
+    pub(crate) async fn assert_download_dataset(info: &BenchmarkInfo) {
         let dataset_root = rwkv_lm_eval_datasets_path();
         fs::create_dir_all(&dataset_root).unwrap_or_else(|err| {
             panic!(
@@ -262,6 +331,7 @@ pub(crate) mod test_utils {
                 dataset_root.display()
             )
         });
+        let _lock = acquire_shared_benchmark_lock(info, &dataset_root);
 
         let mut benchmark = create_benchmark(info, &dataset_root);
         if benchmark.load() {
@@ -293,7 +363,7 @@ pub(crate) mod test_utils {
         );
     }
 
-    pub(crate) async fn assert_loads_shared_dataset(info: &BenchmarkInfo) {
+    pub(crate) async fn assert_load_dataset(info: &BenchmarkInfo) {
         assert_eq!(
             info.avg_ks.len(),
             1,
@@ -303,11 +373,12 @@ pub(crate) mod test_utils {
         let avg_k = info.avg_ks[0];
 
         let dataset_root = rwkv_lm_eval_datasets_path();
+        let _lock = acquire_shared_benchmark_lock(info, &dataset_root);
         let mut benchmark = create_benchmark(info, &dataset_root);
 
         assert!(
             !benchmark.load(),
-            "benchmark {} failed to load from {}. run downloads_or_reuses_shared_dataset first",
+            "benchmark {} failed to load from {}. run download_dataset first",
             info.name.0,
             dataset_root.display()
         );
@@ -326,7 +397,7 @@ pub(crate) mod test_utils {
         );
     }
 
-    pub(crate) async fn assert_renders_expected_context(info: &BenchmarkInfo) {
+    pub(crate) async fn assert_show_expected_context(info: &BenchmarkInfo) {
         let cot_mode = *info
             .cot_mode
             .first()
@@ -336,10 +407,11 @@ pub(crate) mod test_utils {
             .first()
             .unwrap_or_else(|| panic!("benchmark {} missing supported n_shot", info.name.0));
         let dataset_root = rwkv_lm_eval_datasets_path();
+        let _lock = acquire_shared_benchmark_lock(info, &dataset_root);
         let mut benchmark = create_benchmark(info, &dataset_root);
         assert!(
             !benchmark.load(),
-            "benchmark {} failed to load from {}. run downloads_or_reuses_shared_dataset first",
+            "benchmark {} failed to load from {}. run download_dataset first",
             info.name.0,
             dataset_root.display()
         );
@@ -385,27 +457,28 @@ pub(crate) mod test_utils {
 /// The expanded tests are intentionally marked `#[ignore]` because they may
 /// touch the network or depend on previously downloaded shared datasets. Run
 /// them with `cargo nextest --run-ignored only ...` so the nextest config can
-/// serialize access to the shared dataset cache.
+/// prioritize the three phases while the test helpers serialize access to each
+/// benchmark's shared dataset cache entry.
 #[cfg(test)]
 macro_rules! benchmark_dataset_tests {
     ($info:expr) => {
         #[tokio::test]
         #[ignore = "downloads remote benchmark dataset into examples/rwkv-lm-eval/datasets"]
-        async fn downloads_or_reuses_shared_dataset() {
-            $crate::cores::datasets::test_utils::assert_downloads_or_reuses_shared_dataset(&$info)
+        async fn download_dataset() {
+            $crate::cores::datasets::test_utils::assert_download_dataset(&$info)
                 .await;
         }
 
         #[tokio::test]
         #[ignore = "loads benchmark dataset from examples/rwkv-lm-eval/datasets"]
-        async fn loads_shared_dataset() {
-            $crate::cores::datasets::test_utils::assert_loads_shared_dataset(&$info).await;
+        async fn load_dataset() {
+            $crate::cores::datasets::test_utils::assert_load_dataset(&$info).await;
         }
 
         #[tokio::test]
         #[ignore = "renders benchmark context from examples/rwkv-lm-eval/datasets"]
-        async fn renders_expected_context() {
-            $crate::cores::datasets::test_utils::assert_renders_expected_context(&$info).await;
+        async fn show_expected_context() {
+            $crate::cores::datasets::test_utils::assert_show_expected_context(&$info).await;
         }
     };
 }

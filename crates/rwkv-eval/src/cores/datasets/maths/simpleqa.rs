@@ -27,7 +27,7 @@ static SIMPLEQA_INFO: BenchmarkInfo = BenchmarkInfo {
     name: BenchmarkName("simpleqa"),
     field: Field::Maths,
     display_name: "SimpleQA",
-    cot_mode: &[],
+    cot_mode: &[CoTMode::CoT],
     sampling_config: SamplingConfig {
         temperature: 0.3,
         top_k: 500,

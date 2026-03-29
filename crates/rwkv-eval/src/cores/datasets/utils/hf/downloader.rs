@@ -14,6 +14,8 @@ use reqwest::{Client, RequestBuilder, Url};
 use tokio::{sync::Semaphore, time::sleep};
 use walkdir::WalkDir;
 
+const DOWNLOAD_TASKS_ENV: &str = "RWKV_EVAL_DOWNLOAD_TASKS";
+
 #[derive(Debug, Clone)]
 pub struct UrlDownloadFile {
     pub relative_path: PathBuf,
@@ -65,6 +67,7 @@ pub async fn download_hf_repo<P: AsRef<Path>>(
         .trim_end_matches('/')
         .to_string();
     let client = Client::new();
+    let tasks = effective_download_tasks(tasks, lfs.len());
     let sem = Arc::new(Semaphore::new(tasks));
 
     let mut handles = Vec::with_capacity(lfs.len());
@@ -167,6 +170,7 @@ pub async fn download_url_files<P: AsRef<Path>>(
     pb.set_message(format!("Downloading URL files ({} files)", files.len()));
 
     let client = Client::new();
+    let tasks = effective_download_tasks(tasks, files.len());
     let sem = Arc::new(Semaphore::new(tasks));
 
     let mut handles = Vec::with_capacity(files.len());
@@ -279,6 +283,7 @@ pub async fn download_hf_files<P: AsRef<Path>>(
         .trim_end_matches('/')
         .to_string();
     let client = Client::new();
+    let tasks = effective_download_tasks(tasks, files.len());
     let sem = Arc::new(Semaphore::new(tasks));
 
     let mut handles = Vec::with_capacity(files.len());
@@ -419,6 +424,25 @@ where
         "网络操作失败（已重试 5 次）: {}. 最后一次错误: {}",
         operation_name, last_error
     );
+}
+
+fn effective_download_tasks(default_tasks: usize, unit_count: usize) -> usize {
+    assert_ne!(default_tasks, 0, "tasks 不能为 0");
+    assert_ne!(unit_count, 0, "unit_count 不能为 0");
+
+    let tasks = env::var(DOWNLOAD_TASKS_ENV)
+        .ok()
+        .map(|value| {
+            let trimmed = value.trim();
+            trimmed.parse::<usize>().unwrap_or_else(|_| {
+                panic!("{DOWNLOAD_TASKS_ENV} 必须是正整数，当前值为 {:?}", value)
+            })
+        })
+        .unwrap_or(default_tasks);
+
+    assert_ne!(tasks, 0, "{DOWNLOAD_TASKS_ENV} 不能为 0");
+
+    tasks.min(unit_count)
 }
 
 fn get_hf_token() -> Option<String> {

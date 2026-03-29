@@ -7,15 +7,8 @@ use serde::Deserialize;
 
 use crate::cores::{
     datasets::{
-        ALL_BENCHMARKS,
-        Benchmark,
-        BenchmarkInfo,
-        BenchmarkName,
-        CoTMode,
-        Field,
-        Record,
-        SamplingConfig,
-        apply_user_assistant_template,
+        ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
+        SamplingConfig, apply_user_assistant_template,
         coding::{extract_code, get_code_completion_with_cot_mode},
         utils::{
             hf::downloader::{UrlDownloadFile, download_url_files},
@@ -149,8 +142,9 @@ impl Benchmark for LiveCodeBench {
                 ),
             })
             .collect::<Vec<_>>();
+        let tasks = files.len().min(4);
         let downloaded_path =
-            download_url_files(&self.dataset_root, "livecodebench", &files, 1).await;
+            download_url_files(&self.dataset_root, "livecodebench", &files, tasks).await;
         println!("livecodebench dataset: {}", downloaded_path.display());
     }
 

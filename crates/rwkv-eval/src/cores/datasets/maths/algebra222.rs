@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use sonic_rs::Object as Map;
+use serde::Deserialize;
 
 use crate::cores::datasets::{
     ALL_BENCHMARKS,
@@ -47,6 +47,12 @@ pub struct Algebra222 {
     test: Vec<Algebra222Item>,
 }
 
+#[derive(Debug, Deserialize)]
+struct Algebra222CsvRow {
+    question: String,
+    final_answer: Option<String>,
+}
+
 pub struct Algebra222Item {
     question: String,
     answer: String,
@@ -72,22 +78,19 @@ impl Benchmark for Algebra222 {
             return true;
         }
 
-        self.test = read_csv_items::<Map, _>(&path)
+        self.test = read_csv_items::<Algebra222CsvRow, _>(&path)
             .into_iter()
             .filter_map(|row| {
-                Some((
-                    row.get(&"question")
-                        .and_then(crate::cores::datasets::maths::json_value_as_text)?,
-                    row.get(&"final_answer")
-                        .and_then(crate::cores::datasets::maths::json_value_as_text)
-                        .unwrap_or_default(),
-                    "math".to_string(),
-                ))
-            })
-            .map(|(question, answer, subject)| Algebra222Item {
-                question,
-                answer,
-                subject,
+                let question = row.question.trim().to_string();
+                if question.is_empty() {
+                    return None;
+                }
+
+                Some(Algebra222Item {
+                    question,
+                    answer: row.final_answer.unwrap_or_default(),
+                    subject: "math".to_string(),
+                })
             })
             .collect();
 

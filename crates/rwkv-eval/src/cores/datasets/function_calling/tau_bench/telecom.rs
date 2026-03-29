@@ -1886,8 +1886,7 @@ impl TauDomainEnv for TelecomEnv {
 fn parse_toml_value(path: &Path) -> Result<Value, String> {
     let text = fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
-    let value = text
-        .parse::<toml::Value>()
+    let value = toml::from_str::<toml::Value>(&text)
         .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
     sonic_rs::to_value(&value)
         .map_err(|err| format!("failed to convert {} to json: {err}", path.display()))
