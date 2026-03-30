@@ -13,9 +13,18 @@ jobs:
   deploy:
     runs-on: [self-hosted, linux, x64, alicloud]
 
+    env:
+      http_proxy: http://127.0.0.1:7890
+      https_proxy: http://127.0.0.1:7890
+      no_proxy: 127.0.0.1,localhost
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Show proxy env
+        run: |
+          env | grep -E '^(http_proxy|https_proxy|no_proxy)=' || true
 
       - name: Deploy eval on ECS
         run: |

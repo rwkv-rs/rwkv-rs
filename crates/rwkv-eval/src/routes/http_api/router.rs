@@ -52,9 +52,9 @@ impl HttpApiRouterBuilder {
             ));
 
         Router::new()
-            .route("/", get(index))
-            .route("/health", get(health))
-            .route("/openapi.json", get(openapi_json))
+            .route("/api", get(index))
+            .route("/api/health", get(health))
+            .route("/api/openapi.json", get(openapi_json))
             .route("/api/v1/meta", get(meta))
             .route("/api/v1/models", get(models))
             .route("/api/v1/benchmarks", get(benchmarks))

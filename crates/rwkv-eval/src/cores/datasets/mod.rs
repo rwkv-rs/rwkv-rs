@@ -33,8 +33,8 @@
 //! cargo nextest run -p rwkv-eval --lib --run-ignored only download_dataset --no-capture
 //! cargo nextest run -p rwkv-eval --lib --run-ignored only load_dataset --no-capture
 //! cargo nextest run -p rwkv-eval --lib --run-ignored only show_expected_context --no-capture
-//! cargo nextest run -p rwkv-eval --lib --run-ignored only -E 'test(/(download_dataset|load_dataset|show_expected_context)$/)' --no-capture
 //! cargo nextest run -p rwkv-eval --lib 'cores::datasets::maths::gsm8k::tests::' --run-ignored only --no-capture
+//! cargo nextest run -p rwkv-eval --lib --run-ignored only 'tau_bench::benchmark::tests::show_expected_context' --no-capture
 //! ```
 //!
 //! When multi-file downloads are the bottleneck, increase the downloader
@@ -44,8 +44,15 @@
 //! RWKV_EVAL_DOWNLOAD_TASKS=8 cargo nextest run -p rwkv-eval --lib --run-ignored only download_dataset --no-capture
 //! ```
 //!
-//! The last command shows the intended single-benchmark workflow: select one
-//! benchmark's test module and let nextest schedule the three phases in order.
+//! The fourth command selects one benchmark's whole test module and lets
+//! nextest schedule the three phases in order. The fifth command is the
+//! shortest correct way to run just one benchmark's `show_expected_context`
+//! test.
+//!
+//! Avoid combining positional filters like
+//! `... 'tau_bench::benchmark::tests::' ... show_expected_context ...`:
+//! nextest treats them as a union, so the trailing `show_expected_context`
+//! matches every benchmark's test with that name.
 //!
 pub mod coding;
 pub mod function_calling;
