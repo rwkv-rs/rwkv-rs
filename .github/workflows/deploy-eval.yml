@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, linux, x64, aliyun]
+    runs-on: [self-hosted, linux, x64, alicloud]
 
     steps:
       - name: Checkout code
