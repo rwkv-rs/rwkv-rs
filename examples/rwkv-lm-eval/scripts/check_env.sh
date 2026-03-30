@@ -12,6 +12,7 @@ sudo apt-get install -y \
   libcap-ng-dev \
   libdrm-dev \
   libssl-dev
+curl -sSL https://get.microsandbox.dev | sh
 
 echo "== tool checks =="
 command -v cc
