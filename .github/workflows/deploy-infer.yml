@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, linux, x64, pro6000-source]
+    runs-on: [self-hosted, linux, x64, szx-pro6000x4]
 
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
