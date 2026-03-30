@@ -26,7 +26,7 @@ tower = { version = "0.5.3" }
 iceoryx2 = { version = "0.8.1", features = ["libc_platform"] }
 reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls", "query", "stream"] }
 async-openai = { version = "0.34.0", default-features = false, features = ["rustls", "completions", "chat-completion", "byot"] }
-uuid = { version = "1.22.0", features = ["v4", "serde"] }
+uuid = { version = "1.23.0", features = ["v4", "serde"] }
 bytes = { version = "1.11.1" }
 linkme = { version = "0.3.35" }
 
@@ -71,9 +71,9 @@ itertools = { version = "0.14.0" }
 walkdir = { version = "2.5.0" }
 derive-new = { version = "0.7.0" }
 flate2 = { version = "1.1.9" }
-microsandbox = { version = "0.3.2", features = ["prebuilt"] }
+microsandbox = { version = "0.3.4", features = ["prebuilt"] }
 
-unicode-segmentation = "1.13.1"
+unicode-segmentation = "1.13.2"
 unicode-script = "0.5.8"
 unicode-normalization = "0.1.25"
 
@@ -94,7 +94,7 @@ clia-tracing-config = "0.2.7"
 indicatif = { version = "0.18.4", features = ["tokio"] }
 thiserror = "2.0.18"
 wandb = { git = "https://github.com/rwkv-rs/wandb-rs", rev = "1633ca27afb4e09caca2e00d148ea239bc639a69" }
-all-smi = { version = "0.17.3" }
+all-smi = { version = "0.17.5" }
 kuva = { version = "0.1.4" }
 
 # === Deep Learning Core ===
