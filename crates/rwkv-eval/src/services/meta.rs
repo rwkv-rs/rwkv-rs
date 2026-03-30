@@ -2,11 +2,13 @@ use std::{collections::BTreeMap, sync::OnceLock};
 
 use crate::{
     cores::datasets::{ALL_BENCHMARKS, BenchmarkInfo},
+    db::{BenchmarkRecord, Db, ModelRecord, list_benchmarks, list_models},
     dtos::{ApiCotMode, BenchmarkField},
+    services::{ServiceError, ServiceResult},
 };
 
 #[derive(Clone)]
-pub(crate) struct BenchmarkCatalogEntry {
+pub struct BenchmarkCatalogEntry {
     pub display_name: &'static str,
     pub field: BenchmarkField,
     pub supported_cot_modes: Vec<ApiCotMode>,
@@ -15,7 +17,19 @@ pub(crate) struct BenchmarkCatalogEntry {
     pub supported_pass_ks: Vec<u8>,
 }
 
-pub(crate) fn benchmark_names_for_field(field: BenchmarkField) -> Vec<String> {
+pub async fn models(db: &Db) -> ServiceResult<Vec<ModelRecord>> {
+    list_models(db).await.map_err(ServiceError::internal)
+}
+
+pub async fn benchmarks(db: &Db) -> ServiceResult<Vec<BenchmarkRecord>> {
+    list_benchmarks(db).await.map_err(ServiceError::internal)
+}
+
+pub async fn meta(db: &Db) -> ServiceResult<(Vec<ModelRecord>, Vec<BenchmarkRecord>)> {
+    Ok((models(db).await?, benchmarks(db).await?))
+}
+
+pub fn benchmark_names_for_field(field: BenchmarkField) -> Vec<String> {
     benchmark_catalog()
         .iter()
         .filter(|(_, entry)| entry.field == field)
@@ -23,7 +37,7 @@ pub(crate) fn benchmark_names_for_field(field: BenchmarkField) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn catalog_for_benchmark(name: &str) -> Option<&'static BenchmarkCatalogEntry> {
+pub fn catalog_for_benchmark(name: &str) -> Option<&'static BenchmarkCatalogEntry> {
     benchmark_catalog().get(name)
 }
 

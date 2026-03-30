@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use rwkv_config::{load_toml, raw::eval::RawEvalConfig, validated::eval::FinalEvalConfigBuilder};
-use rwkv_eval::{routes::http_api::AppState, services::runner::build_http_app_state};
+use rwkv_eval::routes::http_api::AppState;
 
 pub fn resolve_eval_cfg_path(config_dir: &Path, eval_cfg_name: &str) -> PathBuf {
     [
@@ -45,7 +45,7 @@ pub async fn build_http_runtime(
     let max_connections = db_pool_max_connections
         .or(raw_eval_cfg.db_pool_max_connections)
         .unwrap_or(32);
-    let app_state = build_http_app_state(raw_eval_cfg, db_pool_max_connections)
+    let app_state = AppState::from_config(raw_eval_cfg, db_pool_max_connections)
         .await
         .unwrap_or_else(|err| panic!("failed to prepare eval app state: {err}"));
 

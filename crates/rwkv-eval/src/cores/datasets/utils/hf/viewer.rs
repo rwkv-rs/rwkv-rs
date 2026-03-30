@@ -96,11 +96,7 @@ async fn fetch_viewer_body(endpoint: &str, query: &[(&str, &str)], operation_nam
             let backoff_secs = 1_u64 << (attempt - 1);
             eprintln!(
                 "[network retry {}/{}] {} failed: {}. Retrying in {}s...",
-                attempt,
-                VIEWER_RETRY_ATTEMPTS,
-                operation_name,
-                last_error,
-                backoff_secs
+                attempt, VIEWER_RETRY_ATTEMPTS, operation_name, last_error, backoff_secs
             );
             sleep(Duration::from_secs(backoff_secs)).await;
         }
@@ -108,8 +104,6 @@ async fn fetch_viewer_body(endpoint: &str, query: &[(&str, &str)], operation_nam
 
     panic!(
         "network operation failed after {} attempts: {}. last error: {}",
-        VIEWER_RETRY_ATTEMPTS,
-        operation_name,
-        last_error
+        VIEWER_RETRY_ATTEMPTS, operation_name, last_error
     );
 }

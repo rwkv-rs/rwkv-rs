@@ -11,7 +11,7 @@ use tokio::{sync::Semaphore, task::JoinSet};
 use crate::{
     cores::datasets::{Benchmark, BenchmarkInfo, CoTMode},
     db::{Db, ScoreInsert, TaskStatus, insert_score, update_task_status},
-    services::runtime::{DesiredState, EvalRuntimeControl, ObservedStatus},
+    services::admin::{DesiredState, EvalRuntimeControl, ObservedStatus},
 };
 use super::{
     attempts::{execute_attempt, execute_pending_checks},
@@ -621,16 +621,9 @@ mod tests {
 
     use rwkv_config::raw::eval::IntApiConfig;
 
-    use crate::{
-        cores::datasets::{
-            Benchmark,
-            BenchmarkInfo,
-            BenchmarkName,
-            CoTMode,
-            Field,
-            SamplingConfig,
-        },
-        services::runner::client::build_client,
+    use crate::cores::{
+        datasets::{Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig},
+        evaluation::client::build_client,
     };
     use super::*;
 

@@ -1,0 +1,29 @@
+use axum::{Json, extract::State};
+
+use crate::{
+    dtos::AdminHealthResponse,
+    routes::http_api::{AppState, error::ApiResult},
+    services::admin::fetch_health_targets,
+};
+use super::mapper::to_admin_health_target_resource;
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/admin/health",
+    responses(
+        (status = 200, description = "Current eval config health fan-out", body = AdminHealthResponse),
+        (status = 401, description = "Unauthorized", body = super::super::error::ErrorResponse),
+        (status = 403, description = "Forbidden", body = super::super::error::ErrorResponse),
+        (status = 500, description = "Internal server error", body = super::super::error::ErrorResponse)
+    ),
+    tag = "admin"
+)]
+pub(crate) async fn admin_health(State(state): State<AppState>) -> ApiResult<AdminHealthResponse> {
+    let targets = fetch_health_targets(&state.health_client, &state.service_config).await?;
+    Ok(Json(AdminHealthResponse {
+        targets: targets
+            .into_iter()
+            .map(to_admin_health_target_resource)
+            .collect(),
+    }))
+}

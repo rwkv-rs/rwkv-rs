@@ -100,16 +100,9 @@ fn estimate_pass_at_k(n: usize, c: usize, k: u8) -> Result<f64, String> {
 mod tests {
     use std::{collections::BTreeMap, path::PathBuf};
 
-    use crate::{
-        cores::datasets::{
-            Benchmark,
-            BenchmarkInfo,
-            BenchmarkName,
-            CoTMode,
-            Field,
-            SamplingConfig,
-        },
-        services::runner::{runtime::AttemptKey, sampling::AvgKExecutionPlan},
+    use crate::cores::{
+        datasets::{Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, SamplingConfig},
+        evaluation::{runtime::AttemptKey, sampling::AvgKExecutionPlan},
     };
     use super::{compute_metrics, estimate_pass_at_k};
 

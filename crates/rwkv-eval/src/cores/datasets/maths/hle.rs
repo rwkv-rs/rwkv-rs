@@ -75,15 +75,15 @@ impl Benchmark for Hle {
         }
 
         let parse_item = |row: &Row| {
-            let has_image = get_optional_string(row, "image")
-                .is_some_and(|value| !value.trim().is_empty());
+            let has_image =
+                get_optional_string(row, "image").is_some_and(|value| !value.trim().is_empty());
             (!has_image).then(|| HleItem {
-                    question: get_string(row, "question"),
-                    answer: get_string(row, "answer"),
-                    subject: get_optional_string(row, "category")
-                        .or_else(|| get_optional_string(row, "raw_subject"))
-                        .unwrap_or_else(|| "math".to_string()),
-                })
+                question: get_string(row, "question"),
+                answer: get_string(row, "answer"),
+                subject: get_optional_string(row, "category")
+                    .or_else(|| get_optional_string(row, "raw_subject"))
+                    .unwrap_or_else(|| "math".to_string()),
+            })
         };
         for path in parquet_paths {
             self.test

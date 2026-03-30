@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use rwkv_config::validated::eval::FinalEvalConfigBuilder;
 
-use crate::services::{ServiceResult, runner};
+use crate::{cores::evaluation, services::ServiceResult};
 
 #[derive(Clone, Debug, Default)]
 pub struct LocalClient;
@@ -19,7 +19,7 @@ impl LocalClient {
         config_path: PathBuf,
         logs_path: PathBuf,
     ) -> ServiceResult<()> {
-        runner::run_evaluation(eval_cfg_builder, datasets_path, config_path, logs_path).await
+        evaluation::run_evaluation(eval_cfg_builder, datasets_path, config_path, logs_path).await
     }
 }
 

@@ -465,8 +465,7 @@ macro_rules! benchmark_dataset_tests {
         #[tokio::test]
         #[ignore = "downloads remote benchmark dataset into examples/rwkv-lm-eval/datasets"]
         async fn download_dataset() {
-            $crate::cores::datasets::test_utils::assert_download_dataset(&$info)
-                .await;
+            $crate::cores::datasets::test_utils::assert_download_dataset(&$info).await;
         }
 
         #[tokio::test]

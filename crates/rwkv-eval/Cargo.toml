@@ -33,3 +33,4 @@ microsandbox = { workspace = true }
 
 [dev-dependencies]
 fs4 = "0.13"
+tower = { workspace = true }

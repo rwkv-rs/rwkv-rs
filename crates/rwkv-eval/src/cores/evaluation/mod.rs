@@ -18,10 +18,7 @@ use std::{
     sync::Arc,
 };
 
-use rwkv_config::{
-    raw::eval::{RawEvalConfig, SpaceDbConfig},
-    validated::eval::{EVAL_CFG, FinalEvalConfigBuilder},
-};
+use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfigBuilder};
 use tokio::sync::Semaphore;
 
 use crate::{
@@ -32,12 +29,10 @@ use crate::{
         ModelInsert,
         TaskInsert,
         TaskStatus,
-        connect,
         upsert_benchmark,
         upsert_model,
     },
-    routes::http_api::AppState,
-    services::runtime::{EvalRuntimeControl, ObservedStatus},
+    services::admin::{EvalRuntimeControl, ObservedStatus},
 };
 use self::{
     attempts::build_attempt_keys,
@@ -60,21 +55,6 @@ use self::{
 };
 
 const EVALUATOR_NAME: &str = "rwkv-lm-eval";
-
-pub async fn build_http_app_state(
-    mut raw_eval_cfg: RawEvalConfig,
-    db_pool_max_connections: Option<u32>,
-) -> Result<AppState, String> {
-    raw_eval_cfg.fill_default();
-    validate_space_db_config(&raw_eval_cfg.space_db)?;
-
-    let max_connections = db_pool_max_connections
-        .or(raw_eval_cfg.db_pool_max_connections)
-        .unwrap_or(32);
-    let db = connect(&raw_eval_cfg.space_db, max_connections).await?;
-
-    Ok(AppState::new(db, raw_eval_cfg))
-}
 
 pub async fn run_evaluation(
     eval_cfg_builder: FinalEvalConfigBuilder,
@@ -224,27 +204,6 @@ pub async fn run_evaluation(
 
     Ok(())
 }
-
-fn validate_space_db_config(cfg: &SpaceDbConfig) -> Result<(), String> {
-    if cfg.host.trim().is_empty() {
-        return Err("space_db.host cannot be empty".to_string());
-    }
-    if cfg.username.trim().is_empty() {
-        return Err("space_db.username cannot be empty".to_string());
-    }
-    if cfg.password.trim().is_empty() {
-        return Err("space_db.password cannot be empty".to_string());
-    }
-    if cfg.port.trim().is_empty() {
-        return Err("space_db.port cannot be empty".to_string());
-    }
-    if cfg.database_name.trim().is_empty() {
-        return Err("space_db.database_name cannot be empty".to_string());
-    }
-
-    Ok(())
-}
-
 fn build_model_runtimes(
     clients_with_cfg: &[Arc<ClientWithConfig>],
 ) -> BTreeMap<String, ModelRuntime> {

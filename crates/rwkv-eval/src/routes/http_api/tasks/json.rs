@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 
 use sonic_rs::{Value, from_str, prelude::*};
 
-use super::error::ApiError;
 use crate::{
     db::TaskRecord,
     dtos::{ApiCotMode, SamplingSummary, ScoreSummary, TaskProgress},
+    routes::http_api::error::ApiError,
 };
 
 pub(crate) fn parse_sampling_summary(raw: &str) -> Result<SamplingSummary, ApiError> {

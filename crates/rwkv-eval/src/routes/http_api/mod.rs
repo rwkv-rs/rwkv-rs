@@ -1,11 +1,13 @@
-mod catalog;
+mod admin;
+mod completions;
 mod error;
-mod handlers;
-mod json;
-mod mappers;
+mod meta;
 mod openapi;
+mod review_queue;
 mod router;
 mod state;
+mod system;
+mod tasks;
 
+pub use router::{HttpApiRouterBuilder, build_router};
 pub use state::AppState;
-pub use router::build_router;
