@@ -1,0 +1,22 @@
+name: Deploy Eval
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, x64, aliyun-proxy]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy eval on ECS
+        run: |
+          /srv/deploy/deploy_eval.sh "$GITHUB_WORKSPACE"

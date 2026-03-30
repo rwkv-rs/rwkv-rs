@@ -1,0 +1,25 @@
+name: Deploy Infer
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, x64, pro6000-source]
+
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy infer from Pro6000
+        run: |
+          /srv/deploy/deploy_infer.sh "$GITHUB_WORKSPACE"
