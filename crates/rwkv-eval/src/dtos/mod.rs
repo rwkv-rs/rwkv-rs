@@ -358,6 +358,57 @@ pub struct AdminHealthResponse {
     pub targets: Vec<AdminHealthTargetResource>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct AdminEvalConfigDto {
+    pub experiment_name: String,
+    pub experiment_desc: String,
+    pub admin_api_key: Option<String>,
+    pub run_mode: Option<String>,
+    pub skip_checker: Option<bool>,
+    pub judger_concurrency: Option<usize>,
+    pub checker_concurrency: Option<usize>,
+    pub db_pool_max_connections: Option<u32>,
+    pub model_arch_versions: Vec<String>,
+    pub model_data_versions: Vec<String>,
+    pub model_num_params: Vec<String>,
+    pub benchmark_field: Vec<String>,
+    pub extra_benchmark_name: Vec<String>,
+    pub upload_to_space: Option<bool>,
+    pub git_hash: String,
+    pub models: Vec<AdminEvalModelConfigDto>,
+    pub llm_judger: AdminEvalExtApiConfigDto,
+    pub llm_checker: AdminEvalExtApiConfigDto,
+    pub space_db: AdminEvalSpaceDbConfigDto,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct AdminEvalModelConfigDto {
+    pub model_arch_version: String,
+    pub model_data_version: String,
+    pub model_num_params: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub max_batch_size: Option<usize>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct AdminEvalExtApiConfigDto {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct AdminEvalSpaceDbConfigDto {
+    pub username: String,
+    pub password: String,
+    pub host: String,
+    pub port: String,
+    pub database_name: String,
+    pub sslmode: Option<String>,
+}
+
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct ListTasksParams {
     pub limit: Option<u32>,

@@ -32,8 +32,12 @@ pub fn load_toml<P: AsRef<Path>, T: DeserializeOwned + 'static>(path: P) -> T {
     let content = fs::read_to_string(&path)
         .unwrap_or_else(|_| panic!("Failed to read file at path: {}", path.as_ref().display()));
 
-    toml::from_str(&content)
-        .unwrap_or_else(|_| panic!("Invalid TOML format in file: {}", path.as_ref().display()))
+    toml::from_str(&content).unwrap_or_else(|err| {
+        panic!(
+            "Failed to deserialize TOML file {}: {err}",
+            path.as_ref().display()
+        )
+    })
 }
 
 pub fn get_arg_value(args: &[String], key: &str) -> Option<String> {

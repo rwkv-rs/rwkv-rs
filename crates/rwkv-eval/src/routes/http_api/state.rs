@@ -50,7 +50,7 @@ impl AppState {
     }
 }
 
-fn validate_space_db_config(cfg: &SpaceDbConfig) -> Result<(), String> {
+pub(crate) fn validate_space_db_config(cfg: &SpaceDbConfig) -> Result<(), String> {
     if cfg.host.trim().is_empty() {
         return Err("space_db.host cannot be empty".to_string());
     }

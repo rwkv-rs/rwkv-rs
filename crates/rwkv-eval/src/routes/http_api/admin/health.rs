@@ -3,7 +3,7 @@ use axum::{Json, extract::State};
 use crate::{
     dtos::AdminHealthResponse,
     routes::http_api::{AppState, error::ApiResult},
-    services::admin::fetch_health_targets,
+    services::admin::fetch_admin_health_targets,
 };
 use super::mapper::to_admin_health_target_resource;
 
@@ -19,7 +19,13 @@ use super::mapper::to_admin_health_target_resource;
     tag = "admin"
 )]
 pub(crate) async fn admin_health(State(state): State<AppState>) -> ApiResult<AdminHealthResponse> {
-    let targets = fetch_health_targets(&state.health_client, &state.service_config).await?;
+    let snapshot = state.eval_controller.snapshot().await?;
+    let targets = fetch_admin_health_targets(
+        &state.health_client,
+        snapshot.as_ref(),
+        &state.service_config,
+    )
+    .await?;
     Ok(Json(AdminHealthResponse {
         targets: targets
             .into_iter()

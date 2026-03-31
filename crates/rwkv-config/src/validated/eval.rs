@@ -11,7 +11,6 @@ use crate::raw::eval::{ExtApiConfig, IntApiConfig, SpaceDbConfig};
 pub struct FinalEvalConfig {
     pub experiment_name: String,
     pub experiment_desc: String,
-    #[serde(skip_serializing)]
     pub admin_api_key: Option<String>,
     pub run_mode: String,
     pub skip_checker: bool,

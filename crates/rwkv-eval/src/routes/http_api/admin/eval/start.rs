@@ -1,14 +1,15 @@
-use axum::extract::State;
+use axum::{Json, extract::State};
 
 use crate::{
-    dtos::AdminEvalStatusResponse,
+    dtos::{AdminEvalConfigDto, AdminEvalStatusResponse},
     routes::http_api::{AppState, error::ApiResult},
 };
-use super::service::admin_eval_status_response;
+use super::service::{admin_eval_status_response, parse_admin_eval_request};
 
 #[utoipa::path(
     post,
     path = "/api/v1/admin/eval/start",
+    request_body = AdminEvalConfigDto,
     responses(
         (status = 200, description = "Started or reused the current admin evaluation process", body = AdminEvalStatusResponse),
         (status = 400, description = "Bad request", body = super::super::super::error::ErrorResponse),
@@ -21,7 +22,9 @@ use super::service::admin_eval_status_response;
 )]
 pub(crate) async fn admin_eval_start(
     State(state): State<AppState>,
+    Json(payload): Json<AdminEvalConfigDto>,
 ) -> ApiResult<AdminEvalStatusResponse> {
-    state.eval_controller.start(&state.service_config).await?;
+    let run_cfg = parse_admin_eval_request(payload, &state.service_config)?;
+    state.eval_controller.start(&run_cfg).await?;
     admin_eval_status_response(&state).await
 }

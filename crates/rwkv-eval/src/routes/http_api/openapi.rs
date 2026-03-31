@@ -6,12 +6,14 @@ use super::error::ErrorResponse;
 use super::{
     admin::{
         __path_admin_eval_cancel,
+        __path_admin_eval_draft,
         __path_admin_eval_pause,
         __path_admin_eval_resume,
         __path_admin_eval_start,
         __path_admin_eval_status,
         __path_admin_health,
         admin_eval_cancel,
+        admin_eval_draft,
         admin_eval_pause,
         admin_eval_resume,
         admin_eval_start,
@@ -33,6 +35,7 @@ use super::{
 };
 use crate::dtos::{
     AdminDependencyResource,
+    AdminEvalConfigDto,
     AdminEvalStatusResponse,
     AdminHealthResponse,
     AdminHealthTargetResource,
@@ -73,6 +76,7 @@ use crate::dtos::{
         task_attempts,
         completion_detail,
         review_queue,
+        admin_eval_draft,
         admin_eval_start,
         admin_eval_pause,
         admin_eval_resume,
@@ -101,6 +105,7 @@ use crate::dtos::{
             ReviewQueueResource,
             ReviewQueueResponse,
             AdminDependencyResource,
+            AdminEvalConfigDto,
             AdminEvalStatusResponse,
             AdminHealthTargetResource,
             AdminHealthResponse,
@@ -142,6 +147,7 @@ mod tests {
             "/api/v1/tasks/{task_id}/attempts",
             "/api/v1/completions/{completions_id}",
             "/api/v1/review-queue",
+            "/api/v1/admin/eval/draft",
             "/api/v1/admin/eval/start",
             "/api/v1/admin/eval/pause",
             "/api/v1/admin/eval/resume",

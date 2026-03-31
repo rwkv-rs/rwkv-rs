@@ -226,9 +226,7 @@ impl EvalRuntimeControl {
             .unwrap_or_else(|| RuntimeFile::new(ObservedStatus::Starting, None));
 
         if let Some(existing) = runtime.dependencies.iter_mut().find(|dependency| {
-            dependency.role == role
-                && dependency.label == label
-                && dependency.base_url == base_url
+            dependency.role == role && dependency.label == label && dependency.base_url == base_url
         }) {
             existing.status = status;
             existing.message = message.map(ToOwned::to_owned);
@@ -264,15 +262,31 @@ struct InferHealthPayload {
     status: String,
     window_seconds: u64,
     server_time_unix_ms: u64,
-    queues: Vec<Value>,
-    gpus: Vec<Value>,
+    gpu_panels: Vec<Value>,
 }
 
 pub async fn fetch_health_targets(
     client: &Client,
     cfg: &RawEvalConfig,
 ) -> ServiceResult<Vec<HealthTargetResult>> {
-    let targets = collect_health_targets(cfg);
+    fetch_health_targets_for_targets(client, collect_health_targets(cfg)).await
+}
+
+pub async fn fetch_admin_health_targets(
+    client: &Client,
+    snapshot: Option<&EvalRunSnapshot>,
+    service_cfg: &RawEvalConfig,
+) -> ServiceResult<Vec<HealthTargetResult>> {
+    let targets = snapshot
+        .map(|snapshot| snapshot.health_targets.clone())
+        .unwrap_or_else(|| collect_health_targets(service_cfg));
+    fetch_health_targets_for_targets(client, targets).await
+}
+
+async fn fetch_health_targets_for_targets(
+    client: &Client,
+    targets: Vec<HealthTarget>,
+) -> ServiceResult<Vec<HealthTargetResult>> {
     let mut results = Vec::with_capacity(targets.len());
 
     for target in targets {
@@ -364,6 +378,7 @@ struct ActiveEvalRun {
     config_path: String,
     control_path: PathBuf,
     runtime_path: PathBuf,
+    health_targets: Vec<HealthTarget>,
     child: Child,
 }
 
@@ -372,6 +387,7 @@ pub struct EvalRunSnapshot {
     pub config_path: String,
     pub desired_state: DesiredState,
     pub runtime: RuntimeFile,
+    health_targets: Vec<HealthTarget>,
 }
 
 impl EvalController {
@@ -381,7 +397,7 @@ impl EvalController {
         }
     }
 
-    pub async fn start(&self, service_cfg: &RawEvalConfig) -> ServiceResult<EvalRunSnapshot> {
+    pub async fn start(&self, run_cfg: &RawEvalConfig) -> ServiceResult<EvalRunSnapshot> {
         let mut guard = self.inner.lock().await;
         refresh_active_run(guard.active.as_mut())?;
 
@@ -393,7 +409,7 @@ impl EvalController {
             }
         }
 
-        let active = ActiveEvalRun::spawn(service_cfg)?;
+        let active = ActiveEvalRun::spawn(run_cfg)?;
         let snapshot = active.snapshot()?;
         guard.active = Some(active);
         Ok(snapshot)
@@ -454,8 +470,8 @@ impl EvalController {
 }
 
 impl ActiveEvalRun {
-    fn spawn(service_cfg: &RawEvalConfig) -> ServiceResult<Self> {
-        let mut run_cfg = service_cfg.clone();
+    fn spawn(run_cfg: &RawEvalConfig) -> ServiceResult<Self> {
+        let mut run_cfg = run_cfg.clone();
         run_cfg.fill_default();
         run_cfg.admin_api_key = None;
         run_cfg.upload_to_space = Some(true);
@@ -495,6 +511,7 @@ impl ActiveEvalRun {
         let mut runtime = RuntimeFile::new(ObservedStatus::Starting, None);
         runtime.dependencies = build_runtime_dependencies(&run_cfg);
         write_runtime_file(&runtime_path, &runtime).map_err(ServiceError::internal)?;
+        let health_targets = collect_health_targets(&run_cfg);
 
         let mut command = build_evaluator_command(&temp_dir)?;
         command
@@ -511,6 +528,7 @@ impl ActiveEvalRun {
             config_path: config_path.display().to_string(),
             control_path,
             runtime_path,
+            health_targets,
             child,
         })
     }
@@ -528,6 +546,7 @@ impl ActiveEvalRun {
             config_path: self.config_path.clone(),
             desired_state,
             runtime,
+            health_targets: self.health_targets.clone(),
         })
     }
 }
@@ -761,11 +780,7 @@ where
 mod tests {
     use std::{fs, path::PathBuf};
 
-    use axum::{
-        Router,
-        http::header::CONTENT_TYPE,
-        routing::get,
-    };
+    use axum::{Router, http::header::CONTENT_TYPE, routing::get};
     use reqwest::Client;
     use rwkv_config::raw::eval::{ExtApiConfig, IntApiConfig, RawEvalConfig, SpaceDbConfig};
     use tokio::{net::TcpListener, task::JoinHandle};
@@ -775,13 +790,15 @@ mod tests {
         DependencyRole,
         DependencyStatus,
         DesiredState,
+        EvalRunSnapshot,
         EvalRuntimeControl,
         ObservedStatus,
-        RuntimeFile,
         RuntimeDependencyStatus,
+        RuntimeFile,
         build_runtime_dependencies,
         collect_health_targets,
         current_unix_millis,
+        fetch_admin_health_targets,
         fetch_health_targets,
         normalize_base_url,
         read_control_file,
@@ -961,27 +978,18 @@ mod tests {
                 get(|| async {
                     (
                         [(CONTENT_TYPE, "application/json")],
-                        r#"{"status":"ok","window_seconds":60,"server_time_unix_ms":1,"queues":[],"gpus":[]}"#,
+                        r#"{"status":"ok","window_seconds":60,"server_time_unix_ms":1,"gpu_panels":[]}"#,
                     )
                 }),
             ),
         )
         .await;
-        let (invalid_json_base_url, invalid_json_handle) = spawn_server(
-            Router::new().route("/health", get(|| async { "not-json" })),
-        )
-        .await;
-        let (wrong_schema_base_url, wrong_schema_handle) = spawn_server(
-            Router::new().route(
-                "/health",
-                get(|| async {
-                    (
-                        [(CONTENT_TYPE, "application/json")],
-                        r#"{"ok":true}"#,
-                    )
-                }),
-            ),
-        )
+        let (invalid_json_base_url, invalid_json_handle) =
+            spawn_server(Router::new().route("/health", get(|| async { "not-json" }))).await;
+        let (wrong_schema_base_url, wrong_schema_handle) = spawn_server(Router::new().route(
+            "/health",
+            get(|| async { ([(CONTENT_TYPE, "application/json")], r#"{"ok":true}"#) }),
+        ))
         .await;
 
         let mut cfg = sample_cfg();
@@ -1024,10 +1032,92 @@ mod tests {
             .unwrap();
         assert_eq!(wrong_schema_target.status, "invalid_response");
         assert!(
-            wrong_schema_target.error.as_ref().is_some_and(|error| {
-                error.contains("non-rwkv-infer health payload")
-            })
+            wrong_schema_target
+                .error
+                .as_ref()
+                .is_some_and(|error| { error.contains("non-rwkv-infer health payload") })
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_admin_health_targets_prefers_active_run_targets() {
+        let (service_base_url, service_handle) = spawn_server(Router::new().route(
+            "/health",
+            get(|| async { (axum::http::StatusCode::BAD_GATEWAY, "service-config") }),
+        ))
+        .await;
+        let (active_base_url, active_handle) = spawn_server(
+            Router::new().route(
+                "/health",
+                get(|| async {
+                    (
+                        [(CONTENT_TYPE, "application/json")],
+                        r#"{"status":"ok","window_seconds":60,"server_time_unix_ms":1,"gpu_panels":[]}"#,
+                    )
+                }),
+            ),
+        )
+        .await;
+
+        let mut service_cfg = sample_cfg();
+        service_cfg.models = vec![model_config(service_base_url.clone(), "service-model")];
+        let snapshot = EvalRunSnapshot {
+            config_path: "/tmp/active.toml".to_string(),
+            desired_state: DesiredState::Running,
+            runtime: RuntimeFile::new(ObservedStatus::Running, None),
+            health_targets: collect_health_targets(&RawEvalConfig {
+                models: vec![
+                    model_config(active_base_url.clone(), "active-a"),
+                    model_config(active_base_url.clone(), "active-b"),
+                ],
+                ..sample_cfg()
+            }),
+        };
+
+        let results = fetch_admin_health_targets(&Client::new(), Some(&snapshot), &service_cfg)
+            .await
+            .unwrap();
+
+        service_handle.abort();
+        active_handle.abort();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].base_url, active_base_url);
+        assert_eq!(results[0].status, "ok");
+        assert_eq!(
+            results[0].roles,
+            vec!["model:active-a".to_string(), "model:active-b".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_admin_health_targets_falls_back_to_service_config_without_active_run() {
+        let (service_base_url, service_handle) = spawn_server(
+            Router::new().route(
+                "/health",
+                get(|| async {
+                    (
+                        [(CONTENT_TYPE, "application/json")],
+                        r#"{"status":"ok","window_seconds":60,"server_time_unix_ms":1,"gpu_panels":[]}"#,
+                    )
+                }),
+            ),
+        )
+        .await;
+
+        let mut service_cfg = sample_cfg();
+        service_cfg.models = vec![model_config(service_base_url.clone(), "service-model")];
+
+        let results = fetch_admin_health_targets(&Client::new(), None, &service_cfg)
+            .await
+            .unwrap();
+
+        service_handle.abort();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].base_url, service_base_url);
+        assert_eq!(results[0].status, "ok");
+        assert_eq!(results[0].roles, vec!["model:service-model".to_string()]);
     }
 
     #[test]

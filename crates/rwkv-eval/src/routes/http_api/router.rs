@@ -9,6 +9,7 @@ use tower_http::cors::{Any, CorsLayer};
 use super::{
     admin::{
         admin_eval_cancel,
+        admin_eval_draft,
         admin_eval_pause,
         admin_eval_resume,
         admin_eval_start,
@@ -40,6 +41,7 @@ impl HttpApiRouterBuilder {
             .allow_headers(Any);
 
         let admin_routes = Router::new()
+            .route("/api/v1/admin/eval/draft", get(admin_eval_draft))
             .route("/api/v1/admin/eval/start", post(admin_eval_start))
             .route("/api/v1/admin/eval/pause", post(admin_eval_pause))
             .route("/api/v1/admin/eval/resume", post(admin_eval_resume))
@@ -80,14 +82,28 @@ pub fn build_router(state: AppState) -> Router {
 mod tests {
     use axum::{
         body::{Body, to_bytes},
-        http::{Request, StatusCode, header::AUTHORIZATION},
+        http::{
+            Request,
+            StatusCode,
+            header::{AUTHORIZATION, CONTENT_TYPE},
+        },
     };
     use rwkv_config::raw::eval::{ExtApiConfig, RawEvalConfig, SpaceDbConfig};
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+    use sonic_rs::to_string;
     use tower::util::ServiceExt;
 
     use super::build_router;
-    use crate::{db::Db, routes::http_api::AppState};
+    use crate::{
+        db::Db,
+        dtos::{
+            AdminEvalConfigDto,
+            AdminEvalExtApiConfigDto,
+            AdminEvalModelConfigDto,
+            AdminEvalSpaceDbConfigDto,
+        },
+        routes::http_api::AppState,
+    };
 
     fn test_app_state(admin_api_key: Option<&str>) -> AppState {
         let pool = PgPoolOptions::new().connect_lazy_with(PgConnectOptions::new());
@@ -119,9 +135,63 @@ mod tests {
                 api_key: String::new(),
                 model: "checker".to_string(),
             },
-            space_db: SpaceDbConfig::default(),
+            space_db: SpaceDbConfig {
+                username: "postgres".to_string(),
+                password: "secret".to_string(),
+                host: "localhost".to_string(),
+                port: "5432".to_string(),
+                database_name: "rwkv".to_string(),
+                sslmode: Some("verify-full".to_string()),
+            },
         };
         AppState::new(db, service_config)
+    }
+
+    fn sample_start_request() -> AdminEvalConfigDto {
+        AdminEvalConfigDto {
+            experiment_name: "demo".to_string(),
+            experiment_desc: "demo".to_string(),
+            admin_api_key: None,
+            run_mode: Some("new".to_string()),
+            skip_checker: Some(false),
+            judger_concurrency: Some(1),
+            checker_concurrency: Some(1),
+            db_pool_max_connections: Some(1),
+            model_arch_versions: vec!["rwkv7".to_string()],
+            model_data_versions: vec!["g1".to_string()],
+            model_num_params: vec!["1.5b".to_string()],
+            benchmark_field: vec!["Knowledge".to_string()],
+            extra_benchmark_name: Vec::new(),
+            upload_to_space: Some(true),
+            git_hash: "test".to_string(),
+            models: vec![AdminEvalModelConfigDto {
+                model_arch_version: "rwkv7".to_string(),
+                model_data_version: "g1".to_string(),
+                model_num_params: "1.5b".to_string(),
+                base_url: "http://127.0.0.1".to_string(),
+                api_key: "secret".to_string(),
+                model: "demo-model".to_string(),
+                max_batch_size: Some(8),
+            }],
+            llm_judger: AdminEvalExtApiConfigDto {
+                base_url: "http://127.0.0.1".to_string(),
+                api_key: "secret".to_string(),
+                model: "judge".to_string(),
+            },
+            llm_checker: AdminEvalExtApiConfigDto {
+                base_url: "http://127.0.0.1".to_string(),
+                api_key: "secret".to_string(),
+                model: "checker".to_string(),
+            },
+            space_db: AdminEvalSpaceDbConfigDto {
+                username: "postgres".to_string(),
+                password: "secret".to_string(),
+                host: "localhost".to_string(),
+                port: "5432".to_string(),
+                database_name: "rwkv".to_string(),
+                sslmode: Some("verify-full".to_string()),
+            },
+        }
     }
 
     #[tokio::test]
@@ -199,5 +269,79 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let body = String::from_utf8(body.to_vec()).unwrap();
         assert!(body.contains("\"status\":\"idle\""));
+    }
+
+    #[tokio::test]
+    async fn admin_draft_returns_current_config_shape() {
+        let app = build_router(test_app_state(Some("secret")));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/eval/draft")
+                    .header(AUTHORIZATION, "Bearer secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("\"experiment_name\":\"test\""));
+        assert!(body.contains("\"admin_api_key\":null"));
+        assert!(body.contains("\"upload_to_space\":true"));
+    }
+
+    #[tokio::test]
+    async fn admin_start_rejects_empty_model_api_key() {
+        let app = build_router(test_app_state(Some("secret")));
+        let mut request = sample_start_request();
+        request.models[0].api_key.clear();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/eval/start")
+                    .header(AUTHORIZATION, "Bearer secret")
+                    .header("content-type", "application/json")
+                    .body(Body::from(to_string(&request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("models[0].api_key cannot be empty"));
+    }
+
+    #[tokio::test]
+    async fn admin_start_rejects_space_db_override() {
+        let app = build_router(test_app_state(Some("secret")));
+        let mut request = sample_start_request();
+        request.space_db.host = "other-host".to_string();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/eval/start")
+                    .header(AUTHORIZATION, "Bearer secret")
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(to_string(&request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("does not allow overriding space_db"));
+        assert!(body.contains("host"));
     }
 }

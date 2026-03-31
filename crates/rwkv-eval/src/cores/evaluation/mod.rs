@@ -32,12 +32,7 @@ use crate::{
         upsert_benchmark,
         upsert_model,
     },
-    services::admin::{
-        DependencyRole,
-        DependencyStatus,
-        EvalRuntimeControl,
-        ObservedStatus,
-    },
+    services::admin::{DependencyRole, DependencyStatus, EvalRuntimeControl, ObservedStatus},
 };
 use self::{
     attempts::build_attempt_keys,
@@ -242,13 +237,7 @@ async fn verify_dependency_client(
         Ok(()) => {
             if let Some(control) = runtime_control {
                 control
-                    .update_dependency_status(
-                        role,
-                        label,
-                        base_url,
-                        DependencyStatus::Ok,
-                        None,
-                    )
+                    .update_dependency_status(role, label, base_url, DependencyStatus::Ok, None)
                     .unwrap_or_else(|err| panic!("failed to persist dependency status: {err}"));
             }
             Ok(())

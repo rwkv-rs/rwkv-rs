@@ -26,6 +26,7 @@ pub struct QueueHandle {
     pub device_id: u32,
     pub weights_path: String,
     pub max_batch_size: usize,
+    pub paragraph_len: usize,
     pub tokenizer: Arc<Tokenizer>,
     perf_history: QueuePerfHistory,
 }
@@ -208,6 +209,7 @@ pub fn spawn_queue_worker(
         device_id,
         weights_path,
         max_batch_size,
+        paragraph_len,
         tokenizer,
         perf_history,
     }

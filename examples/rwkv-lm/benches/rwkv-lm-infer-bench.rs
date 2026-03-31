@@ -45,7 +45,7 @@ mod bench {
                 health::{
                     GpuSample,
                     HealthResp,
-                    QueueHealthSeries,
+                    QueueHealthBinding,
                     QueuePerfSample,
                     QueuePerfStage,
                 },
@@ -570,25 +570,27 @@ mod bench {
         let mut series_map: BTreeMap<String, Vec<QueuePerfSample>> = BTreeMap::new();
 
         for snapshot in &stage.health_snapshots {
-            for queue in &snapshot.queues {
-                if queue.model_name != model_name {
-                    continue;
-                }
+            for panel in &snapshot.gpu_panels {
+                for queue in &panel.queues {
+                    if queue.model_name != model_name {
+                        continue;
+                    }
 
-                let label = format_queue_label(queue);
-                let entry = series_map.entry(label).or_default();
-                entry.extend(
-                    queue
-                        .samples
-                        .iter()
-                        .filter(|sample| {
-                            sample.ts_unix_ms >= stage.stage_start_unix_ms
-                                && sample.ts_unix_ms <= stage.stage_end_unix_ms
-                                && wanted_stage
-                                    .map_or(true, |stage_filter| sample.stage == stage_filter)
-                        })
-                        .cloned(),
-                );
+                    let label = format_queue_label(queue);
+                    let entry = series_map.entry(label).or_default();
+                    entry.extend(
+                        queue
+                            .samples
+                            .iter()
+                            .filter(|sample| {
+                                sample.ts_unix_ms >= stage.stage_start_unix_ms
+                                    && sample.ts_unix_ms <= stage.stage_end_unix_ms
+                                    && wanted_stage
+                                        .map_or(true, |stage_filter| sample.stage == stage_filter)
+                            })
+                            .cloned(),
+                    );
+                }
             }
         }
 
@@ -618,8 +620,8 @@ mod bench {
         let mut series_map: BTreeMap<String, Vec<GpuSample>> = BTreeMap::new();
 
         for snapshot in &stage.health_snapshots {
-            for gpu in &snapshot.gpus {
-                let label = format!("{} ({})", gpu.name, gpu.device_key);
+            for gpu in &snapshot.gpu_panels {
+                let label = format!("device{} {} ({})", gpu.device_id, gpu.name, gpu.device_key);
                 let entry = series_map.entry(label).or_default();
                 entry.extend(
                     gpu.samples
@@ -711,7 +713,7 @@ mod bench {
         fs::write(path, svg).map_err(|err| format!("failed to write {}: {err}", path.display()))
     }
 
-    fn format_queue_label(queue: &QueueHealthSeries) -> String {
+    fn format_queue_label(queue: &QueueHealthBinding) -> String {
         let weights_name = Path::new(&queue.weights_path)
             .file_name()
             .and_then(|name| name.to_str())
