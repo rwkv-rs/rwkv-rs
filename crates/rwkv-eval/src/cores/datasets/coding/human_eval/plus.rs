@@ -9,13 +9,7 @@ use sonic_rs::Value;
 use super::get_expected_context;
 use crate::cores::{
     datasets::{
-        ALL_BENCHMARKS,
-        Benchmark,
-        BenchmarkInfo,
-        BenchmarkName,
-        CoTMode,
-        Field,
-        Record,
+        ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
         SamplingConfig,
         coding::{extract_code, get_code_completion_with_cot_mode},
         utils::{

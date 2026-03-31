@@ -24,22 +24,14 @@ use tokio::sync::Semaphore;
 use crate::{
     cores::datasets::{Benchmark, maths::set_llm_judger_semaphore},
     db::{
-        BenchmarkInsert,
-        Db,
-        ModelInsert,
-        TaskInsert,
-        TaskStatus,
-        upsert_benchmark,
-        upsert_model,
+        BenchmarkInsert, Db, ModelInsert, TaskInsert, TaskStatus, upsert_benchmark, upsert_model,
     },
     services::admin::{EvalRuntimeControl, ObservedStatus},
 };
 use self::{
     attempts::build_attempt_keys,
     benchmark::{
-        collect_benchmarks,
-        ensure_microsandbox_for_coding_benchmarks,
-        prepare_benchmark,
+        collect_benchmarks, ensure_microsandbox_for_coding_benchmarks, prepare_benchmark,
         validate_benchmark_info,
     },
     client::{ClientWithConfig, build_client, check_client},

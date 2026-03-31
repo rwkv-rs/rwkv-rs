@@ -2,13 +2,7 @@ use sqlx::{Postgres, QueryBuilder, Row, query};
 
 use super::decode::decode_task_record;
 use crate::db::{
-    AttemptRecord,
-    Db,
-    TaskDetailRecord,
-    TaskIdentity,
-    TaskListQuery,
-    TaskLookup,
-    TaskRecord,
+    AttemptRecord, Db, TaskDetailRecord, TaskIdentity, TaskListQuery, TaskLookup, TaskRecord,
     TaskStatus,
 };
 

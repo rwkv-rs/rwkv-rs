@@ -11,30 +11,13 @@ use sonic_rs::{Value, prelude::*};
 
 use super::{
     super::{
-        FunctionCall,
-        FunctionCallingDecision,
-        FunctionCallingStep,
-        build_turn_completion_prompt,
-        get_completion,
-        get_expected_context,
-        parse_tool_call_or_final_answer,
-        render_fc_output,
+        FunctionCall, FunctionCallingDecision, FunctionCallingStep, build_turn_completion_prompt,
+        get_completion, get_expected_context, parse_tool_call_or_final_answer, render_fc_output,
     },
-    TauDomain,
-    TauTask,
-    create_domain_env,
-    evaluate_task,
-    render_system_prompt,
-    render_user_prompt,
+    TauDomain, TauTask, create_domain_env, evaluate_task, render_system_prompt, render_user_prompt,
 };
 use crate::cores::datasets::{
-    ALL_BENCHMARKS,
-    Benchmark,
-    BenchmarkInfo,
-    BenchmarkName,
-    CoTMode,
-    Field,
-    Record,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
     SamplingConfig,
     utils::hf::downloader::{UrlDownloadFile, download_url_files},
 };

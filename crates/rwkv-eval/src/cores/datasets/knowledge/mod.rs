@@ -2,13 +2,8 @@ use async_openai::{Client, config::OpenAIConfig};
 
 use crate::cores::{
     datasets::{
-        CoTMode,
-        SamplingConfig,
-        apply_user_assistant_template,
-        get_completions_of_cot,
-        get_prompt_for_cot,
-        get_prompt_for_final_answer,
-        render_context,
+        CoTMode, SamplingConfig, apply_user_assistant_template, get_completions_of_cot,
+        get_prompt_for_cot, get_prompt_for_final_answer, render_context,
     },
     inferers::{CompletionRequest, CompletionResponse},
 };

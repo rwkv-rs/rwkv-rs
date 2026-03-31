@@ -3,11 +3,12 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sonic_rs::{Object as Map, Value, json};
 
-use crate::cores::{
-    datasets::SamplingConfig,
-    inferers::{CompletionRequest, CompletionResponse},
-};
+use crate::cores::{datasets::SamplingConfig, inferers::generate_text_completion};
 
+pub mod browsecomp;
+mod browsecomp_common;
+pub mod browsecomp_zh;
+pub mod mcp_bench;
 pub mod tau_bench;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,17 +87,16 @@ pub async fn get_completion(
     stop: Vec<String>,
     max_tokens: u32,
 ) -> String {
-    let req = CompletionRequest::new(
-        model_name.to_string(),
-        prompt.to_string().into(),
+    generate_text_completion(
+        model_client,
+        model_name,
+        prompt,
         stop,
         max_tokens,
         sampling_config,
-        None,
-        None,
-    );
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
-    resp.choices[0].text.clone()
+    )
+    .await
+    .unwrap()
 }
 
 pub fn parse_tool_call_or_final_answer(response: &str) -> Result<FunctionCallingDecision, String> {

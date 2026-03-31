@@ -9,12 +9,7 @@ use crate::{
         datasets::{Benchmark, CoTMode},
     },
     db::{
-        CheckerInsert,
-        CompletionInsert,
-        CompletionStatus,
-        Db,
-        EvalInsert,
-        insert_checker,
+        CheckerInsert, CompletionInsert, CompletionStatus, Db, EvalInsert, insert_checker,
         insert_completion_and_eval,
     },
 };

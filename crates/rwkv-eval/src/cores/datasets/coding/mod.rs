@@ -2,11 +2,7 @@ use async_openai::{Client, config::OpenAIConfig};
 
 use crate::cores::{
     datasets::{
-        CoTMode,
-        SamplingConfig,
-        get_completions_of_cot,
-        get_prompt_for_cot,
-        render_context,
+        CoTMode, SamplingConfig, get_completions_of_cot, get_prompt_for_cot, render_context,
     },
     evaluators::coding::get_completion,
 };

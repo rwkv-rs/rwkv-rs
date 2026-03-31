@@ -3,10 +3,7 @@ use langdetect_rs::detector_factory::DetectorFactory;
 use regex::{Captures, Regex, RegexBuilder};
 use sonic_rs::{Object as Map, Value, prelude::*};
 
-use crate::cores::{
-    datasets::SamplingConfig,
-    inferers::{CompletionRequest, CompletionResponse},
-};
+use crate::cores::{datasets::SamplingConfig, inferers::generate_text_completion};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstructionKind {
@@ -160,18 +157,16 @@ pub async fn generate_response(
     prompt: &str,
     sampling_config: &SamplingConfig,
 ) -> String {
-    let req = CompletionRequest::new(
-        model_name.to_string(),
-        prompt.to_string().into(),
+    generate_text_completion(
+        model_client,
+        model_name,
+        prompt,
         vec![],
         4096,
         sampling_config,
-        None,
-        None,
-    );
-
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
-    resp.choices[0].text.clone()
+    )
+    .await
+    .unwrap()
 }
 
 pub fn describe_instructions(instructions: &[InstructionSpec]) -> String {
@@ -725,13 +720,8 @@ mod tests {
     use sonic_rs::{Object as Map, Value, json, prelude::*};
 
     use super::{
-        InstructionSpec,
-        build_prompt,
-        check_json_format,
-        count_capital_words,
-        count_highlighted_sections,
-        count_sentences,
-        evaluate_response,
+        InstructionSpec, build_prompt, check_json_format, count_capital_words,
+        count_highlighted_sections, count_sentences, evaluate_response,
     };
 
     fn spec(id: &str, args: Value) -> InstructionSpec {

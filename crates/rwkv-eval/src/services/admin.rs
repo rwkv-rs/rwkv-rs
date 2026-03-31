@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::Stdio,
     time::{SystemTime, UNIX_EPOCH},
@@ -598,19 +597,9 @@ mod tests {
     use rwkv_config::raw::eval::{ExtApiConfig, IntApiConfig, RawEvalConfig, SpaceDbConfig};
 
     use super::{
-        ControlFile,
-        DesiredState,
-        EvalRuntimeControl,
-        ObservedStatus,
-        RuntimeFile,
-        collect_health_targets,
-        current_unix_millis,
-        normalize_base_url,
-        read_control_file,
-        read_runtime_file,
-        workspace_root,
-        write_control_file,
-        write_runtime_file,
+        ControlFile, DesiredState, EvalRuntimeControl, ObservedStatus, RuntimeFile,
+        collect_health_targets, current_unix_millis, normalize_base_url, read_control_file,
+        read_runtime_file, workspace_root, write_control_file, write_runtime_file,
     };
 
     fn temp_path(name: &str) -> PathBuf {
@@ -629,16 +618,22 @@ mod tests {
             experiment_desc: "demo".to_string(),
             admin_api_key: None,
             run_mode: Some("new".to_string()),
+            continue_on_benchmark_error: Some(false),
             skip_checker: Some(false),
+            attempt_concurrency: Some(1),
             judger_concurrency: Some(1),
             checker_concurrency: Some(1),
             db_pool_max_connections: Some(1),
+            sample_limit: None,
+            browsecomp_cot_max_tokens: None,
+            browsecomp_answer_max_tokens: None,
             model_arch_versions: vec!["rwkv7".to_string()],
             model_data_versions: vec!["g1".to_string()],
             model_num_params: vec!["1.5b".to_string()],
             benchmark_field: vec!["Knowledge".to_string()],
             extra_benchmark_name: vec![],
             upload_to_space: Some(true),
+            startup_recovery: Some(false),
             git_hash: "abc".to_string(),
             models: vec![
                 IntApiConfig {

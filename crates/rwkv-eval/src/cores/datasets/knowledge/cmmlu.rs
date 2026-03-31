@@ -9,19 +9,10 @@ use linkme::distributed_slice;
 use serde::Deserialize;
 
 use crate::cores::datasets::{
-    ALL_BENCHMARKS,
-    Benchmark,
-    BenchmarkInfo,
-    BenchmarkName,
-    CoTMode,
-    Field,
-    Record,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
     SamplingConfig,
     knowledge::{
-        Example,
-        answer_index_from_letter,
-        get_expect_context,
-        get_final_answer_with_cot_mode,
+        Example, answer_index_from_letter, get_expect_context, get_final_answer_with_cot_mode,
         get_ref_answer,
     },
     utils::{

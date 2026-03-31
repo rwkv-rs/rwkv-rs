@@ -1,14 +1,8 @@
 use crate::{
     db::{BenchmarkRecord, CheckerRecord, TaskAttemptRecord, TaskRecord},
     dtos::{
-        ApiCompletionStatus,
-        ApiTaskStatus,
-        BenchmarkField,
-        BenchmarkResource,
-        CheckerSummary,
-        ModelResource,
-        TaskAttemptResource,
-        TaskResource,
+        ApiCompletionStatus, ApiTaskStatus, BenchmarkField, BenchmarkResource, CheckerSummary,
+        ModelResource, TaskAttemptResource, TaskResource,
     },
     routes::http_api::error::ApiError,
     services::meta::catalog_for_benchmark,

@@ -8,13 +8,10 @@ use tokio::sync::Semaphore;
 
 use crate::cores::{
     datasets::{
-        CoTMode,
-        SamplingConfig,
-        apply_user_assistant_template,
-        get_completions_of_cot,
+        CoTMode, SamplingConfig, apply_user_assistant_template, get_completions_of_cot,
         render_context,
     },
-    inferers::{CompletionRequest, CompletionResponse},
+    inferers::{CompletionRequest, CompletionResponse, generate_text_completion},
 };
 
 pub mod aime24;
@@ -39,6 +36,7 @@ pub mod mawps;
 pub mod minerva_math;
 pub mod olympiadbench;
 pub mod omni_math;
+pub mod polymath;
 pub mod simpleqa;
 pub mod svamp;
 
@@ -118,6 +116,34 @@ pub fn json_value_as_text(value: &Value) -> Option<String> {
     } else {
         sonic_rs::to_string(value).ok()
     }
+}
+
+pub fn extract_last_boxed_answer(solution: &str) -> Option<String> {
+    let marker = r"\boxed{";
+    let mut search_end = solution.len();
+
+    while let Some(start) = solution[..search_end].rfind(marker) {
+        let content_start = start + marker.len();
+        let tail = &solution[content_start..];
+        let mut depth = 0usize;
+
+        for (idx, ch) in tail.char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    if depth == 0 {
+                        return Some(tail[..idx].trim().to_string());
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
+
+        search_end = start;
+    }
+
+    None
 }
 
 pub fn get_expect_context(subject: &str, question: &str, cot_mode: CoTMode) -> String {
@@ -208,18 +234,88 @@ async fn get_final_answer(
     prompt_for_final_answer: &str,
     sampling_config: &SamplingConfig,
 ) -> String {
-    let req = CompletionRequest::new(
-        model_name.to_string(),
-        prompt_for_final_answer.into(),
-        vec![],
-        128,
-        sampling_config,
-        None,
-        None,
-    );
+    sanitize_generated_final_answer(
+        &generate_text_completion(
+            model_client,
+            model_name,
+            prompt_for_final_answer,
+            final_answer_stop_suffixes(),
+            128,
+            sampling_config,
+        )
+        .await
+        .unwrap(),
+    )
+}
 
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
-    resp.choices[0].text.clone()
+fn final_answer_stop_suffixes() -> Vec<String> {
+    ["<think>", "</think>", "\nUser:", "\nAssistant:"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn sanitize_generated_final_answer(raw_answer: &str) -> String {
+    let normalized = raw_answer.replace('\r', "");
+    let mut answer = normalized.trim().to_string();
+
+    if let Some(cutoff) = final_answer_stop_suffixes()
+        .iter()
+        .filter_map(|marker| answer.find(marker))
+        .min()
+    {
+        answer.truncate(cutoff);
+    }
+    answer = answer.trim().to_string();
+
+    if answer.contains('\n') {
+        if let Some(first_non_empty_line) =
+            answer.lines().map(str::trim).find(|line| !line.is_empty())
+        {
+            answer = first_non_empty_line.to_string();
+        }
+    }
+
+    if let Some(boxed) = extract_last_boxed_answer(&answer) {
+        return boxed;
+    }
+
+    trim_template_tail(&answer)
+}
+
+fn trim_template_tail(answer: &str) -> String {
+    let mut cleaned = answer.trim().to_string();
+
+    loop {
+        let mut changed = false;
+
+        for suffix in [r"\).", r"\)"] {
+            if cleaned.ends_with(suffix) {
+                cleaned.truncate(cleaned.len() - suffix.len());
+                cleaned = cleaned.trim_end().to_string();
+                changed = true;
+                break;
+            }
+        }
+
+        while cleaned.ends_with('}') && has_extra_trailing_closing_brace(&cleaned) {
+            cleaned.pop();
+            cleaned = cleaned.trim_end().to_string();
+            changed = true;
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    cleaned
+}
+
+fn has_extra_trailing_closing_brace(text: &str) -> bool {
+    let open_count = text.chars().filter(|&ch| ch == '{').count();
+    let close_count = text.chars().filter(|&ch| ch == '}').count();
+    close_count > open_count
 }
 
 pub async fn judge_with_retry(

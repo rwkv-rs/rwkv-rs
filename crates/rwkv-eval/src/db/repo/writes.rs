@@ -1,17 +1,8 @@
 use sqlx::{Postgres, QueryBuilder, query, query_scalar};
 
 use crate::db::{
-    BenchmarkInsert,
-    CheckerInsert,
-    CompletionInsert,
-    CompletionStatus,
-    Db,
-    EvalInsert,
-    ModelInsert,
-    ScoreInsert,
-    StartupRecoveryStats,
-    TaskInsert,
-    TaskStatus,
+    BenchmarkInsert, CheckerInsert, CompletionInsert, CompletionStatus, Db, EvalInsert,
+    ModelInsert, ScoreInsert, StartupRecoveryStats, TaskInsert, TaskStatus,
 };
 
 pub async fn upsert_model(db: &Db, insert: &ModelInsert) -> Result<i32, String> {

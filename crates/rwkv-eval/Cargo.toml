@@ -30,6 +30,9 @@ regex = { workspace = true }
 langdetect-rs = { workspace = true }
 flate2 = { workspace = true }
 microsandbox = { workspace = true }
+base64 = "0.22.1"
+sha2 = "0.10.9"
+zip = "0.6.6"
 
 [dev-dependencies]
 fs4 = "0.13"

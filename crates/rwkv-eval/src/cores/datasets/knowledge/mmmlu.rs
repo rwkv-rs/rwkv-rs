@@ -6,18 +6,10 @@ use linkme::distributed_slice;
 use parquet::record::Row;
 
 use crate::cores::datasets::{
-    ALL_BENCHMARKS,
-    Benchmark,
-    BenchmarkInfo,
-    BenchmarkName,
-    CoTMode,
-    Field,
-    Record,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
     SamplingConfig,
     knowledge::{
-        answer_index_from_letter,
-        get_expect_context,
-        get_final_answer_with_cot_mode,
+        answer_index_from_letter, get_expect_context, get_final_answer_with_cot_mode,
         get_ref_answer,
     },
     utils::{

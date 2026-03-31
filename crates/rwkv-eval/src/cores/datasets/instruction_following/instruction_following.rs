@@ -8,13 +8,7 @@ use sonic_rs::Object as Map;
 
 use crate::cores::{
     datasets::{
-        ALL_BENCHMARKS,
-        Benchmark,
-        BenchmarkInfo,
-        BenchmarkName,
-        CoTMode,
-        Field,
-        Record,
+        ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
         SamplingConfig,
         utils::{
             hf::downloader::{UrlDownloadFile, download_url_files},
@@ -22,11 +16,7 @@ use crate::cores::{
         },
     },
     evaluators::instruction_following::{
-        InstructionSpec,
-        build_prompt,
-        describe_instructions,
-        evaluate_response,
-        generate_response,
+        InstructionSpec, build_prompt, describe_instructions, evaluate_response, generate_response,
     },
 };
 

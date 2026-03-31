@@ -7,13 +7,7 @@ use serde::Deserialize;
 
 use super::{download_gpqa_csv, gpqa_csv_path, join_subject_parts, ordered_gpqa_choices};
 use crate::cores::datasets::{
-    ALL_BENCHMARKS,
-    Benchmark,
-    BenchmarkInfo,
-    BenchmarkName,
-    CoTMode,
-    Field,
-    Record,
+    ALL_BENCHMARKS, Benchmark, BenchmarkInfo, BenchmarkName, CoTMode, Field, Record,
     SamplingConfig,
     knowledge::{get_expect_context, get_final_answer_with_cot_mode, get_ref_answer},
     utils::csv::read_csv_items,

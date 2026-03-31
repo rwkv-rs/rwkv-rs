@@ -1,0 +1,47 @@
+experiment_name = "mcp_bench_rwkv7_g1d_7_2b"
+experiment_desc = "MCP-Bench evaluation using .env-provided target/judger/checker settings"
+run_mode = "rerun"
+attempt_concurrency = 1
+judger_concurrency = 4
+checker_concurrency = 1
+db_pool_max_connections = 8
+
+model_arch_versions = ["rwkv7"]
+model_data_versions = ["g1d"]
+model_num_params = ["7.2b"]
+
+benchmark_field = []
+extra_benchmark_name = ["mcp_bench"]
+
+upload_to_space = false
+git_hash = "fa705ee9d14ff2bc2e64f0f18129007f6d9f91b2"
+
+[[models]]
+model_arch_version = "rwkv7"
+model_data_version = "g1d"
+model_num_params = "7.2b"
+# Resolved from RWKV_EVAL_TARGET_* and falls back to RWKV_EVAL_EXT_*.
+base_url = "env_override_required"
+api_key = "env_override_required"
+model = "env_override_required"
+max_batch_size = 1
+
+[llm_judger]
+# Resolved from RWKV_EVAL_LLM_JUDGER_* and falls back to RWKV_EVAL_EXT_*.
+base_url = "env_override_required"
+api_key = "env_override_required"
+model = "env_override_required"
+
+[llm_checker]
+# Resolved from RWKV_EVAL_LLM_CHECKER_* and falls back to RWKV_EVAL_EXT_*.
+base_url = "env_override_required"
+api_key = "env_override_required"
+model = "env_override_required"
+
+[space_db]
+username = "env_override_required"
+password = "env_override_required"
+host = "env_override_required"
+port = "5432"
+database_name = "env_override_required"
+sslmode = "disable"
