@@ -11,7 +11,7 @@ use super::mapper::to_admin_health_target_resource;
     get,
     path = "/api/v1/admin/health",
     responses(
-        (status = 200, description = "Current eval config health fan-out", body = AdminHealthResponse),
+        (status = 200, description = "Current infer telemetry fan-out", body = AdminHealthResponse),
         (status = 401, description = "Unauthorized", body = super::super::error::ErrorResponse),
         (status = 403, description = "Forbidden", body = super::super::error::ErrorResponse),
         (status = 500, description = "Internal server error", body = super::super::error::ErrorResponse)

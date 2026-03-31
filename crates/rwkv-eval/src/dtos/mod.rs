@@ -330,6 +330,17 @@ pub struct AdminEvalStatusResponse {
     pub attempts_planned: u64,
     pub attempts_completed: u64,
     pub progress_percent: f64,
+    pub dependencies: Vec<AdminDependencyResource>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AdminDependencyResource {
+    pub role: String,
+    pub label: String,
+    pub base_url: String,
+    pub status: String,
+    pub message: Option<String>,
+    pub checked_at_unix_ms: Option<u64>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

@@ -32,6 +32,7 @@ use super::{
     },
 };
 use crate::dtos::{
+    AdminDependencyResource,
     AdminEvalStatusResponse,
     AdminHealthResponse,
     AdminHealthTargetResource,
@@ -99,6 +100,7 @@ use crate::dtos::{
             CompletionDetailResponse,
             ReviewQueueResource,
             ReviewQueueResponse,
+            AdminDependencyResource,
             AdminEvalStatusResponse,
             AdminHealthTargetResource,
             AdminHealthResponse,

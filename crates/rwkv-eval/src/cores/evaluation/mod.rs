@@ -32,7 +32,12 @@ use crate::{
         upsert_benchmark,
         upsert_model,
     },
-    services::admin::{EvalRuntimeControl, ObservedStatus},
+    services::admin::{
+        DependencyRole,
+        DependencyStatus,
+        EvalRuntimeControl,
+        ObservedStatus,
+    },
 };
 use self::{
     attempts::build_attempt_keys,
@@ -144,11 +149,32 @@ pub async fn run_evaluation(
     println!("target models: {}", clients_with_cfg.len());
 
     for target_model in &clients_with_cfg {
-        check_client(&target_model.client, &target_model.api_cfg.model).await;
+        verify_dependency_client(
+            runtime_control.as_ref(),
+            DependencyRole::Model,
+            &target_model.api_cfg.model,
+            &target_model.api_cfg.base_url,
+            &target_model.client,
+        )
+        .await?;
     }
-    check_client(&llm_judger_client, &llm_judger_cfg.model).await;
+    verify_dependency_client(
+        runtime_control.as_ref(),
+        DependencyRole::Judger,
+        &llm_judger_cfg.model,
+        &llm_judger_cfg.base_url,
+        &llm_judger_client,
+    )
+    .await?;
     if let Some(checker_runtime) = checker_runtime.as_ref() {
-        check_client(checker_runtime.client.as_ref(), &llm_checker_cfg.model).await;
+        verify_dependency_client(
+            runtime_control.as_ref(),
+            DependencyRole::Checker,
+            &llm_checker_cfg.model,
+            &llm_checker_cfg.base_url,
+            checker_runtime.client.as_ref(),
+        )
+        .await?;
     }
 
     let mut model_ids = BTreeMap::new();
@@ -204,6 +230,57 @@ pub async fn run_evaluation(
 
     Ok(())
 }
+
+async fn verify_dependency_client(
+    runtime_control: Option<&EvalRuntimeControl>,
+    role: DependencyRole,
+    label: &str,
+    base_url: &str,
+    client: &async_openai::Client<async_openai::config::OpenAIConfig>,
+) -> crate::services::ServiceResult<()> {
+    match check_client(client, label).await {
+        Ok(()) => {
+            if let Some(control) = runtime_control {
+                control
+                    .update_dependency_status(
+                        role,
+                        label,
+                        base_url,
+                        DependencyStatus::Ok,
+                        None,
+                    )
+                    .unwrap_or_else(|err| panic!("failed to persist dependency status: {err}"));
+            }
+            Ok(())
+        }
+        Err(err) => {
+            let message = format!(
+                "dependency check failed for {} `{label}` at {base_url}: {err}",
+                role.as_str()
+            );
+            if let Some(control) = runtime_control {
+                control
+                    .update_dependency_status(
+                        role,
+                        label,
+                        base_url,
+                        DependencyStatus::Failed,
+                        Some(&err),
+                    )
+                    .unwrap_or_else(|persist_err| {
+                        panic!("failed to persist dependency failure: {persist_err}")
+                    });
+                control
+                    .write_status(ObservedStatus::Failed, Some(&message))
+                    .unwrap_or_else(|persist_err| {
+                        panic!("failed to write failed runtime status: {persist_err}")
+                    });
+            }
+            Err(crate::services::ServiceError::internal(message))
+        }
+    }
+}
+
 fn build_model_runtimes(
     clients_with_cfg: &[Arc<ClientWithConfig>],
 ) -> BTreeMap<String, ModelRuntime> {

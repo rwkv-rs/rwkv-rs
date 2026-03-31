@@ -84,6 +84,8 @@ pub struct RuntimeFile {
     pub updated_at_unix_ms: u64,
     pub finished_at_unix_ms: Option<u64>,
     pub error: Option<String>,
+    #[serde(default)]
+    pub dependencies: Vec<RuntimeDependencyStatus>,
 }
 
 impl RuntimeFile {
@@ -95,8 +97,57 @@ impl RuntimeFile {
             updated_at_unix_ms: now,
             finished_at_unix_ms: observed_status.is_terminal().then_some(now),
             error,
+            dependencies: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyRole {
+    Model,
+    Judger,
+    Checker,
+}
+
+impl DependencyRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Model => "model",
+            Self::Judger => "judger",
+            Self::Checker => "checker",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyStatus {
+    Unknown,
+    Ok,
+    Failed,
+    Skipped,
+}
+
+impl DependencyStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Ok => "ok",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeDependencyStatus {
+    pub role: DependencyRole,
+    pub label: String,
+    pub base_url: String,
+    pub status: DependencyStatus,
+    pub message: Option<String>,
+    pub checked_at_unix_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -139,12 +190,17 @@ impl EvalRuntimeControl {
             .as_ref()
             .map(|runtime| runtime.started_at_unix_ms)
             .unwrap_or(now);
+        let dependencies = current
+            .as_ref()
+            .map(|runtime| runtime.dependencies.clone())
+            .unwrap_or_default();
         let runtime = RuntimeFile {
             observed_status,
             started_at_unix_ms,
             updated_at_unix_ms: now,
             finished_at_unix_ms: observed_status.is_terminal().then_some(now),
             error: error.map(ToOwned::to_owned),
+            dependencies,
         };
         write_runtime_file(&self.runtime_path, &runtime)
     }
@@ -156,6 +212,41 @@ impl EvalRuntimeControl {
         runtime.updated_at_unix_ms = current_unix_millis();
         write_runtime_file(&self.runtime_path, &runtime)
     }
+
+    pub fn update_dependency_status(
+        &self,
+        role: DependencyRole,
+        label: &str,
+        base_url: &str,
+        status: DependencyStatus,
+        message: Option<&str>,
+    ) -> Result<(), String> {
+        let now = current_unix_millis();
+        let mut runtime = read_runtime_file(&self.runtime_path)?
+            .unwrap_or_else(|| RuntimeFile::new(ObservedStatus::Starting, None));
+
+        if let Some(existing) = runtime.dependencies.iter_mut().find(|dependency| {
+            dependency.role == role
+                && dependency.label == label
+                && dependency.base_url == base_url
+        }) {
+            existing.status = status;
+            existing.message = message.map(ToOwned::to_owned);
+            existing.checked_at_unix_ms = Some(now);
+        } else {
+            runtime.dependencies.push(RuntimeDependencyStatus {
+                role,
+                label: label.to_string(),
+                base_url: base_url.to_string(),
+                status,
+                message: message.map(ToOwned::to_owned),
+                checked_at_unix_ms: Some(now),
+            });
+        }
+
+        runtime.updated_at_unix_ms = now;
+        write_runtime_file(&self.runtime_path, &runtime)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -165,6 +256,16 @@ pub struct HealthTargetResult {
     pub status: String,
     pub error: Option<String>,
     pub health: Option<Value>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct InferHealthPayload {
+    status: String,
+    window_seconds: u64,
+    server_time_unix_ms: u64,
+    queues: Vec<Value>,
+    gpus: Vec<Value>,
 }
 
 pub async fn fetch_health_targets(
@@ -191,9 +292,45 @@ pub async fn fetch_health_targets(
                     continue;
                 }
 
-                let health = response.json::<Value>().await.map_err(|err| {
-                    ServiceError::internal(format!("decode {endpoint} failed: {err}"))
-                })?;
+                let body = match response.bytes().await {
+                    Ok(body) => body,
+                    Err(err) => {
+                        results.push(HealthTargetResult {
+                            base_url: target.base_url,
+                            roles: target.roles,
+                            status: "invalid_response".to_string(),
+                            error: Some(format!("read {endpoint} failed: {err}")),
+                            health: None,
+                        });
+                        continue;
+                    }
+                };
+
+                let health = match sonic_rs::from_slice::<Value>(body.as_ref()) {
+                    Ok(health) => health,
+                    Err(err) => {
+                        results.push(HealthTargetResult {
+                            base_url: target.base_url,
+                            roles: target.roles,
+                            status: "invalid_response".to_string(),
+                            error: Some(format!("decode {endpoint} failed: {err}")),
+                            health: None,
+                        });
+                        continue;
+                    }
+                };
+                if sonic_rs::from_slice::<InferHealthPayload>(body.as_ref()).is_err() {
+                    results.push(HealthTargetResult {
+                        base_url: target.base_url,
+                        roles: target.roles,
+                        status: "invalid_response".to_string(),
+                        error: Some(format!(
+                            "GET {endpoint} returned a non-rwkv-infer health payload"
+                        )),
+                        health: None,
+                    });
+                    continue;
+                }
                 results.push(HealthTargetResult {
                     base_url: target.base_url,
                     roles: target.roles,
@@ -355,11 +492,9 @@ impl ActiveEvalRun {
             },
         )
         .map_err(ServiceError::internal)?;
-        write_runtime_file(
-            &runtime_path,
-            &RuntimeFile::new(ObservedStatus::Starting, None),
-        )
-        .map_err(ServiceError::internal)?;
+        let mut runtime = RuntimeFile::new(ObservedStatus::Starting, None);
+        runtime.dependencies = build_runtime_dependencies(&run_cfg);
+        write_runtime_file(&runtime_path, &runtime).map_err(ServiceError::internal)?;
 
         let mut command = build_evaluator_command(&temp_dir)?;
         command
@@ -412,14 +547,6 @@ fn collect_health_targets(cfg: &RawEvalConfig) -> Vec<HealthTarget> {
             .or_default()
             .insert(format!("model:{}", model.model));
     }
-    dedup
-        .entry(cfg.llm_judger.base_url.clone())
-        .or_default()
-        .insert(format!("judger:{}", cfg.llm_judger.model));
-    dedup
-        .entry(cfg.llm_checker.base_url.clone())
-        .or_default()
-        .insert(format!("checker:{}", cfg.llm_checker.model));
 
     dedup
         .into_iter()
@@ -437,6 +564,44 @@ fn normalize_base_url(base_url: &str) -> String {
     } else {
         format!("http://{trimmed}")
     }
+}
+
+pub fn build_runtime_dependencies(cfg: &RawEvalConfig) -> Vec<RuntimeDependencyStatus> {
+    let mut dependencies = cfg
+        .models
+        .iter()
+        .map(|model| RuntimeDependencyStatus {
+            role: DependencyRole::Model,
+            label: model.model.clone(),
+            base_url: model.base_url.clone(),
+            status: DependencyStatus::Unknown,
+            message: None,
+            checked_at_unix_ms: None,
+        })
+        .collect::<Vec<_>>();
+
+    dependencies.push(RuntimeDependencyStatus {
+        role: DependencyRole::Judger,
+        label: cfg.llm_judger.model.clone(),
+        base_url: cfg.llm_judger.base_url.clone(),
+        status: DependencyStatus::Unknown,
+        message: None,
+        checked_at_unix_ms: None,
+    });
+    dependencies.push(RuntimeDependencyStatus {
+        role: DependencyRole::Checker,
+        label: cfg.llm_checker.model.clone(),
+        base_url: cfg.llm_checker.base_url.clone(),
+        status: if cfg.skip_checker.unwrap_or(false) {
+            DependencyStatus::Skipped
+        } else {
+            DependencyStatus::Unknown
+        },
+        message: None,
+        checked_at_unix_ms: None,
+    });
+
+    dependencies
 }
 
 fn refresh_active_run(active: Option<&mut ActiveEvalRun>) -> ServiceResult<()> {
@@ -474,6 +639,7 @@ fn refresh_active_run(active: Option<&mut ActiveEvalRun>) -> ServiceResult<()> {
             updated_at_unix_ms: current_unix_millis(),
             finished_at_unix_ms: Some(current_unix_millis()),
             error,
+            dependencies: runtime.dependencies,
         },
     )
     .map_err(ServiceError::internal)
@@ -595,16 +761,28 @@ where
 mod tests {
     use std::{fs, path::PathBuf};
 
+    use axum::{
+        Router,
+        http::header::CONTENT_TYPE,
+        routing::get,
+    };
+    use reqwest::Client;
     use rwkv_config::raw::eval::{ExtApiConfig, IntApiConfig, RawEvalConfig, SpaceDbConfig};
+    use tokio::{net::TcpListener, task::JoinHandle};
 
     use super::{
         ControlFile,
+        DependencyRole,
+        DependencyStatus,
         DesiredState,
         EvalRuntimeControl,
         ObservedStatus,
         RuntimeFile,
+        RuntimeDependencyStatus,
+        build_runtime_dependencies,
         collect_health_targets,
         current_unix_millis,
+        fetch_health_targets,
         normalize_base_url,
         read_control_file,
         read_runtime_file,
@@ -621,6 +799,27 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir.join(name)
+    }
+
+    fn model_config(base_url: impl Into<String>, model: &str) -> IntApiConfig {
+        IntApiConfig {
+            model_arch_version: "rwkv7".to_string(),
+            model_data_version: "g1".to_string(),
+            model_num_params: "1.5b".to_string(),
+            base_url: base_url.into(),
+            api_key: "secret".to_string(),
+            model: model.to_string(),
+            max_batch_size: Some(1),
+        }
+    }
+
+    async fn spawn_server(router: Router) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        (format!("http://{addr}"), handle)
     }
 
     fn sample_cfg() -> RawEvalConfig {
@@ -641,24 +840,8 @@ mod tests {
             upload_to_space: Some(true),
             git_hash: "abc".to_string(),
             models: vec![
-                IntApiConfig {
-                    model_arch_version: "rwkv7".to_string(),
-                    model_data_version: "g1".to_string(),
-                    model_num_params: "1.5b".to_string(),
-                    base_url: "127.0.0.1:8080".to_string(),
-                    api_key: "secret".to_string(),
-                    model: "demo-a".to_string(),
-                    max_batch_size: Some(1),
-                },
-                IntApiConfig {
-                    model_arch_version: "rwkv7".to_string(),
-                    model_data_version: "g1".to_string(),
-                    model_num_params: "3b".to_string(),
-                    base_url: "127.0.0.1:8080".to_string(),
-                    api_key: "secret".to_string(),
-                    model: "demo-b".to_string(),
-                    max_batch_size: Some(1),
-                },
+                model_config("127.0.0.1:8080", "demo-a"),
+                model_config("127.0.0.1:8080", "demo-b"),
             ],
             llm_judger: ExtApiConfig {
                 base_url: "judge:8080".to_string(),
@@ -675,10 +858,32 @@ mod tests {
     }
 
     #[test]
-    fn collects_unique_base_urls() {
+    fn collects_unique_model_base_urls() {
         let targets = collect_health_targets(&sample_cfg());
-        assert_eq!(targets.len(), 2);
-        assert!(targets.iter().any(|target| target.roles.len() == 2));
+        assert_eq!(targets.len(), 1);
+        assert_eq!(
+            targets[0].roles,
+            vec!["model:demo-a".to_string(), "model:demo-b".to_string()]
+        );
+    }
+
+    #[test]
+    fn builds_dependency_statuses_and_marks_skipped_checker() {
+        let mut cfg = sample_cfg();
+        cfg.skip_checker = Some(true);
+
+        let dependencies = build_runtime_dependencies(&cfg);
+
+        assert_eq!(dependencies.len(), 4);
+        assert!(dependencies.iter().any(|dependency| {
+            dependency.role == DependencyRole::Judger
+                && dependency.status == DependencyStatus::Unknown
+        }));
+        assert!(dependencies.iter().any(|dependency| {
+            dependency.role == DependencyRole::Checker
+                && dependency.status == DependencyStatus::Skipped
+                && dependency.checked_at_unix_ms.is_none()
+        }));
     }
 
     #[test]
@@ -719,6 +924,110 @@ mod tests {
         write_runtime_file(&path, &RuntimeFile::new(ObservedStatus::Completed, None)).unwrap();
         let runtime = read_runtime_file(&path).unwrap().unwrap();
         assert!(runtime.finished_at_unix_ms.is_some());
+    }
+
+    #[test]
+    fn write_status_preserves_dependency_statuses() {
+        let control_path = temp_path("control.json");
+        let runtime_path = temp_path("runtime.json");
+        let control = EvalRuntimeControl {
+            control_path,
+            runtime_path: runtime_path.clone(),
+        };
+        let dependency = RuntimeDependencyStatus {
+            role: DependencyRole::Model,
+            label: "demo-a".to_string(),
+            base_url: "127.0.0.1:8080".to_string(),
+            status: DependencyStatus::Ok,
+            message: None,
+            checked_at_unix_ms: Some(123),
+        };
+        let mut runtime = RuntimeFile::new(ObservedStatus::Starting, None);
+        runtime.dependencies = vec![dependency.clone()];
+        write_runtime_file(&runtime_path, &runtime).unwrap();
+
+        control.write_status(ObservedStatus::Running, None).unwrap();
+
+        let runtime = read_runtime_file(&runtime_path).unwrap().unwrap();
+        assert_eq!(runtime.dependencies, vec![dependency]);
+        assert_eq!(runtime.observed_status, ObservedStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn fetch_health_targets_only_returns_infer_targets_and_keeps_partial_failures() {
+        let (ok_base_url, ok_handle) = spawn_server(
+            Router::new().route(
+                "/health",
+                get(|| async {
+                    (
+                        [(CONTENT_TYPE, "application/json")],
+                        r#"{"status":"ok","window_seconds":60,"server_time_unix_ms":1,"queues":[],"gpus":[]}"#,
+                    )
+                }),
+            ),
+        )
+        .await;
+        let (invalid_json_base_url, invalid_json_handle) = spawn_server(
+            Router::new().route("/health", get(|| async { "not-json" })),
+        )
+        .await;
+        let (wrong_schema_base_url, wrong_schema_handle) = spawn_server(
+            Router::new().route(
+                "/health",
+                get(|| async {
+                    (
+                        [(CONTENT_TYPE, "application/json")],
+                        r#"{"ok":true}"#,
+                    )
+                }),
+            ),
+        )
+        .await;
+
+        let mut cfg = sample_cfg();
+        cfg.models = vec![
+            model_config(ok_base_url.clone(), "demo-a"),
+            model_config(invalid_json_base_url.clone(), "demo-b"),
+            model_config(wrong_schema_base_url.clone(), "demo-c"),
+        ];
+
+        let results = fetch_health_targets(&Client::new(), &cfg).await.unwrap();
+
+        ok_handle.abort();
+        invalid_json_handle.abort();
+        wrong_schema_handle.abort();
+
+        assert_eq!(results.len(), 3);
+
+        let ok_target = results
+            .iter()
+            .find(|target| target.base_url == ok_base_url)
+            .unwrap();
+        assert_eq!(ok_target.status, "ok");
+        assert!(ok_target.health.is_some());
+
+        let invalid_json_target = results
+            .iter()
+            .find(|target| target.base_url == invalid_json_base_url)
+            .unwrap();
+        assert_eq!(invalid_json_target.status, "invalid_response");
+        assert!(
+            invalid_json_target
+                .error
+                .as_ref()
+                .is_some_and(|error| error.contains("decode"))
+        );
+
+        let wrong_schema_target = results
+            .iter()
+            .find(|target| target.base_url == wrong_schema_base_url)
+            .unwrap();
+        assert_eq!(wrong_schema_target.status, "invalid_response");
+        assert!(
+            wrong_schema_target.error.as_ref().is_some_and(|error| {
+                error.contains("non-rwkv-infer health payload")
+            })
+        );
     }
 
     #[test]

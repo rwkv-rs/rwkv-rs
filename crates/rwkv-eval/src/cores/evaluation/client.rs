@@ -37,7 +37,10 @@ fn norm_api_url(base_url: &str) -> String {
     }
 }
 
-pub(crate) async fn check_client(client: &Client<OpenAIConfig>, model_name: &str) {
+pub(crate) async fn check_client(
+    client: &Client<OpenAIConfig>,
+    model_name: &str,
+) -> Result<(), String> {
     let req = CompletionRequest::new(
         model_name.to_string(),
         "ping".into(),
@@ -59,5 +62,7 @@ pub(crate) async fn check_client(client: &Client<OpenAIConfig>, model_name: &str
         .completions()
         .create_byot(&req)
         .await
-        .unwrap_or_else(|error| panic!("client `{model_name}` is unavailable: {error}"));
+        .map_err(|error| format!("client `{model_name}` is unavailable: {error}"))?;
+
+    Ok(())
 }

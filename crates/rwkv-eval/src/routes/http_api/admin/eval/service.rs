@@ -1,5 +1,6 @@
 use axum::Json;
 
+use super::super::mapper::to_admin_dependency_resource;
 use crate::{
     dtos::AdminEvalStatusResponse,
     routes::http_api::{
@@ -35,6 +36,7 @@ async fn build_admin_eval_status(
             attempts_planned: 0,
             attempts_completed: 0,
             progress_percent: 0.0,
+            dependencies: Vec::new(),
         });
     };
 
@@ -57,19 +59,35 @@ async fn build_admin_eval_status(
         ((attempts_completed.min(attempts_planned)) as f64 / attempts_planned as f64)
             .clamp(0.0, 1.0)
     };
+    let EvalRunSnapshot {
+        config_path,
+        desired_state,
+        runtime,
+    } = snapshot;
+    let status = runtime.observed_status.as_str().to_string();
+    let started_at_unix_ms = runtime.started_at_unix_ms;
+    let updated_at_unix_ms = runtime.updated_at_unix_ms;
+    let finished_at_unix_ms = runtime.finished_at_unix_ms;
+    let error = runtime.error;
+    let dependencies = runtime
+        .dependencies
+        .into_iter()
+        .map(to_admin_dependency_resource)
+        .collect();
 
     Ok(AdminEvalStatusResponse {
-        status: snapshot.runtime.observed_status.as_str().to_string(),
-        desired_state: Some(snapshot.desired_state.as_str().to_string()),
-        config_path: Some(snapshot.config_path),
-        started_at_unix_ms: Some(snapshot.runtime.started_at_unix_ms),
-        updated_at_unix_ms: Some(snapshot.runtime.updated_at_unix_ms),
-        finished_at_unix_ms: snapshot.runtime.finished_at_unix_ms,
-        error: snapshot.runtime.error,
+        status,
+        desired_state: Some(desired_state.as_str().to_string()),
+        config_path: Some(config_path),
+        started_at_unix_ms: Some(started_at_unix_ms),
+        updated_at_unix_ms: Some(updated_at_unix_ms),
+        finished_at_unix_ms,
+        error,
         tasks_total: tasks.len() as u64,
         attempts_planned,
         attempts_completed,
         progress_percent,
         tasks,
+        dependencies,
     })
 }

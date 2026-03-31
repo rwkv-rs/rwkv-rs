@@ -130,7 +130,7 @@ mod tests {
 
         let index = app
             .clone()
-            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .oneshot(Request::builder().uri("/api").body(Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(index.status(), StatusCode::OK);
@@ -139,7 +139,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/health")
+                    .uri("/api/health")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -150,7 +150,7 @@ mod tests {
         let openapi = app
             .oneshot(
                 Request::builder()
-                    .uri("/openapi.json")
+                    .uri("/api/openapi.json")
                     .body(Body::empty())
                     .unwrap(),
             )
