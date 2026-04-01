@@ -295,7 +295,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn admin_start_rejects_empty_model_api_key() {
+    async fn admin_start_does_not_reject_empty_model_api_key() {
         let app = build_router(test_app_state(Some("secret")));
         let mut request = sample_start_request();
         request.models[0].api_key.clear();
@@ -312,11 +312,12 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        assert_ne!(response.status(), StatusCode::BAD_REQUEST);
 
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let body = String::from_utf8(body.to_vec()).unwrap();
-        assert!(body.contains("models[0].api_key cannot be empty"));
+        assert!(!body.contains("models[0].api_key cannot be empty"));
     }
 
     #[tokio::test]

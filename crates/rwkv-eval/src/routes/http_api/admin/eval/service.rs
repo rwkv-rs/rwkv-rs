@@ -118,13 +118,6 @@ async fn build_admin_eval_status(
 fn validate_admin_eval_config(cfg: &RawEvalConfig) -> Result<(), ApiError> {
     validate_space_db_config(&cfg.space_db).map_err(ApiError::bad_request)?;
 
-    for (index, model) in cfg.models.iter().enumerate() {
-        require_non_empty(
-            &model.api_key,
-            &format!("models[{index}].api_key cannot be empty"),
-        )?;
-    }
-
     require_non_empty(
         &cfg.llm_judger.api_key,
         "llm_judger.api_key cannot be empty",
@@ -356,13 +349,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_request_rejects_empty_model_api_key() {
+    fn parse_request_allows_empty_model_api_key() {
         let mut request = sample_request();
         request.models[0].api_key.clear();
 
         let service_cfg = from_admin_eval_config_dto(sample_request());
-        let err = parse_admin_eval_request(request, &service_cfg).unwrap_err();
-        assert!(format!("{err:?}").contains("models[0].api_key cannot be empty"));
+        let parsed = parse_admin_eval_request(request, &service_cfg).unwrap();
+        assert_eq!(parsed.models[0].api_key, "");
     }
 
     #[test]
