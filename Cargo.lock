@@ -9176,6 +9176,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rwkv-distill-data"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "indicatif 0.18.4",
+ "reqwest 0.13.2",
+ "rwkv-data",
+ "serde",
+ "sonic-rs",
+ "tokio",
+ "toml 1.1.0+spec-1.1.0",
+]
+
+[[package]]
 name = "rwkv-eval"
 version = "0.1.0"
 dependencies = [

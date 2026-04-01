@@ -1,0 +1,40 @@
+[input]
+dataset_path = "../data/source.jsonl"
+limit = 100
+start_index = 0
+
+[generator]
+endpoint = "http://127.0.0.1:8000/v1/chat/completions"
+model_name = "generator-model"
+api_key = "replace-me"
+variant_count = 3
+max_completion_tokens = 2048
+reasoning_effort = "medium"
+
+[[answer_models]]
+endpoint = "http://127.0.0.1:8000/v1/chat/completions"
+model_name = "answer-model-a"
+api_key = "replace-me"
+max_completion_tokens = 4096
+reasoning_effort = "medium"
+
+[[answer_models]]
+endpoint = "http://127.0.0.1:8000/v1/chat/completions"
+model_name = "answer-model-b"
+api_key = "replace-me"
+max_completion_tokens = 4096
+reasoning_effort = "medium"
+
+[output]
+state_jsonl_path = "../data/distill_state.jsonl"
+train_jsonl_path = "../data/rwkv_train.jsonl"
+
+[run]
+resume = true
+request_timeout_seconds = 240.0
+disable_env_proxy = true
+force_http1 = true
+
+[concurrency]
+generate_requests = 4
+answer_requests = 16
