@@ -211,9 +211,13 @@ impl fmt::Display for RapidSampleCase {
 }
 
 pub const RAPID_SAMPLE_CASES: &[RapidSampleCase] = &[
-    RapidSampleCase::new("b4_v4096", 4, 4096, 50, 0.95),
-    RapidSampleCase::new("b8_v8192", 8, 8192, 100, 0.9),
-    RapidSampleCase::new("b16_v16384", 16, 16384, 200, 0.9),
+    // Decode-oriented cases. Small toy vocab sizes are useful for smoke tests, but they bias
+    // optimization toward the wrong launch shape and hide the real `[batch, vocab]` traffic
+    // patterns that dominate LLM sampling throughput.
+    RapidSampleCase::new("b64_v65536", 64, 65536, 50, 0.95),
+    RapidSampleCase::new("b128_v65536", 128, 65536, 50, 0.95),
+    RapidSampleCase::new("b256_v65536", 256, 65536, 50, 0.95),
+    RapidSampleCase::new("b512_v65536", 512, 65536, 50, 0.95),
 ];
 
 pub fn random_logits<B: Backend>(case: &RapidSampleCase, device: &B::Device) -> Tensor<B, 2> {
@@ -225,7 +229,7 @@ pub fn random_logits<B: Backend>(case: &RapidSampleCase, device: &B::Device) -> 
 }
 
 pub fn seed_states<B: Backend>(case: &RapidSampleCase, device: &B::Device) -> Tensor<B, 1, Int> {
-    Tensor::arange(0..case.batch_size as i64, device)
+    Tensor::arange(1..(case.batch_size as i64 + 1), device)
 }
 
 pub fn random_penalties<B: Backend>(case: &RapidSampleCase, device: &B::Device) -> Tensor<B, 2> {

@@ -326,8 +326,6 @@ where
                     )
                 };
 
-                let rng = self.rng.clone().select(0, batch_ids_tensor.clone());
-                let penalties = self.penalties.clone().select(0, batch_ids_tensor.clone());
                 let SamplingConfigsTensor {
                     inv_temperatures,
                     top_ks,
@@ -343,34 +341,26 @@ where
 
                 let sample_output = rapid_sample::<B>(
                     logits,
-                    rng,
+                    batch_ids_tensor.clone(),
+                    self.rng.clone(),
                     inv_temperatures,
                     top_ks,
                     top_ps,
-                    Some((
-                        penalties,
+                    (
+                        self.penalties.clone(),
                         presence_penalties,
                         repetition_penalties,
                         penalties_decay,
-                    )),
+                    ),
                 );
 
-                self.rng = (self.rng.clone().float() * batch_masks.clone())
-                    .select_assign(
-                        0,
-                        batch_ids_tensor.clone(),
-                        sample_output.states.clone().cast(DType::I32).float(),
-                        IndexingUpdateOp::Add,
-                    )
-                    .int();
+                // The CubeCL sampler keeps the LCG state in `u32` internally to match the kernel's
+                // unsigned arithmetic. The queue-owned RNG buffer in Burn, however, is seeded and
+                // reset as `i32`. Keep this cast at the writeback boundary so later `slice_assign`
+                // updates do not mix signed/unsigned int dtypes in the IR graph.
+                self.rng = sample_output.states.cast(DType::I32);
                 if let Some(ref updated_penalties) = sample_output.penalties {
-                    let penalties_mask_2d = batch_masks_2d.clone().cast(DType::F32);
-                    self.penalties = (self.penalties.clone() * penalties_mask_2d).select_assign(
-                        0,
-                        batch_ids_tensor.clone(),
-                        updated_penalties.clone(),
-                        IndexingUpdateOp::Add,
-                    );
+                    self.penalties = updated_penalties.clone();
                 }
 
                 let token_ids = sample_output.token_ids.to_data().to_vec::<i32>().unwrap();

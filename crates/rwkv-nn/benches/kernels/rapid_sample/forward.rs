@@ -24,31 +24,10 @@ fn build_sampling_params<B2: Backend>(
 }
 
 #[divan::bench(args = common::RAPID_SAMPLE_CASES)]
-fn bench_rapid_sample_forward(bencher: Bencher<'_, '_>, case: &common::RapidSampleCase) {
+fn bench_rapid_sample(bencher: Bencher<'_, '_>, case: &common::RapidSampleCase) {
     let device = common::bench_device();
     let logits = common::random_logits::<B>(case, &device);
-    let states = common::seed_states::<B>(case, &device);
-    let (inv_temps, top_ks, top_ps) = build_sampling_params::<B>(case, &device);
-
-    bencher.bench_local(|| {
-        black_box(rapid_sample(
-            logits.clone(),
-            states.clone(),
-            inv_temps.clone(),
-            top_ks.clone(),
-            top_ps.clone(),
-            None,
-        ))
-    });
-}
-
-#[divan::bench(args = common::RAPID_SAMPLE_CASES)]
-fn bench_rapid_sample_forward_with_penalty(
-    bencher: Bencher<'_, '_>,
-    case: &common::RapidSampleCase,
-) {
-    let device = common::bench_device();
-    let logits = common::random_logits::<B>(case, &device);
+    let batch_ids = Tensor::<B, 1, Int>::arange(0..case.batch_size as i64, &device);
     let states = common::seed_states::<B>(case, &device);
     let penalties = common::random_penalties::<B>(case, &device);
     let (inv_temps, top_ks, top_ps) = build_sampling_params::<B>(case, &device);
@@ -59,11 +38,12 @@ fn bench_rapid_sample_forward_with_penalty(
     bencher.bench_local(|| {
         black_box(rapid_sample(
             logits.clone(),
+            batch_ids.clone(),
             states.clone(),
             inv_temps.clone(),
             top_ks.clone(),
             top_ps.clone(),
-            Some((penalties.clone(), pp.clone(), rp.clone(), pd.clone())),
+            (penalties.clone(), pp.clone(), rp.clone(), pd.clone()),
         ))
     });
 }

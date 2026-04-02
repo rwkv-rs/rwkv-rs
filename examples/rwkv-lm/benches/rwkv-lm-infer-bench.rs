@@ -49,7 +49,6 @@ mod bench {
                     QueuePerfSample,
                     QueuePerfStage,
                 },
-                stop::StopField,
             },
             sdk::LocalClient,
             services::{QueueMap, ServiceError, ServiceResult},
@@ -69,8 +68,10 @@ mod bench {
         paths,
     };
 
-    const BENCH_PROMPT: &str = "User: You are a very talented expert in abstract algebra.\nAnswer this question: Find the degree for the given field extension Q(sqrt(2), sqrt(3), sqrt(18)) over Q.\nA. 0\nB. 4\nC. 2\nD. 6\n\nAssistant: <think>";
-    const HEALTH_SAMPLING_INTERVAL_MS: u64 = 200;
+    // Keep the prompt short and the decode budget long so this bench stresses token-by-token
+    // inference instead of spending most of its time in prefill.
+    const BENCH_PROMPT: &str = "User: Give a long, detailed explanation of field extensions, with many examples.\nAssistant:";
+    const BENCH_MAX_TOKENS: u32 = 512;
 
     #[cfg(not(any(feature = "f32", feature = "flex32", feature = "f16")))]
     pub type ElemType = rwkv::custom::tensor::bf16;
@@ -200,15 +201,29 @@ mod bench {
         let stage_started = Instant::now();
         let stop_sampling = Arc::new(AtomicBool::new(false));
         let health_snapshots = Arc::new(Mutex::new(Vec::new()));
+        let health_sampling_interval_ms = health_sampling_interval_ms();
 
-        let sampler = {
+        {
+            let mut snapshots = health_snapshots
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            snapshots.push(client.health());
+        }
+
+        let sampler = (health_sampling_interval_ms > 0).then(|| {
             let client = client.clone();
             let stop_sampling = Arc::clone(&stop_sampling);
             let health_snapshots = Arc::clone(&health_snapshots);
             tokio::spawn(async move {
-                sample_health_loop(client, health_snapshots, stop_sampling).await;
+                sample_health_loop(
+                    client,
+                    health_snapshots,
+                    stop_sampling,
+                    health_sampling_interval_ms,
+                )
+                .await;
             })
-        };
+        });
 
         let template = build_completion_request(model_name);
         let mut join_set = JoinSet::new();
@@ -229,8 +244,10 @@ mod bench {
             }
         }
 
-        stop_sampling.store(true, Ordering::Relaxed);
-        let _ = sampler.await;
+        if let Some(sampler) = sampler {
+            stop_sampling.store(true, Ordering::Relaxed);
+            let _ = sampler.await;
+        }
 
         {
             let mut snapshots = health_snapshots
@@ -295,6 +312,7 @@ mod bench {
         client: LocalClient,
         health_snapshots: Arc<Mutex<Vec<HealthResp>>>,
         stop_sampling: Arc<AtomicBool>,
+        interval_ms: u64,
     ) {
         loop {
             let snapshot = client.health();
@@ -307,8 +325,15 @@ mod bench {
                 break;
             }
 
-            tokio::time::sleep(Duration::from_millis(HEALTH_SAMPLING_INTERVAL_MS)).await;
+            tokio::time::sleep(Duration::from_millis(interval_ms)).await;
         }
+    }
+
+    fn health_sampling_interval_ms() -> u64 {
+        std::env::var("RWKV_LM_INFER_BENCH_HEALTH_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0)
     }
 
     async fn run_completion(client: LocalClient, req: CompletionsReq) -> RequestOutcome {
@@ -342,40 +367,31 @@ mod bench {
             model: model_name.to_string(),
             prompt: BENCH_PROMPT.to_string(),
             stream: Some(false),
-            max_tokens: Some(256),
+            max_tokens: Some(BENCH_MAX_TOKENS),
             temperature: Some(0.8),
             top_k: Some(50),
             top_p: Some(0.95),
             presence_penalty: Some(0.5),
             repetition_penalty: Some(0.5),
             penalty_decay: Some(0.996),
-            stop: Some(StopField::Multiple(vec![
-                "\n</think>".to_string(),
-                "\n\nUser: ".to_string(),
-            ])),
+            // Disable early stop strings so stages consistently measure long decode runs instead
+            // of whichever request happened to terminate first.
+            stop: None,
             logprobs: None,
             candidate_token_texts: None,
         }
     }
 
     fn concurrency_levels(max_batch_size: usize) -> Vec<usize> {
-        let mut levels = Vec::new();
-        let mut current = 1usize;
-
-        loop {
-            levels.push(current.min(max_batch_size));
-            if current >= max_batch_size {
-                break;
-            }
-
-            let next = current.saturating_mul(2);
-            if next > max_batch_size {
-                if current != max_batch_size {
-                    levels.push(max_batch_size);
-                }
-                break;
-            }
-            current = next;
+        let mut levels = vec![1usize];
+        for candidate in [
+            max_batch_size / 8,
+            max_batch_size / 4,
+            max_batch_size / 2,
+            (max_batch_size * 3) / 4,
+            max_batch_size,
+        ] {
+            levels.push(candidate.clamp(1, max_batch_size));
         }
 
         levels.dedup();

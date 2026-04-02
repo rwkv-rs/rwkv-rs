@@ -10,6 +10,8 @@
 //! - `Line<f32>` vectorized loads/stores (`VEC = 4`, CUDA `float4` equivalent);
 //! - plane-shuffle + shared memory reductions/scans;
 //! - RNG state uses lightweight LCG (`u32`) instead of CUDA Philox.
+//! - an inference-oriented `batch_ids` entry point lets the kernel update the full RNG /
+//!   penalty state in place without a `[batch, vocab]` gather + scatter around every decode step.
 //!
 //! Equivalence target:
 //! - algorithmic equivalence and statistically consistent sampling behavior;
@@ -57,23 +59,25 @@ pub trait RapidSampleBackend: Backend {
     /// - `inv_temperatures`: `[batch_size]` (pre-computed `1.0 / temperature`)
     /// - `top_ks`: `[batch_size]` (pre-normalized via `normalize_topk_topp`)
     /// - `top_ps`: `[batch_size]` (pre-normalized via `normalize_topk_topp`)
-    /// - penalties tuple when provided:
-    ///   - `.0`: `[batch_size, vocab_size]` penalty state, dtype `F32`
+    /// - `batch_ids`: `[batch_size]` active-row -> full-state-slot mapping
+    /// - penalties tuple:
+    ///   - `.0`: `[full_batch_size, vocab_size]` penalty state, dtype `F32`
     ///   - `.1`: `[batch_size]` presence_penalty
     ///   - `.2`: `[batch_size]` repetition_penalty
     ///   - `.3`: `[batch_size]` penalty_decay
     fn rapid_sample(
         logits: FloatTensor<Self>,
+        batch_ids: IntTensor<Self>,
         states: IntTensor<Self>,
         inv_temperatures: FloatTensor<Self>,
         top_ks: IntTensor<Self>,
         top_ps: FloatTensor<Self>,
-        penalties: Option<(
+        penalties: (
             FloatTensor<Self>,
             FloatTensor<Self>,
             FloatTensor<Self>,
             FloatTensor<Self>,
-        )>,
+        ),
     ) -> RapidSampleOutputPrimitive<Self>;
 }
 
@@ -83,23 +87,24 @@ pub trait RapidSampleBackend: Backend {
 )]
 pub fn rapid_sample<B: RapidSampleBackend>(
     logits: Tensor<B, 2>,
+    batch_ids: Tensor<B, 1, Int>,
     rng: Tensor<B, 1, Int>,
     inv_temperatures: Tensor<B, 1>,
     top_ks: Tensor<B, 1, Int>,
     top_ps: Tensor<B, 1>,
-    penalties: Option<(Tensor<B, 2>, Tensor<B, 1>, Tensor<B, 1>, Tensor<B, 1>)>,
+    penalties: (Tensor<B, 2>, Tensor<B, 1>, Tensor<B, 1>, Tensor<B, 1>),
 ) -> RapidSampleOutputTensor<B> {
-    let primitive_penalties = penalties.map(|(pen, pp, rp, pd)| {
-        (
-            pen.into_primitive().tensor(),
-            pp.into_primitive().tensor(),
-            rp.into_primitive().tensor(),
-            pd.into_primitive().tensor(),
-        )
-    });
+    let (pen, pp, rp, pd) = penalties;
+    let primitive_penalties = (
+        pen.into_primitive().tensor(),
+        pp.into_primitive().tensor(),
+        rp.into_primitive().tensor(),
+        pd.into_primitive().tensor(),
+    );
 
     let out = B::rapid_sample(
         logits.into_primitive().tensor(),
+        batch_ids.into_primitive(),
         rng.into_primitive(),
         inv_temperatures.into_primitive().tensor(),
         top_ks.into_primitive(),
