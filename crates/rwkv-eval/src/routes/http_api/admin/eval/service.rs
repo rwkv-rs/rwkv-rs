@@ -117,19 +117,6 @@ async fn build_admin_eval_status(
 
 fn validate_admin_eval_config(cfg: &RawEvalConfig) -> Result<(), ApiError> {
     validate_space_db_config(&cfg.space_db).map_err(ApiError::bad_request)?;
-
-    require_non_empty(
-        &cfg.llm_judger.api_key,
-        "llm_judger.api_key cannot be empty",
-    )?;
-
-    if !cfg.skip_checker.unwrap_or(false) {
-        require_non_empty(
-            &cfg.llm_checker.api_key,
-            "llm_checker.api_key cannot be empty",
-        )?;
-    }
-
     Ok(())
 }
 
@@ -168,13 +155,6 @@ fn validate_space_db_matches_service_config(
         "admin eval start does not allow overriding space_db; changed fields: {}",
         changed_fields.join(", ")
     )))
-}
-
-fn require_non_empty(value: &str, message: &str) -> Result<(), ApiError> {
-    if value.trim().is_empty() {
-        return Err(ApiError::bad_request(message));
-    }
-    Ok(())
 }
 
 fn to_admin_eval_config_dto(cfg: RawEvalConfig) -> AdminEvalConfigDto {
@@ -356,6 +336,26 @@ mod tests {
         let service_cfg = from_admin_eval_config_dto(sample_request());
         let parsed = parse_admin_eval_request(request, &service_cfg).unwrap();
         assert_eq!(parsed.models[0].api_key, "");
+    }
+
+    #[test]
+    fn parse_request_allows_empty_judger_api_key() {
+        let mut request = sample_request();
+        request.llm_judger.api_key.clear();
+
+        let service_cfg = from_admin_eval_config_dto(sample_request());
+        let parsed = parse_admin_eval_request(request, &service_cfg).unwrap();
+        assert_eq!(parsed.llm_judger.api_key, "");
+    }
+
+    #[test]
+    fn parse_request_allows_empty_checker_api_key() {
+        let mut request = sample_request();
+        request.llm_checker.api_key.clear();
+
+        let service_cfg = from_admin_eval_config_dto(sample_request());
+        let parsed = parse_admin_eval_request(request, &service_cfg).unwrap();
+        assert_eq!(parsed.llm_checker.api_key, "");
     }
 
     #[test]
