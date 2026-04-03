@@ -1,4 +1,7 @@
-use burn::{Tensor, prelude::{Backend, Int}};
+use burn::{
+    Tensor,
+    prelude::{Backend, Int},
+};
 
 use crate::kernels::{
     wkv7_infer::{Wkv7InferBackend, wkv7_infer_forward},
@@ -120,8 +123,8 @@ impl<B: Wkv7InferBackend> Wkv7Kernel<B> for KernelInfer {
         let initial_state = state.expect("initial_state required");
         let [active_batch_size, context_length, _num_heads, _head_size] = input.weight_decay.dims();
         let device = input.weight_decay.device();
-        let context_mask =
-            context_mask.unwrap_or_else(|| Tensor::ones([active_batch_size, context_length], &device));
+        let context_mask = context_mask
+            .unwrap_or_else(|| Tensor::ones([active_batch_size, context_length], &device));
 
         let output = wkv7_infer_forward(
             input.weight_decay,

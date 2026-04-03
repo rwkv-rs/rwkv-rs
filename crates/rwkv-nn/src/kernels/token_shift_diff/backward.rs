@@ -8,7 +8,13 @@ use burn::{
         },
     },
     prelude::Int,
-    tensor::{IndexingUpdateOp, Tensor, TensorMetadata, TensorPrimitive, ops::{FloatTensor, IntTensor}},
+    tensor::{
+        IndexingUpdateOp,
+        Tensor,
+        TensorMetadata,
+        TensorPrimitive,
+        ops::{FloatTensor, IntTensor},
+    },
 };
 
 use crate::kernels::token_shift_diff::TokenShiftDiffBackend;
@@ -84,16 +90,13 @@ pub(crate) fn rwkv_token_shift_diff_autodiff<B: TokenShiftDiffBackend, C: Checkp
             .sum_dim(1)
             .squeeze_dim(1);
 
-            let embedded_token_shift_grad = Tensor::<B, 2>::zeros(
-                [full_batch_size, embedded_dim],
-                &device,
-            )
-            .select_assign(
-                0,
-                batch_ids,
-                active_token_shift_grad,
-                IndexingUpdateOp::Add,
-            );
+            let embedded_token_shift_grad =
+                Tensor::<B, 2>::zeros([full_batch_size, embedded_dim], &device).select_assign(
+                    0,
+                    batch_ids,
+                    active_token_shift_grad,
+                    IndexingUpdateOp::Add,
+                );
 
             if let Some(node) = node_embedded_context {
                 grads.register::<B>(node.id, embedded_context_grad.into_primitive().tensor());

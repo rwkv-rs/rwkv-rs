@@ -47,7 +47,11 @@ fn rwkv_token_shift_diff_launch<
         2,
         "embedded_token_shift must be rank 2"
     );
-    debug_assert_eq!(batch_ids.meta.shape().num_dims(), 1, "batch_ids must be rank 1");
+    debug_assert_eq!(
+        batch_ids.meta.shape().num_dims(),
+        1,
+        "batch_ids must be rank 1"
+    );
     debug_assert_eq!(
         context_mask.meta.shape().num_dims(),
         2,
@@ -164,7 +168,12 @@ mod fusion_impl {
                     >,
                 ) {
                     let (
-                        [embedded_context, embedded_token_shift, batch_ids, context_mask],
+                        [
+                            embedded_context,
+                            embedded_token_shift,
+                            batch_ids,
+                            context_mask,
+                        ],
                         [token_shifted_diff_out, next_token_shift_out],
                     ) = self.desc.as_fixed();
 

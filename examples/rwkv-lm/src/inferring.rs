@@ -41,6 +41,7 @@ use rwkv::{
     },
     nn::kernels::{
         addcmul::AddcmulBackend,
+        guided_token_mask::{GuidedTokenMaskBackend, apply_guided_token_masks},
         rapid_sample::{RapidSampleBackend, rapid_sample},
         token_shift_diff::TokenShiftDiffBackend,
         wkv7_common::Wkv7Backend,
@@ -52,8 +53,6 @@ use rwkv::infer::routes::IpcServerConfig;
 use crate::model::{AutoRegressiveModel, AutoRegressiveModelConfig, UnembedMode};
 
 rwkv::custom_mode!();
-
-const GUIDED_MASKED_LOGIT: f32 = -1.0e30;
 
 pub fn infer_cli_args(args: &[String]) -> (PathBuf, String) {
     let config_dir = get_arg_value(args, "--config-dir")
@@ -132,9 +131,69 @@ impl<B: Backend + Wkv7Backend + RapidSampleBackend> RwkvLmForward<B> {
     }
 }
 
+fn bitmask_allows_token(guided_token_mask: &[i32], token_id: usize) -> bool {
+    let word_index = token_id / 32;
+    let bit_index = token_id % 32;
+    guided_token_mask
+        .get(word_index)
+        .is_some_and(|&word| ((word as u32) & (1_u32 << bit_index)) != 0)
+}
+
+fn build_guided_token_masks_tensor<B: Backend>(
+    guided_token_masks: &[Option<&[i32]>],
+    vocab_size: usize,
+    device: &B::Device,
+) -> Result<Option<(Tensor<B, 2, Int>, usize)>, String> {
+    if guided_token_masks.iter().all(Option::is_none) {
+        return Ok(None);
+    }
+
+    let guided_token_mask_words = vocab_size.div_ceil(32);
+    let mut flattened = Vec::with_capacity(guided_token_masks.len() * guided_token_mask_words);
+
+    for (row_index, guided_token_mask) in guided_token_masks.iter().enumerate() {
+        match guided_token_mask {
+            Some(guided_token_mask) => {
+                if guided_token_mask.len() != guided_token_mask_words {
+                    return Err(format!(
+                        "guided_token_masks[{row_index}] has {} words, expected {guided_token_mask_words} for vocab_size={vocab_size}",
+                        guided_token_mask.len()
+                    ));
+                }
+
+                if !(0..vocab_size)
+                    .any(|token_id| bitmask_allows_token(guided_token_mask, token_id))
+                {
+                    return Err(format!(
+                        "guided_token_masks[{row_index}] disallows every token in vocab_size={vocab_size}"
+                    ));
+                }
+
+                flattened.extend_from_slice(guided_token_mask);
+            }
+            None => flattened.extend(std::iter::repeat_n(-1_i32, guided_token_mask_words)),
+        }
+    }
+
+    let guided_token_masks = Tensor::<B, 2, Int>::from_data(
+        TensorData::new(
+            flattened,
+            [guided_token_masks.len(), guided_token_mask_words],
+        ),
+        device,
+    );
+
+    Ok(Some((guided_token_masks, guided_token_mask_words)))
+}
+
 impl<B> ModelForward for RwkvLmForward<B>
 where
-    B: Backend + TokenShiftDiffBackend + AddcmulBackend + Wkv7Backend + RapidSampleBackend,
+    B: Backend
+        + TokenShiftDiffBackend
+        + AddcmulBackend
+        + Wkv7Backend
+        + RapidSampleBackend
+        + GuidedTokenMaskBackend,
 {
     fn step(
         &mut self,
@@ -222,37 +281,21 @@ where
                 assert_eq!(batch_ids.len(), token_logprobs_configs.len());
                 assert_eq!(batch_ids.len(), guided_token_masks.len());
 
-                let logits = if guided_token_masks.iter().all(Option::is_none) {
-                    logits
-                } else {
-                    let mut logits_vec = logits.to_data().to_vec::<f32>().unwrap();
-                    assert_eq!(logits_vec.len(), guided_token_masks.len() * self.vocab_size);
-
-                    for (row_index, guided_token_mask) in guided_token_masks.iter().enumerate() {
-                        let Some(guided_token_mask) = guided_token_mask else {
-                            continue;
-                        };
-
-                        let row_start = row_index * self.vocab_size;
-                        let row_end = row_start + self.vocab_size;
-                        let row = &mut logits_vec[row_start..row_end];
-
-                        for (token_id, logit) in row.iter_mut().enumerate() {
-                            let word_index = token_id / 32;
-                            let bit_index = token_id % 32;
-                            let allowed = guided_token_mask
-                                .get(word_index)
-                                .is_some_and(|word| (word & (1 << bit_index)) != 0);
-                            if !allowed {
-                                *logit = GUIDED_MASKED_LOGIT;
-                            }
-                        }
+                let logits = match build_guided_token_masks_tensor::<B>(
+                    guided_token_masks,
+                    self.vocab_size,
+                    &self.device,
+                )
+                .expect("guided_token_masks must match vocab size and allow at least one token")
+                {
+                    Some((guided_token_masks, guided_token_mask_words)) => {
+                        apply_guided_token_masks(
+                            logits,
+                            guided_token_masks,
+                            guided_token_mask_words,
+                        )
                     }
-
-                    Tensor::from_data(
-                        TensorData::new(logits_vec, [guided_token_masks.len(), self.vocab_size]),
-                        &self.device,
-                    )
+                    None => logits,
                 };
 
                 let SamplingConfigsTensor {
@@ -398,6 +441,7 @@ where
         + AddcmulBackend
         + Wkv7Backend
         + RapidSampleBackend
+        + GuidedTokenMaskBackend
         + Send
         + Sync
         + 'static,
@@ -481,6 +525,7 @@ where
         + AddcmulBackend
         + Wkv7Backend
         + RapidSampleBackend
+        + GuidedTokenMaskBackend
         + Send
         + Sync
         + 'static,
@@ -502,6 +547,7 @@ where
         + AddcmulBackend
         + Wkv7Backend
         + RapidSampleBackend
+        + GuidedTokenMaskBackend
         + Send
         + Sync
         + 'static,

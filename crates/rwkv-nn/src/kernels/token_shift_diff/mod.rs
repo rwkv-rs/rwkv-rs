@@ -5,7 +5,12 @@ mod kernel;
 use burn::{
     backend::{Autodiff, autodiff::checkpoint::strategy::CheckpointStrategy},
     prelude::{Backend, Int},
-    tensor::{IndexingUpdateOp, Tensor, TensorPrimitive, ops::{FloatTensor, IntTensor}},
+    tensor::{
+        IndexingUpdateOp,
+        Tensor,
+        TensorPrimitive,
+        ops::{FloatTensor, IntTensor},
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -89,7 +94,8 @@ fn token_shift_diff_reference<B: Backend>(
     let prev = shifted.clone()
         + use_external_shift.unsqueeze_dim(2)
             * (active_token_shift.clone().unsqueeze_dim(1) - shifted);
-    let token_shifted_diff = (prev - embedded_context.clone()) * context_mask.clone().unsqueeze_dim(2);
+    let token_shifted_diff =
+        (prev - embedded_context.clone()) * context_mask.clone().unsqueeze_dim(2);
 
     TokenShiftDiffOutput {
         token_shifted_diff,
@@ -133,8 +139,8 @@ fn next_token_shift_reference<B: Backend>(
         .clone()
         .slice([0..active_batch_size, (context_length - 1)..context_length])
         .squeeze_dim(1);
-    let next_active_token_shift = active_token_shift.clone()
-        + last_mask.unsqueeze_dim(1) * (last_token - active_token_shift);
+    let next_active_token_shift =
+        active_token_shift.clone() + last_mask.unsqueeze_dim(1) * (last_token - active_token_shift);
 
     let selected_rows = Tensor::<B, 1>::zeros([full_batch_size], &device).select_assign(
         0,
@@ -144,12 +150,7 @@ fn next_token_shift_reference<B: Backend>(
     );
     (embedded_token_shift.clone()
         * (Tensor::ones([full_batch_size], &device) - selected_rows).unsqueeze_dim(1))
-    .select_assign(
-        0,
-        batch_ids,
-        next_active_token_shift,
-        IndexingUpdateOp::Add,
-    )
+    .select_assign(0, batch_ids, next_active_token_shift, IndexingUpdateOp::Add)
 }
 
 #[cfg_attr(
@@ -191,7 +192,9 @@ pub fn token_shift_diff<B: TokenShiftDiffBackend>(
     };
 
     TokenShiftDiffOutput {
-        token_shifted_diff: Tensor::from_primitive(TensorPrimitive::Float(output.token_shifted_diff)),
+        token_shifted_diff: Tensor::from_primitive(TensorPrimitive::Float(
+            output.token_shifted_diff,
+        )),
         next_token_shift: Tensor::from_primitive(TensorPrimitive::Float(output.next_token_shift)),
     }
 }
@@ -205,9 +208,8 @@ impl<B: TokenShiftDiffBackend, C: CheckpointStrategy> TokenShiftDiffBackend for 
     ) -> TokenShiftDiffPrimitiveOutput<Self> {
         let embedded_context_tensor =
             Tensor::<Self, 3>::from_primitive(TensorPrimitive::Float(embedded_context.clone()));
-        let embedded_token_shift_tensor = Tensor::<Self, 2>::from_primitive(
-            TensorPrimitive::Float(embedded_token_shift.clone()),
-        );
+        let embedded_token_shift_tensor =
+            Tensor::<Self, 2>::from_primitive(TensorPrimitive::Float(embedded_token_shift.clone()));
         let batch_ids_tensor = Tensor::<Self, 1, Int>::new(batch_ids.clone());
         let context_mask_tensor =
             Tensor::<Self, 2>::from_primitive(TensorPrimitive::Float(context_mask.clone()));
@@ -293,32 +295,24 @@ mod tests {
                 &expected.token_shifted_diff.into_data(),
                 Tolerance::rel_abs(1e-5, 1e-5),
             );
-        output
-            .next_token_shift
-            .into_data()
-            .assert_approx_eq::<f32>(
-                &expected.next_token_shift.into_data(),
-                Tolerance::rel_abs(1e-5, 1e-5),
-            );
+        output.next_token_shift.into_data().assert_approx_eq::<f32>(
+            &expected.next_token_shift.into_data(),
+            Tolerance::rel_abs(1e-5, 1e-5),
+        );
     }
 
     #[test]
     fn token_shift_diff_backward_matches_reference() {
         let device = Default::default();
 
-        let embedded_context = Tensor::<TestBackend, 3>::from_floats(
-            [[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]],
-            &device,
-        )
-        .require_grad();
-        let embedded_token_shift = Tensor::<TestBackend, 2>::from_floats(
-            [[10.0, 20.0], [30.0, 40.0]],
-            &device,
-        )
-        .require_grad();
+        let embedded_context =
+            Tensor::<TestBackend, 3>::from_floats([[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]], &device)
+                .require_grad();
+        let embedded_token_shift =
+            Tensor::<TestBackend, 2>::from_floats([[10.0, 20.0], [30.0, 40.0]], &device)
+                .require_grad();
         let batch_ids = Tensor::<TestBackend, 1, Int>::from_ints([1], &device);
-        let context_mask =
-            Tensor::<TestBackend, 2>::from_floats([[0.0, 1.0, 1.0]], &device);
+        let context_mask = Tensor::<TestBackend, 2>::from_floats([[0.0, 1.0, 1.0]], &device);
 
         let custom = token_shift_diff(
             embedded_context.clone(),
@@ -328,21 +322,20 @@ mod tests {
         );
         let custom_grads = custom.token_shifted_diff.sum().backward();
 
-        let ref_context = Tensor::<TestBackend, 3>::from_floats(
-            [[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]],
-            &device,
-        )
-        .require_grad();
-        let ref_shift = Tensor::<TestBackend, 2>::from_floats(
-            [[10.0, 20.0], [30.0, 40.0]],
-            &device,
-        )
-        .require_grad();
+        let ref_context =
+            Tensor::<TestBackend, 3>::from_floats([[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]], &device)
+                .require_grad();
+        let ref_shift =
+            Tensor::<TestBackend, 2>::from_floats([[10.0, 20.0], [30.0, 40.0]], &device)
+                .require_grad();
         let ref_batch_ids = Tensor::<TestBackend, 1, Int>::from_ints([1], &device);
-        let ref_mask =
-            Tensor::<TestBackend, 2>::from_floats([[0.0, 1.0, 1.0]], &device);
-        let reference =
-            token_shift_diff_reference(ref_context.clone(), ref_shift.clone(), ref_batch_ids, ref_mask);
+        let ref_mask = Tensor::<TestBackend, 2>::from_floats([[0.0, 1.0, 1.0]], &device);
+        let reference = token_shift_diff_reference(
+            ref_context.clone(),
+            ref_shift.clone(),
+            ref_batch_ids,
+            ref_mask,
+        );
         let ref_grads = reference.token_shifted_diff.sum().backward();
 
         embedded_context

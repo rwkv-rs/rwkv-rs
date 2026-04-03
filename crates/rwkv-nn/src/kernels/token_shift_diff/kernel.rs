@@ -45,7 +45,8 @@ pub fn rwkv_token_shift_diff_kernel<F: Float>(
 
     for time_index in 0..context_length {
         let mask_index = batch_index * context_length + time_index;
-        let output_index = (batch_index * context_length + time_index) * embedded_dim + feature_index;
+        let output_index =
+            (batch_index * context_length + time_index) * embedded_dim + feature_index;
         let mask = inputs.context_mask[mask_index];
 
         if mask == zero {

@@ -1,5 +1,6 @@
 use burn::tensor::{
-    DType, Shape,
+    DType,
+    Shape,
     ops::{FloatTensor, IntTensor},
 };
 use burn_cubecl::{CubeElement, CubeRuntime};
@@ -30,7 +31,9 @@ where
 #[cfg(feature = "fusion")]
 mod fusion_impl {
     use burn_fusion::{
-        Fusion, FusionBackend, FusionRuntime,
+        Fusion,
+        FusionBackend,
+        FusionRuntime,
         stream::{Operation, OperationStreams},
     };
     use burn_ir::{CustomOpIr, HandleContainer, OperationIr, TensorIr};

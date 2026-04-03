@@ -5,7 +5,12 @@ mod kernel;
 use burn::{
     backend::{Autodiff, autodiff::checkpoint::strategy::CheckpointStrategy},
     prelude::{Backend, Int},
-    tensor::{Tensor, TensorPrimitive, backend::AutodiffBackend, ops::{FloatTensor, IntTensor}},
+    tensor::{
+        Tensor,
+        TensorPrimitive,
+        backend::AutodiffBackend,
+        ops::{FloatTensor, IntTensor},
+    },
 };
 
 /// Forward output for inference-only WKV7 kernel.

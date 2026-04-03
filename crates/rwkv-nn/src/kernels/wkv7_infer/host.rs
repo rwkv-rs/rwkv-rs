@@ -1,4 +1,8 @@
-use burn::tensor::{DType, Shape, ops::{FloatTensor, IntTensor}};
+use burn::tensor::{
+    DType,
+    Shape,
+    ops::{FloatTensor, IntTensor},
+};
 use burn_cubecl::{
     CubeElement,
     CubeRuntime,

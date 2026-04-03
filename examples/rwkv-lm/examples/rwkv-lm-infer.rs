@@ -16,6 +16,7 @@ use rwkv::{
     infer::routes::HttpApiRouterBuilder,
     nn::kernels::{
         addcmul::AddcmulBackend,
+        guided_token_mask::GuidedTokenMaskBackend,
         rapid_sample::RapidSampleBackend,
         token_shift_diff::TokenShiftDiffBackend,
         wkv7_common::Wkv7Backend,
@@ -48,6 +49,7 @@ where
         + TokenShiftDiffBackend
         + AddcmulBackend
         + RapidSampleBackend
+        + GuidedTokenMaskBackend
         + Send
         + Sync
         + 'static,

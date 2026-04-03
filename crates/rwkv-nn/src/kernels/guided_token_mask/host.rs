@@ -1,5 +1,6 @@
 use burn::tensor::{
-    DType, Shape,
+    DType,
+    Shape,
     ops::{FloatTensor, IntTensor},
 };
 use burn_cubecl::{

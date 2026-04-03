@@ -23,8 +23,8 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
     }
 
     let mut state = Array::<F>::new(head_size);
-    let initial_state_base =
-        (state_batch_index * num_heads + head_index) * head_size * head_size + head_dim_index * head_size;
+    let initial_state_base = (state_batch_index * num_heads + head_index) * head_size * head_size
+        + head_dim_index * head_size;
 
     #[unroll(true)]
     for i in 0..head_size {
@@ -38,7 +38,8 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
     let mut shared_removal = SharedMemory::<F>::new(head_size);
     let mut shared_replacement = SharedMemory::<F>::new(head_size);
 
-    let batch_head_base = (active_batch_index * context_length * num_heads + head_index) * head_size;
+    let batch_head_base =
+        (active_batch_index * context_length * num_heads + head_index) * head_size;
     let context_mask_base = active_batch_index * context_length;
 
     for t in 0..context_length {
@@ -85,8 +86,8 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
     // `[max_batch, H, S, S]` tensor every decode step would erase most of the win from slot-mapped
     // inference, so the kernel reads the old state from the same buffer and overwrites only the
     // mapped rows.
-    let final_state_base =
-        (state_batch_index * num_heads + head_index) * head_size * head_size + head_dim_index * head_size;
+    let final_state_base = (state_batch_index * num_heads + head_index) * head_size * head_size
+        + head_dim_index * head_size;
 
     #[unroll(true)]
     for i in 0..head_size {
