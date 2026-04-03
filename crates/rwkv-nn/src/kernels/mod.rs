@@ -1,5 +1,6 @@
 pub mod addcmul;
 pub(crate) mod backend;
+pub mod guided_token_mask;
 pub mod l2wrap;
 pub mod rapid_sample;
 pub mod token_shift_diff;
