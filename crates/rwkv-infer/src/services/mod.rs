@@ -15,7 +15,6 @@ use std::{
 };
 
 use axum::{
-    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -29,6 +28,7 @@ use crate::{
         queue::queue_worker::QueueHandle,
     },
     dtos::errors::OpenAiErrorResponse,
+    sonic_json::SonicJson,
 };
 
 pub type QueueMap = HashMap<String, Vec<QueueHandle>>;
@@ -90,7 +90,7 @@ impl ServiceError {
 
 impl IntoResponse for ServiceError {
     fn into_response(self) -> Response {
-        (self.status, Json(self.body)).into_response()
+        (self.status, SonicJson(self.body)).into_response()
     }
 }
 

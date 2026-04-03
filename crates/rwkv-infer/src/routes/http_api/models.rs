@@ -1,11 +1,11 @@
-use axum::{Json, extract::State};
+use axum::extract::State;
 
-use crate::{dtos::models::ModelsResp, routes::http_api::AppState};
+use crate::{dtos::models::ModelsResp, routes::http_api::AppState, sonic_json::SonicJson};
 
-pub async fn models(State(app_state): State<AppState>) -> Json<ModelsResp> {
+pub async fn models(State(app_state): State<AppState>) -> SonicJson<ModelsResp> {
     let queues = app_state
         .queues
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    Json(crate::services::models::models(&queues))
+    SonicJson(crate::services::models::models(&queues))
 }

@@ -14,7 +14,6 @@
 //! ```
 
 use axum::{
-    Json,
     extract::State,
     http::{Request, StatusCode, header::AUTHORIZATION},
     middleware::Next,
@@ -22,7 +21,7 @@ use axum::{
 };
 use thiserror::Error;
 
-use crate::dtos::errors::OpenAiErrorResponse;
+use crate::{dtos::errors::OpenAiErrorResponse, sonic_json::SonicJson};
 
 #[derive(Clone, Debug, Default)]
 pub struct AuthConfig {
@@ -56,7 +55,7 @@ pub async fn auth(
         Ok(()) => next.run(request).await,
         Err(err) => (
             StatusCode::UNAUTHORIZED,
-            Json(OpenAiErrorResponse::unauthorized(err.to_string())),
+            SonicJson(OpenAiErrorResponse::unauthorized(err.to_string())),
         )
             .into_response(),
     }

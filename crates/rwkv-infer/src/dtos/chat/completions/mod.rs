@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use sonic_rs::Value;
 
 use crate::dtos::stop::StopField;
@@ -54,12 +54,41 @@ pub struct FunctionInContext {
     pub arguments: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Clone, Debug, Serialize)]
 pub enum ResponseFormat {
     Text,
     JsonObject,
     JsonSchema { json_schema: JsonSchema },
+}
+
+impl<'de> Deserialize<'de> for ResponseFormat {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct ResponseFormatHelper {
+            #[serde(rename = "type")]
+            ty: String,
+            #[serde(default)]
+            json_schema: Option<JsonSchema>,
+        }
+
+        let helper = ResponseFormatHelper::deserialize(deserializer)?;
+        match helper.ty.as_str() {
+            "text" => Ok(Self::Text),
+            "json_object" => Ok(Self::JsonObject),
+            "json_schema" => Ok(Self::JsonSchema {
+                json_schema: helper
+                    .json_schema
+                    .ok_or_else(|| de::Error::missing_field("json_schema"))?,
+            }),
+            other => Err(de::Error::unknown_variant(
+                other,
+                &["text", "json_object", "json_schema"],
+            )),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -126,6 +155,40 @@ pub struct Choices {
     pub finish_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logprobs: Option<Logprobs>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ChatCompletionsReq, ResponseFormat};
+
+    #[test]
+    fn parses_response_format_json_schema_with_schema_value() {
+        let req: ChatCompletionsReq = sonic_rs::from_str(
+            r#"{
+                "model":"test-model",
+                "messages":[{"role":"user","content":"hi"}],
+                "response_format":{
+                    "type":"json_schema",
+                    "json_schema":{
+                        "name":"result",
+                        "schema":{"type":"object","properties":{},"additionalProperties":false}
+                    }
+                }
+            }"#,
+        )
+        .expect("parse chat completions request");
+
+        match req.response_format.expect("response format") {
+            ResponseFormat::JsonSchema { json_schema } => {
+                assert_eq!(json_schema.name, "result");
+                assert_eq!(
+                    json_schema.schema.expect("schema"),
+                    sonic_rs::json!({"type":"object","properties":{},"additionalProperties":false})
+                );
+            }
+            other => panic!("unexpected response format: {other:?}"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

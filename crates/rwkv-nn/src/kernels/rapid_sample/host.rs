@@ -182,10 +182,7 @@ pub(crate) fn rapid_sample_topk_topp_impl<
         &client,
         cube_count,
         cube_dim,
-        RapidSampleBatchIdsInputsLaunch::new(
-            logits.as_tensor_arg(4),
-            batch_ids.as_tensor_arg(1),
-        ),
+        RapidSampleBatchIdsInputsLaunch::new(logits.as_tensor_arg(4), batch_ids.as_tensor_arg(1)),
         RapidSampleRepetitionOutputsLaunch::new(
             token_ids.as_tensor_arg(1),
             penalties.as_tensor_arg(4),

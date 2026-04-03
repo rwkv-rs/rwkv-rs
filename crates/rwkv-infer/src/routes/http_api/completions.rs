@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use axum::{
-    Json,
     extract::State,
     response::{
         IntoResponse,
@@ -18,11 +17,12 @@ use crate::{
     dtos::completions::CompletionsReq,
     routes::http_api::AppState,
     services::{completions::completions as run_completions, select_model_queue},
+    sonic_json::SonicJson,
 };
 
 pub async fn completions(
     State(app_state): State<AppState>,
-    Json(req): Json<CompletionsReq>,
+    SonicJson(req): SonicJson<CompletionsReq>,
 ) -> Response {
     let handle = {
         let queues = app_state
@@ -75,5 +75,5 @@ pub async fn completions(
         return Sse::new(sse_stream).keep_alive(keep_alive).into_response();
     }
 
-    Json(run.collect().await).into_response()
+    SonicJson(run.collect().await).into_response()
 }
