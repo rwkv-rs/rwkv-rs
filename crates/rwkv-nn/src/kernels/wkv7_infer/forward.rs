@@ -1,4 +1,4 @@
-use burn::tensor::ops::FloatTensor;
+use burn::tensor::ops::{FloatTensor, IntTensor};
 
 use crate::kernels::{
     backend::{BoolElement, CubeBackend, CubeElement, CubeRuntime, FloatElement, IntElement},
@@ -17,6 +17,7 @@ where
         value: FloatTensor<Self>,
         removal: FloatTensor<Self>,
         replacement: FloatTensor<Self>,
+        batch_ids: IntTensor<Self>,
         initial_state: FloatTensor<Self>,
         context_mask: FloatTensor<Self>,
     ) -> Wkv7InferForwardOutput<FloatTensor<Self>> {
@@ -27,6 +28,7 @@ where
             value,
             removal,
             replacement,
+            batch_ids,
             initial_state,
             context_mask,
         )
@@ -55,6 +57,7 @@ mod fusion_impl {
             value: FloatTensor<Self>,
             removal: FloatTensor<Self>,
             replacement: FloatTensor<Self>,
+            batch_ids: IntTensor<Self>,
             initial_state: FloatTensor<Self>,
             context_mask: FloatTensor<Self>,
         ) -> Wkv7InferForwardOutput<FloatTensor<Self>> {
@@ -63,6 +66,7 @@ mod fusion_impl {
             let context_length = weight_decay.shape[1];
             let num_heads = weight_decay.shape[2];
             let dim = weight_decay.shape[3];
+            let full_batch_size = initial_state.shape[0];
 
             #[derive(Clone, Debug)]
             struct Wkv7InferForwardOp<B1> {
@@ -85,6 +89,7 @@ mod fusion_impl {
                             value,
                             removal,
                             replacement,
+                            batch_ids,
                             initial_state,
                             context_mask,
                         ],
@@ -97,6 +102,7 @@ mod fusion_impl {
                     let value_tensor = handles.get_float_tensor::<B1>(value);
                     let removal_tensor = handles.get_float_tensor::<B1>(removal);
                     let replacement_tensor = handles.get_float_tensor::<B1>(replacement);
+                    let batch_ids_tensor = handles.get_int_tensor::<B1>(batch_ids);
                     let initial_state_tensor = handles.get_float_tensor::<B1>(initial_state);
                     let context_mask_tensor = handles.get_float_tensor::<B1>(context_mask);
 
@@ -107,6 +113,7 @@ mod fusion_impl {
                         value_tensor,
                         removal_tensor,
                         replacement_tensor,
+                        batch_ids_tensor,
                         initial_state_tensor,
                         context_mask_tensor,
                     );
@@ -123,6 +130,7 @@ mod fusion_impl {
             streams.tensor(&value);
             streams.tensor(&removal);
             streams.tensor(&replacement);
+            streams.tensor(&batch_ids);
             streams.tensor(&initial_state);
             streams.tensor(&context_mask);
 
@@ -134,7 +142,7 @@ mod fusion_impl {
                 ),
                 TensorIr::uninit(
                     client.create_empty_handle(),
-                    Shape::new([batch_size, num_heads, dim, dim]),
+                    Shape::new([full_batch_size, num_heads, dim, dim]),
                     B::FloatElem::dtype(),
                 ),
             ];
@@ -148,6 +156,7 @@ mod fusion_impl {
                     value.into_ir(),
                     removal.into_ir(),
                     replacement.into_ir(),
+                    batch_ids.into_ir(),
                     initial_state.into_ir(),
                     context_mask.into_ir(),
                 ],

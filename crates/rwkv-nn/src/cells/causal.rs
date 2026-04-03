@@ -2,7 +2,7 @@ use burn::{
     config::Config,
     module::Module,
     nn::{LayerNorm, LayerNormConfig},
-    prelude::{Backend, Tensor},
+    prelude::{Backend, Int, Tensor},
 };
 
 use crate::{
@@ -79,6 +79,7 @@ impl<B: Backend> MultiCausalCells<B> {
     {
         let MultiCausalCellsIO {
             embedded_context,
+            batch_ids,
             context_mask,
             mut embedded_token_shift_for_time_mix,
             mut state,
@@ -113,9 +114,11 @@ impl<B: Backend> MultiCausalCells<B> {
                 embedded_token_shift_for_time_mix: next_embedded_token_shift_for_time_mix,
                 state: next_state,
                 embedded_token_shift_for_channel_mix: next_embedded_token_shift_for_channel_mix,
+                ..
             } = cell.forward::<K>(
                 CausalCellIO {
                     embedded_context,
+                    batch_ids: batch_ids.clone(),
                     value_from_first_cell,
                     state: state_of_the_cell,
                     embedded_token_shift_for_time_mix: cell_time_shift,
@@ -142,6 +145,7 @@ impl<B: Backend> MultiCausalCells<B> {
 
         MultiCausalCellsIO {
             embedded_context,
+            batch_ids,
             context_mask,
             embedded_token_shift_for_time_mix,
             state,
@@ -152,6 +156,7 @@ impl<B: Backend> MultiCausalCells<B> {
 
 pub struct MultiCausalCellsIO<B: Backend> {
     pub embedded_context: Tensor<B, 3>, // [batch_size, context_length, embedded_dim]
+    pub batch_ids: Tensor<B, 1, Int>,   // [active_batch_size]
     pub context_mask: Option<Tensor<B, 2>>,
     pub embedded_token_shift_for_time_mix: Option<Vec<Tensor<B, 2>>>, // num_cells [batch_size, embedded_dim]
     pub state: Option<Vec<Tensor<B, 4>>>, // num_cells [batch_size, num_heads, head_size, head_size]
@@ -212,12 +217,14 @@ impl<B: AddcmulBackend + TokenShiftDiffBackend> CausalCell<B> {
     ) -> CausalCellIO<B> {
         let context_mask = context_mask.cloned();
         let embedded_context = causal_cell_input.embedded_context;
+        let batch_ids = causal_cell_input.batch_ids.clone();
 
         let embedded_context_normalized = self
             .pre_layer_norm_for_time_mix
             .forward(embedded_context.clone());
         let time_mixer_input = TimeMixerIO {
             embedded_context: embedded_context_normalized,
+            batch_ids: batch_ids.clone(),
             context_mask: context_mask.clone(),
             value_from_first_cell: causal_cell_input.value_from_first_cell.clone(),
             embedded_token_shift: causal_cell_input.embedded_token_shift_for_time_mix,
@@ -234,6 +241,7 @@ impl<B: AddcmulBackend + TokenShiftDiffBackend> CausalCell<B> {
 
         let channel_mixer_input = ChannelMixerIO {
             embedded_context: embedded_context_normalized,
+            batch_ids: batch_ids.clone(),
             context_mask,
             embedded_token_shift: causal_cell_input.embedded_token_shift_for_channel_mix,
         };
@@ -244,6 +252,7 @@ impl<B: AddcmulBackend + TokenShiftDiffBackend> CausalCell<B> {
 
         CausalCellIO {
             embedded_context,
+            batch_ids,
             value_from_first_cell: time_mixer_output.value_from_first_cell,
             embedded_token_shift_for_time_mix: time_mixer_output.embedded_token_shift,
             state: time_mixer_output.state,
@@ -254,6 +263,7 @@ impl<B: AddcmulBackend + TokenShiftDiffBackend> CausalCell<B> {
 
 pub struct CausalCellIO<B: Backend> {
     pub embedded_context: Tensor<B, 3>, // [batch_size, context_len, embedded_dim]
+    pub batch_ids: Tensor<B, 1, Int>,   // [active_batch_size]
     pub value_from_first_cell: Tensor<B, 3>, // [batch_size, context_len, embedded_dim]
     pub embedded_token_shift_for_time_mix: Option<Tensor<B, 2>>, // [batch_size, embedded_dim]
     pub state: Option<Tensor<B, 4>>,    // [batch_size, num_heads, head_size, head_size]

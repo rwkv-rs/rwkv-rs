@@ -139,12 +139,14 @@ impl<B: Backend> AutoRegressiveModel<B> {
 
         let inputs = item.inputs.to_device(device);
         let targets = item.targets.to_device(device);
+        let batch_ids = Tensor::<B, 1, Int>::arange(0..batch_size as i64, device);
 
         let embedded_context = self.embed.forward(inputs);
         let embedded_context_normalized = self.layer_norm_for_first_cell.forward(embedded_context);
 
         let multi_causal_cells_input = MultiCausalCellsIO {
             embedded_context: embedded_context_normalized,
+            batch_ids,
             context_mask: None,
             embedded_token_shift_for_time_mix,
             state,
@@ -181,6 +183,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
     pub fn infer(
         &self,
         contexts: Tensor<B, 2, Int>,
+        batch_ids: Tensor<B, 1, Int>,
         context_masks: Option<Tensor<B, 2>>,
         embedded_token_shift_for_time_mix: &mut Vec<Tensor<B, 2>>,
         state: &mut Vec<Tensor<B, 4>>,
@@ -209,10 +212,16 @@ impl<B: Backend> AutoRegressiveModel<B> {
         let device = &self.embed.devices()[0];
 
         let contexts = contexts.to_device(device);
+        let batch_ids = batch_ids.to_device(device);
         let context_masks = context_masks.map(|m| m.to_device(device));
 
         let [batch_size, context_length] = contexts.dims();
         assert!(context_length > 0, "tokens must be non-empty");
+        debug_assert_eq!(
+            batch_ids.dims(),
+            [batch_size],
+            "batch_ids shape mismatch with contexts"
+        );
 
         if let Some(mask) = context_masks.as_ref() {
             let [mask_batch_size, mask_context_length] = mask.dims();
@@ -234,6 +243,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
 
         let multi_causal_cells_input = MultiCausalCellsIO {
             embedded_context,
+            batch_ids,
             context_mask: context_masks.clone(),
             embedded_token_shift_for_time_mix: Some(take(embedded_token_shift_for_time_mix)),
             state: Some(take(state)),

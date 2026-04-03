@@ -1,5 +1,6 @@
 use std::hint::black_box;
 
+use burn::{Tensor, tensor::Int};
 use divan::Bencher;
 use rwkv_nn::kernels::wkv7_infer::wkv7_infer_forward;
 
@@ -14,6 +15,7 @@ fn bench_wkv7_infer_forward(bencher: Bencher<'_, '_>, case: &common::Wkv7Case) {
     let input = common::random_wkv7_input::<B>(case, &device);
     let initial_state = common::random_initial_state::<B>(case, &device);
     let context_mask = common::random_context_mask::<B>(case, &device);
+    let batch_ids = Tensor::<B, 1, Int>::arange(0..case.batch_size as i64, &device);
 
     bencher.bench_local(|| {
         black_box(wkv7_infer_forward(
@@ -23,6 +25,7 @@ fn bench_wkv7_infer_forward(bencher: Bencher<'_, '_>, case: &common::Wkv7Case) {
             input.value.clone(),
             input.removal_key_normalized.clone(),
             input.replacement.clone(),
+            batch_ids.clone(),
             initial_state.clone(),
             context_mask.clone(),
         ))

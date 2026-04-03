@@ -4,14 +4,14 @@ mod kernel;
 
 use burn::{
     backend::{Autodiff, autodiff::checkpoint::strategy::CheckpointStrategy},
-    prelude::Backend,
-    tensor::{Tensor, TensorPrimitive, backend::AutodiffBackend, ops::FloatTensor},
+    prelude::{Backend, Int},
+    tensor::{Tensor, TensorPrimitive, backend::AutodiffBackend, ops::{FloatTensor, IntTensor}},
 };
 
 /// Forward output for inference-only WKV7 kernel.
 ///
-/// - `output`: [batch_size, context_length, num_heads, head_size]
-/// - `final_state`: [batch_size, num_heads, head_size, head_size]
+/// - `output`: [active_batch_size, context_length, num_heads, head_size]
+/// - `final_state`: [full_batch_size, num_heads, head_size, head_size]
 #[derive(Clone, Debug)]
 pub struct Wkv7InferForwardOutput<T> {
     pub output: T,
@@ -35,6 +35,7 @@ pub trait Wkv7InferBackend: Backend {
         value: FloatTensor<Self>,
         removal: FloatTensor<Self>,
         replacement: FloatTensor<Self>,
+        batch_ids: IntTensor<Self>,
         initial_state: FloatTensor<Self>,
         context_mask: FloatTensor<Self>,
     ) -> Wkv7InferForwardOutputPrimitive<Self>;
@@ -52,6 +53,7 @@ pub fn wkv7_infer_forward<B: Wkv7InferBackend>(
     value: Tensor<B, 4>,
     removal: Tensor<B, 4>,
     replacement: Tensor<B, 4>,
+    batch_ids: Tensor<B, 1, Int>,
     initial_state: Tensor<B, 4>,
     context_mask: Tensor<B, 2>,
 ) -> Wkv7InferForwardOutputTensor<B> {
@@ -62,6 +64,7 @@ pub fn wkv7_infer_forward<B: Wkv7InferBackend>(
         value.into_primitive().tensor(),
         removal.into_primitive().tensor(),
         replacement.into_primitive().tensor(),
+        batch_ids.into_primitive(),
         initial_state.into_primitive().tensor(),
         context_mask.into_primitive().tensor(),
     );
@@ -80,6 +83,7 @@ impl<B: Wkv7InferBackend, C: CheckpointStrategy> Wkv7InferBackend for Autodiff<B
         value: FloatTensor<Self>,
         removal: FloatTensor<Self>,
         replacement: FloatTensor<Self>,
+        batch_ids: IntTensor<Self>,
         initial_state: FloatTensor<Self>,
         context_mask: FloatTensor<Self>,
     ) -> Wkv7InferForwardOutput<FloatTensor<Self>> {
@@ -90,6 +94,7 @@ impl<B: Wkv7InferBackend, C: CheckpointStrategy> Wkv7InferBackend for Autodiff<B
             value.primitive,
             removal.primitive,
             replacement.primitive,
+            batch_ids,
             initial_state.primitive,
             context_mask.primitive,
         );

@@ -13,7 +13,8 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
     let num_heads = comptime![config.num_heads];
     let head_size = comptime![config.head_size];
 
-    let batch_index = CUBE_POS_Y as usize;
+    let active_batch_index = CUBE_POS_Y as usize;
+    let state_batch_index = inputs.batch_ids[active_batch_index] as usize;
     let head_index = CUBE_POS_X as usize;
     let head_dim_index = UNIT_POS as usize;
 
@@ -23,11 +24,11 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
 
     let mut state = Array::<F>::new(head_size);
     let initial_state_base =
-        (batch_index * num_heads + head_index) * head_size * head_size + head_dim_index * head_size;
+        (state_batch_index * num_heads + head_index) * head_size * head_size + head_dim_index * head_size;
 
     #[unroll(true)]
     for i in 0..head_size {
-        state[i] = inputs.initial_state[initial_state_base + i];
+        state[i] = outputs.final_state[initial_state_base + i];
     }
 
     let mut shared_receptance = SharedMemory::<F>::new(head_size);
@@ -37,8 +38,8 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
     let mut shared_removal = SharedMemory::<F>::new(head_size);
     let mut shared_replacement = SharedMemory::<F>::new(head_size);
 
-    let batch_head_base = (batch_index * context_length * num_heads + head_index) * head_size;
-    let context_mask_base = batch_index * context_length;
+    let batch_head_base = (active_batch_index * context_length * num_heads + head_index) * head_size;
+    let context_mask_base = active_batch_index * context_length;
 
     for t in 0..context_length {
         let flat_index = batch_head_base + t * num_heads * head_size + head_dim_index;
@@ -80,8 +81,12 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
         }
     }
 
+    // `final_state` aliases the caller-owned full state buffer on purpose. Copying the whole
+    // `[max_batch, H, S, S]` tensor every decode step would erase most of the win from slot-mapped
+    // inference, so the kernel reads the old state from the same buffer and overwrites only the
+    // mapped rows.
     let final_state_base =
-        (batch_index * num_heads + head_index) * head_size * head_size + head_dim_index * head_size;
+        (state_batch_index * num_heads + head_index) * head_size * head_size + head_dim_index * head_size;
 
     #[unroll(true)]
     for i in 0..head_size {
@@ -97,7 +102,7 @@ pub struct Wkv7InferForwardInputs<F: Float> {
     pub value: Tensor<F>,
     pub removal: Tensor<F>,
     pub replacement: Tensor<F>,
-    pub initial_state: Tensor<F>,
+    pub batch_ids: Tensor<u32>,
     pub context_mask: Tensor<F>,
 }
 

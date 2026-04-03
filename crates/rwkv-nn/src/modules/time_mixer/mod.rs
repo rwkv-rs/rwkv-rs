@@ -157,6 +157,7 @@ impl<B: Backend> TimeMixer<B> {
         let should_return_token_shift = time_mixer_input.embedded_token_shift.is_some();
         let TimeMixerIO {
             embedded_context,
+            batch_ids,
             context_mask,
             value_from_first_cell,
             embedded_token_shift,
@@ -174,13 +175,14 @@ impl<B: Backend> TimeMixer<B> {
             embedded_context.clone(),
             value_from_first_cell.clone(),
             embedded_token_shift,
+            batch_ids.clone(),
             context_mask.clone(),
         );
 
         let shape = [batch_size_per_device, context_length, num_heads, head_size];
         let wkv7_forward_input = weight_prepare_output.reshape_to_wkv7_input(shape);
         let wkv7_forward_output =
-            K::forward(wkv7_forward_input.clone(), state, 16, context_mask.clone());
+            K::forward(wkv7_forward_input.clone(), state, batch_ids.clone(), 16, context_mask.clone());
         let gated_readout_input = GatedReadoutInput {
             embedded_context,
             token_shifted_diff: weight_prepare_output.token_shifted_diff,
@@ -194,6 +196,7 @@ impl<B: Backend> TimeMixer<B> {
 
         TimeMixerIO {
             embedded_context: apply_context_mask(output_embedded_context, context_mask.clone()),
+            batch_ids,
             context_mask: context_mask.clone(),
             value_from_first_cell: apply_context_mask(
                 weight_prepare_output.value_from_first_cell,
@@ -208,6 +211,7 @@ impl<B: Backend> TimeMixer<B> {
 
 pub struct TimeMixerIO<B: Backend> {
     pub embedded_context: Tensor<B, 3>,
+    pub batch_ids: Tensor<B, 1, Int>,
     pub context_mask: Option<Tensor<B, 2>>,
     pub value_from_first_cell: Tensor<B, 3>,
     pub embedded_token_shift: Option<Tensor<B, 2>>,

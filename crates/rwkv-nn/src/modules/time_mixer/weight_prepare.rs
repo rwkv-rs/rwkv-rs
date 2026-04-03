@@ -212,6 +212,7 @@ impl<B: Backend> WeightPrepare<B> {
         embedded_context: Tensor<B, 3>,
         value_from_first_cell: Tensor<B, 3>,
         embedded_token_shift: Option<Tensor<B, 2>>,
+        batch_ids: Tensor<B, 1, Int>,
         context_mask: Option<Tensor<B, 2>>,
     ) -> WeightPrepareOutput<B>
     where
@@ -220,7 +221,12 @@ impl<B: Backend> WeightPrepare<B> {
         let TokenShiftDiffOutput {
             token_shifted_diff,
             next_token_shift,
-        } = token_shift_diff(embedded_context.clone(), embedded_token_shift, context_mask);
+        } = token_shift_diff(
+            embedded_context.clone(),
+            embedded_token_shift,
+            batch_ids,
+            context_mask,
+        );
 
         // self.forward_with_token_shifted_diff(
         //     embedded_context,

@@ -2,7 +2,7 @@ use burn::{
     config::Config,
     module::{Module, Param},
     nn::{Linear, LinearConfig},
-    prelude::{Backend, Tensor},
+    prelude::{Backend, Int, Tensor},
     tensor::activation::relu,
 };
 
@@ -84,6 +84,7 @@ impl<B: AddcmulBackend + TokenShiftDiffBackend> ChannelMixer<B> {
         let should_return_token_shift = channel_mixer_input.embedded_token_shift.is_some();
         let ChannelMixerIO {
             embedded_context,
+            batch_ids,
             embedded_token_shift,
             context_mask,
         } = channel_mixer_input;
@@ -95,6 +96,7 @@ impl<B: AddcmulBackend + TokenShiftDiffBackend> ChannelMixer<B> {
         let token_shift_diff_output = token_shift_diff(
             embedded_context.clone(),
             embedded_token_shift,
+            batch_ids.clone(),
             context_mask.clone(),
         );
         let embedded_context_shift = addcmul(
@@ -110,6 +112,7 @@ impl<B: AddcmulBackend + TokenShiftDiffBackend> ChannelMixer<B> {
 
         ChannelMixerIO {
             embedded_context: value,
+            batch_ids,
             embedded_token_shift: should_return_token_shift
                 .then_some(token_shift_diff_output.next_token_shift),
             context_mask,
@@ -119,6 +122,7 @@ impl<B: AddcmulBackend + TokenShiftDiffBackend> ChannelMixer<B> {
 
 pub struct ChannelMixerIO<B: Backend> {
     pub embedded_context: Tensor<B, 3>,
+    pub batch_ids: Tensor<B, 1, Int>,
     pub context_mask: Option<Tensor<B, 2>>, // [batch_size, context_length]
     pub embedded_token_shift: Option<Tensor<B, 2>>,
 }

@@ -1,4 +1,4 @@
-use burn::tensor::{Shape, ops::FloatTensor};
+use burn::tensor::{DType, Shape, ops::{FloatTensor, IntTensor}};
 use burn_cubecl::{
     CubeElement,
     CubeRuntime,
@@ -32,6 +32,7 @@ pub(crate) fn wkv7_infer_forward_impl<
     value: FloatTensor<CubeBackend<R, F, I, BT>>,
     removal: FloatTensor<CubeBackend<R, F, I, BT>>,
     replacement: FloatTensor<CubeBackend<R, F, I, BT>>,
+    batch_ids: IntTensor<CubeBackend<R, F, I, BT>>,
     initial_state: FloatTensor<CubeBackend<R, F, I, BT>>,
     context_mask: FloatTensor<CubeBackend<R, F, I, BT>>,
 ) -> Wkv7InferForwardOutput<FloatTensor<CubeBackend<R, F, I, BT>>> {
@@ -42,6 +43,7 @@ pub(crate) fn wkv7_infer_forward_impl<
         value,
         removal,
         replacement,
+        batch_ids,
         initial_state,
         context_mask,
     )
@@ -59,6 +61,7 @@ fn wkv7_infer_forward_impl_inner<
     value: FloatTensor<CubeBackend<R, F, I, BT>>,
     removal: FloatTensor<CubeBackend<R, F, I, BT>>,
     replacement: FloatTensor<CubeBackend<R, F, I, BT>>,
+    batch_ids: IntTensor<CubeBackend<R, F, I, BT>>,
     initial_state: FloatTensor<CubeBackend<R, F, I, BT>>,
     context_mask: FloatTensor<CubeBackend<R, F, I, BT>>,
 ) -> Wkv7InferForwardOutput<FloatTensor<CubeBackend<R, F, I, BT>>> {
@@ -68,6 +71,7 @@ fn wkv7_infer_forward_impl_inner<
     let value = into_contiguous(value);
     let removal = into_contiguous(removal);
     let replacement = into_contiguous(replacement);
+    let batch_ids = burn_cubecl::kernel::cast::<R>(into_contiguous(batch_ids), DType::U32);
     let initial_state = into_contiguous(initial_state);
     let context_mask = into_contiguous(context_mask);
 
@@ -75,21 +79,22 @@ fn wkv7_infer_forward_impl_inner<
     let device = weight_decay.device.clone();
     let shape = weight_decay.meta.shape().clone();
 
-    let batch_size = shape[0];
+    let active_batch_size = shape[0];
     let context_length = shape[1];
     let num_heads = shape[2];
     let dim = shape[3];
+    let full_batch_size = initial_state.meta.shape()[0];
 
-    debug_assert!(batch_size > 0, "batch size must be > 0");
+    debug_assert!(active_batch_size > 0, "batch size must be > 0");
     debug_assert!(context_length > 0, "context length must be > 0");
     debug_assert!(num_heads > 0, "num_heads must be > 0");
     debug_assert!(dim > 0, "head size must be > 0");
 
-    let expected_initial_state_shape = Shape::new([batch_size, num_heads, dim, dim]);
+    let expected_initial_state_shape = Shape::new([full_batch_size, num_heads, dim, dim]);
     debug_assert_eq!(
         initial_state.meta.shape(),
         &expected_initial_state_shape,
-        "initial_state shape must be [batch_size, num_heads, head_size, head_size]"
+        "initial_state shape must be [full_batch_size, num_heads, head_size, head_size]"
     );
     debug_assert_eq!(
         receptance.meta.shape(),
@@ -116,8 +121,13 @@ fn wkv7_infer_forward_impl_inner<
         &shape,
         "replacement shape mismatch with weight_decay"
     );
+    debug_assert_eq!(
+        batch_ids.meta.shape(),
+        &Shape::new([active_batch_size]),
+        "batch_ids shape must be [active_batch_size]"
+    );
 
-    let expected_context_mask_shape = Shape::new([batch_size, context_length]);
+    let expected_context_mask_shape = Shape::new([active_batch_size, context_length]);
     debug_assert_eq!(
         context_mask.meta.shape(),
         &expected_context_mask_shape,
@@ -125,8 +135,7 @@ fn wkv7_infer_forward_impl_inner<
     );
 
     let output = empty_device::<R, F>(client.clone(), device.clone(), shape);
-    let final_state =
-        empty_device::<R, F>(client.clone(), device.clone(), expected_initial_state_shape);
+    let final_state = initial_state;
 
     let config = Wkv7InferConfig {
         context_length,
@@ -134,7 +143,7 @@ fn wkv7_infer_forward_impl_inner<
         head_size: dim,
     };
 
-    let cube_count = CubeCount::Static(num_heads as u32, batch_size as u32, 1);
+    let cube_count = CubeCount::Static(num_heads as u32, active_batch_size as u32, 1);
     let cube_dim = CubeDim::new_1d(dim as u32);
 
     wkv7_infer_forward_kernel::launch::<F, R>(
@@ -148,7 +157,7 @@ fn wkv7_infer_forward_impl_inner<
             value.as_tensor_arg(1),
             removal.as_tensor_arg(1),
             replacement.as_tensor_arg(1),
-            initial_state.as_tensor_arg(1),
+            batch_ids.as_tensor_arg(1),
             context_mask.as_tensor_arg(1),
         ),
         Wkv7InferForwardOutputsLaunch::new(output.as_tensor_arg(1), final_state.as_tensor_arg(1)),

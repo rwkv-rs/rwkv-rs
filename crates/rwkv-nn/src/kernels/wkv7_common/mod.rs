@@ -1,4 +1,4 @@
-use burn::{Tensor, prelude::Backend};
+use burn::{Tensor, prelude::{Backend, Int}};
 
 use crate::kernels::{
     wkv7_infer::{Wkv7InferBackend, wkv7_infer_forward},
@@ -23,6 +23,7 @@ pub trait Wkv7Kernel<B: Backend> {
     fn forward(
         input: Wkv7ForwardInput<B>,
         state: Option<Tensor<B, 4>>,
+        batch_ids: Tensor<B, 1, Int>,
         chunk_len: usize,
         context_mask: Option<Tensor<B, 2>>,
     ) -> KernelOutput<B>;
@@ -34,6 +35,7 @@ impl<B: Wkv7PretrainBackend> Wkv7Kernel<B> for KernelPretrain {
     fn forward(
         input: Wkv7ForwardInput<B>,
         state: Option<Tensor<B, 4>>,
+        _batch_ids: Tensor<B, 1, Int>,
         chunk_len: usize,
         _context_mask: Option<Tensor<B, 2>>,
     ) -> KernelOutput<B> {
@@ -51,6 +53,7 @@ impl<B: Wkv7StatePassBackend> Wkv7Kernel<B> for KernelStatePass {
     fn forward(
         input: Wkv7ForwardInput<B>,
         state: Option<Tensor<B, 4>>,
+        _batch_ids: Tensor<B, 1, Int>,
         chunk_len: usize,
         _context_mask: Option<Tensor<B, 2>>,
     ) -> KernelOutput<B> {
@@ -78,6 +81,7 @@ impl<B: Wkv7StateTuneBackend> Wkv7Kernel<B> for KernelStateTune {
     fn forward(
         input: Wkv7ForwardInput<B>,
         state: Option<Tensor<B, 4>>,
+        _batch_ids: Tensor<B, 1, Int>,
         chunk_len: usize,
         _context_mask: Option<Tensor<B, 2>>,
     ) -> KernelOutput<B> {
@@ -109,14 +113,15 @@ impl<B: Wkv7InferBackend> Wkv7Kernel<B> for KernelInfer {
     fn forward(
         input: Wkv7ForwardInput<B>,
         state: Option<Tensor<B, 4>>,
+        batch_ids: Tensor<B, 1, Int>,
         _chunk_len: usize,
         context_mask: Option<Tensor<B, 2>>,
     ) -> KernelOutput<B> {
         let initial_state = state.expect("initial_state required");
-        let [batch_size, context_length, _num_heads, _head_size] = input.weight_decay.dims();
+        let [active_batch_size, context_length, _num_heads, _head_size] = input.weight_decay.dims();
         let device = input.weight_decay.device();
         let context_mask =
-            context_mask.unwrap_or_else(|| Tensor::ones([batch_size, context_length], &device));
+            context_mask.unwrap_or_else(|| Tensor::ones([active_batch_size, context_length], &device));
 
         let output = wkv7_infer_forward(
             input.weight_decay,
@@ -125,6 +130,7 @@ impl<B: Wkv7InferBackend> Wkv7Kernel<B> for KernelInfer {
             input.value,
             input.removal_key_normalized,
             input.replacement,
+            batch_ids,
             initial_state,
             context_mask,
         );
