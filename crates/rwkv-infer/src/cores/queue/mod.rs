@@ -20,13 +20,18 @@ use xgrammar::TokenizerInfo;
 
 use self::{
     detokenize::{DetokenizeResult, DetokenizeTask, spawn_detokenize_worker},
-    guided_decode::{GuidedDecodeResult, GuidedDecodeTask, spawn_guided_decode_worker},
+    guided_decode::{
+        GuidedDecodeResult,
+        GuidedDecodeTask,
+        GuidedTokenMaskBatchState,
+        spawn_guided_decode_worker,
+    },
     stats::{QueuePerfHistory, record_perf_sample},
 };
 use crate::{
     cores::{
         forward::{ModelForward, TokenId, TokenIdLogprobsConfig, sampling::SamplingConfig},
-        queue::guided_decode::{GuidedDecodingState, build_tokenizer_info_from_vocab},
+        queue::guided_decode::{GuidedDecodingStatus, build_tokenizer_info_from_vocab},
     },
     dtos::health::QueuePerfStage,
 };
@@ -40,6 +45,7 @@ pub struct Queue {
     paragraph_len: usize,
     guided_vocab_size: usize,
     guided_tokenizer_info: TokenizerInfo,
+    guided_token_mask_state: GuidedTokenMaskBatchState,
     items: IndexMap<usize, QueueItem>,
     batch_status: BatchStatus,
     detokenize_sender: mpsc::UnboundedSender<DetokenizeTask>,
@@ -125,7 +131,10 @@ impl Queue {
         );
         let (detokenize_sender, detokenize_receiver) =
             spawn_detokenize_worker(Arc::clone(&tokenizer));
-        let (guided_decode_sender, guided_decode_receiver) = spawn_guided_decode_worker();
+        let guided_token_mask_state =
+            GuidedTokenMaskBatchState::new(max_batch_size, guided_vocab_size);
+        let (guided_decode_sender, guided_decode_receiver) =
+            spawn_guided_decode_worker(guided_vocab_size);
 
         Self {
             model_forward,
@@ -133,6 +142,7 @@ impl Queue {
             paragraph_len,
             guided_vocab_size,
             guided_tokenizer_info,
+            guided_token_mask_state,
             items: IndexMap::new(),
             batch_status: BatchStatus::PrefillWithoutOutput,
             detokenize_sender,
@@ -175,6 +185,7 @@ impl Queue {
         }
 
         self.assign_batch_ids(item_ids);
+        self.materialize_guided_prepared_states(item_ids);
         let step_inputs = self.build_step_inputs(item_ids);
         let contexts: Vec<&[i32]> = step_inputs.contexts.iter().map(Vec::as_slice).collect();
         let context_masks: Vec<&[u8]> = step_inputs
@@ -182,12 +193,11 @@ impl Queue {
             .iter()
             .map(Vec::as_slice)
             .collect();
-        let guided_token_masks: Vec<Option<&[i32]>> = step_inputs
-            .guided_token_masks
-            .iter()
-            .map(Option::as_deref)
-            .collect();
-        let step_mode = self.build_step_mode(&step_inputs, &guided_token_masks);
+        let guided_token_mask_ref = step_inputs
+            .has_masked_guided_token
+            .then(|| self.guided_token_mask_state.as_ref());
+        let step_mode =
+            Self::build_step_mode(self.batch_status, &step_inputs, guided_token_mask_ref);
 
         self.model_forward
             .step(&step_inputs.batch_ids, &contexts, &context_masks, step_mode)
@@ -201,6 +211,7 @@ impl Queue {
 
             if let Some(batch_id) = item.batch_id {
                 self.model_forward.reset(batch_id);
+                self.guided_token_mask_state.reset(batch_id);
             }
         }
 
@@ -264,9 +275,10 @@ impl Queue {
     }
 
     fn has_pending_async_work(&self) -> bool {
-        self.items
-            .values()
-            .any(|item| item.pending_detokenize_tasks > 0 || item.guided_decoding_pending)
+        self.items.values().any(|item| {
+            item.pending_detokenize_tasks > 0
+                || matches!(item.guided_decoding_status, GuidedDecodingStatus::Pending)
+        })
     }
 
     fn record_perf_sample(&self, batch_status: BatchStatus, batch_used: usize, duration: Duration) {
@@ -294,9 +306,7 @@ pub struct QueueItem {
     sampling_config: SamplingConfig,
     token_logprobs_config: Option<TokenIdLogprobsConfig>,
     guided_decoding_config: Option<GuidedDecodingConfig>,
-    guided_decoding_state: Option<GuidedDecodingState>,
-    guided_token_mask: Option<Box<[i32]>>,
-    guided_decoding_pending: bool,
+    guided_decoding_status: GuidedDecodingStatus,
     status: QueueItemStatus,
 
     tokens_in_buffer: Vec<QueueOutputToken>,
@@ -337,9 +347,7 @@ impl QueueItem {
             sampling_config,
             token_logprobs_config,
             guided_decoding_config,
-            guided_decoding_state: None,
-            guided_token_mask: None,
-            guided_decoding_pending: false,
+            guided_decoding_status: GuidedDecodingStatus::Disabled,
             status: QueueItemStatus::Waiting,
             tokens_in_buffer: Vec::new(),
             stop_suffixes,

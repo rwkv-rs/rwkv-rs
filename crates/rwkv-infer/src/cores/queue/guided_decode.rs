@@ -1,8 +1,9 @@
-use std::thread;
+use std::{ffi::c_void, thread};
 
 use sonic_rs::{json, to_string};
 use tokio::sync::mpsc;
 use xgrammar::{
+    BatchGrammarMatcher,
     DLDataType,
     DLDataTypeCode,
     DLDevice,
@@ -16,14 +17,152 @@ use xgrammar::{
 };
 
 use super::Queue;
+use crate::cores::forward::GuidedTokenMaskBatchRef;
 
-pub(super) type GuidedDecodeTask = (usize, GuidedDecodingState);
-pub(super) type GuidedDecodeResult = (
-    usize,
-    Result<(GuidedDecodingState, Option<Box<[i32]>>), String>,
-);
+pub(super) type GuidedDecodeTask = (usize, GuidedMatcherState);
+pub(super) type GuidedDecodeResult = (usize, Result<GuidedPreparedState, String>);
 
-pub(super) fn spawn_guided_decode_worker() -> (
+#[derive(Debug)]
+pub(super) enum GuidedDecodingStatus {
+    Disabled,
+    Pending,
+    Ready(GuidedPreparedState),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GuidedTokenMaskStatus {
+    Masked,
+    AllAllowed,
+}
+
+#[derive(Debug)]
+pub(super) struct GuidedPreparedState {
+    pub(super) matcher_state: GuidedMatcherState,
+    pub(super) token_mask_status: GuidedTokenMaskStatus,
+    token_mask_data: Option<Box<[i32]>>,
+}
+
+impl GuidedPreparedState {
+    pub(super) fn masked(matcher_state: GuidedMatcherState, token_mask_data: Box<[i32]>) -> Self {
+        Self {
+            matcher_state,
+            token_mask_status: GuidedTokenMaskStatus::Masked,
+            token_mask_data: Some(token_mask_data),
+        }
+    }
+
+    pub(super) fn all_allowed(matcher_state: GuidedMatcherState) -> Self {
+        Self {
+            matcher_state,
+            token_mask_status: GuidedTokenMaskStatus::AllAllowed,
+            token_mask_data: None,
+        }
+    }
+
+    pub(super) fn has_masked_token(&self) -> bool {
+        self.token_mask_status == GuidedTokenMaskStatus::Masked
+    }
+
+    pub(super) fn materialize_token_mask(
+        &mut self,
+        token_mask_state: &mut GuidedTokenMaskBatchState,
+        batch_id: usize,
+    ) {
+        match self.token_mask_status {
+            GuidedTokenMaskStatus::Masked => {
+                if let Some(token_mask_data) = self.token_mask_data.as_deref() {
+                    token_mask_state.write_mask(batch_id, token_mask_data);
+                    self.token_mask_data = None;
+                }
+            }
+            GuidedTokenMaskStatus::AllAllowed => token_mask_state.reset(batch_id),
+        }
+    }
+
+    pub(super) fn allows_token(
+        &self,
+        token_mask_state: &GuidedTokenMaskBatchState,
+        batch_id: usize,
+        token_id: i32,
+    ) -> bool {
+        match self.token_mask_status {
+            GuidedTokenMaskStatus::Masked => self
+                .token_mask_data
+                .as_deref()
+                .map(|token_mask_data| bitmask_allows_token(token_mask_data, token_id))
+                .unwrap_or_else(|| token_mask_state.allows_token(batch_id, token_id)),
+            GuidedTokenMaskStatus::AllAllowed => token_id >= 0,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct GuidedTokenMaskBatchState {
+    token_masks: Box<[i32]>,
+    token_mask_words: usize,
+}
+
+impl GuidedTokenMaskBatchState {
+    pub(super) fn new(max_batch_size: usize, vocab_size: usize) -> Self {
+        let token_masks = xgrammar::allocate_token_bitmask(max_batch_size, vocab_size);
+        let (_, token_mask_words) = get_bitmask_shape(max_batch_size, vocab_size);
+
+        Self {
+            token_masks,
+            token_mask_words,
+        }
+    }
+
+    pub(super) fn as_ref(&self) -> GuidedTokenMaskBatchRef<'_> {
+        GuidedTokenMaskBatchRef {
+            token_masks: &self.token_masks,
+            token_mask_words: self.token_mask_words,
+        }
+    }
+
+    pub(super) fn reset(&mut self, batch_id: usize) {
+        let row_range = self.row_range(batch_id);
+        self.token_masks[row_range].fill(-1_i32);
+    }
+
+    pub(super) fn write_mask(&mut self, batch_id: usize, token_mask: &[i32]) {
+        assert_eq!(
+            token_mask.len(),
+            self.token_mask_words,
+            "guided token mask row has {} words, expected {}",
+            token_mask.len(),
+            self.token_mask_words
+        );
+
+        let row_range = self.row_range(batch_id);
+        self.token_masks[row_range].copy_from_slice(token_mask);
+    }
+
+    pub(super) fn allows_token(&self, batch_id: usize, token_id: i32) -> bool {
+        bitmask_allows_token(self.row(batch_id), token_id)
+    }
+
+    fn row(&self, batch_id: usize) -> &[i32] {
+        let row_range = self.row_range(batch_id);
+        &self.token_masks[row_range]
+    }
+
+    fn row_range(&self, batch_id: usize) -> std::ops::Range<usize> {
+        let row_start = batch_id
+            .checked_mul(self.token_mask_words)
+            .expect("guided token mask row offset overflow");
+        let row_end = row_start + self.token_mask_words;
+        assert!(
+            row_end <= self.token_masks.len(),
+            "guided token mask batch_id {batch_id} out of range"
+        );
+        row_start..row_end
+    }
+}
+
+pub(super) fn spawn_guided_decode_worker(
+    vocab_size: usize,
+) -> (
     mpsc::UnboundedSender<GuidedDecodeTask>,
     mpsc::UnboundedReceiver<GuidedDecodeResult>,
 ) {
@@ -33,20 +172,150 @@ pub(super) fn spawn_guided_decode_worker() -> (
         mpsc::unbounded_channel::<GuidedDecodeResult>();
 
     thread::spawn(move || {
-        while let Some((item_id, mut guided_decoding_state)) =
-            guided_decode_task_receiver.blocking_recv()
-        {
-            let result = guided_decoding_state
-                .fill_token_mask()
-                .map(|guided_token_mask| (guided_decoding_state, guided_token_mask));
+        let mut worker = GuidedDecodeWorker::new(vocab_size);
 
-            if guided_decode_result_sender.send((item_id, result)).is_err() {
-                break;
+        while let Some(first_task) = guided_decode_task_receiver.blocking_recv() {
+            let mut tasks = vec![first_task];
+            while let Ok(task) = guided_decode_task_receiver.try_recv() {
+                tasks.push(task);
+            }
+
+            for result in worker.prepare_batch(tasks) {
+                if guided_decode_result_sender.send(result).is_err() {
+                    return;
+                }
             }
         }
     });
 
     (guided_decode_sender, guided_decode_receiver)
+}
+
+struct GuidedDecodeWorker {
+    batch_matcher: Option<BatchGrammarMatcher>,
+    token_masks: Box<[i32]>,
+    token_mask_words: usize,
+    bitmask_shape: [i64; 2],
+    bitmask_strides: [i64; 2],
+}
+
+impl GuidedDecodeWorker {
+    fn new(vocab_size: usize) -> Self {
+        let (_, token_mask_words) = get_bitmask_shape(1, vocab_size);
+
+        Self {
+            batch_matcher: BatchGrammarMatcher::new_auto().ok(),
+            token_masks: Vec::new().into_boxed_slice(),
+            token_mask_words,
+            bitmask_shape: [0, token_mask_words as i64],
+            bitmask_strides: [token_mask_words as i64, 1],
+        }
+    }
+
+    fn prepare_batch(&mut self, tasks: Vec<GuidedDecodeTask>) -> Vec<GuidedDecodeResult> {
+        if self.batch_matcher.is_some() {
+            self.prepare_batch_parallel(tasks)
+        } else {
+            tasks
+                .into_iter()
+                .map(|(item_id, matcher_state)| {
+                    (
+                        item_id,
+                        matcher_state.fill_token_mask(self.token_mask_words),
+                    )
+                })
+                .collect()
+        }
+    }
+
+    fn prepare_batch_parallel(&mut self, tasks: Vec<GuidedDecodeTask>) -> Vec<GuidedDecodeResult> {
+        let mut results = Vec::with_capacity(tasks.len());
+        let mut item_ids = Vec::with_capacity(tasks.len());
+        let mut matcher_states = Vec::with_capacity(tasks.len());
+
+        for (item_id, matcher_state) in tasks {
+            if matcher_state.is_terminated() {
+                results.push((
+                    item_id,
+                    Err("guided decoding matcher terminated before fill_token_mask".to_string()),
+                ));
+            } else {
+                item_ids.push(item_id);
+                matcher_states.push(matcher_state);
+            }
+        }
+
+        if matcher_states.is_empty() {
+            return results;
+        }
+
+        self.ensure_token_mask_capacity(matcher_states.len());
+        reset_token_bitmask(&mut self.token_masks);
+
+        let mut token_masks = self.token_masks_tensor(matcher_states.len());
+        self.batch_matcher
+            .as_mut()
+            .expect("batch matcher must exist")
+            .batch_fill_next_token_bitmask(
+                GuidedMatcherState::matchers_ref(&matcher_states),
+                &mut token_masks,
+                None,
+                false,
+            );
+
+        for (row_index, (item_id, matcher_state)) in
+            item_ids.into_iter().zip(matcher_states).enumerate()
+        {
+            let row_start = row_index * self.token_mask_words;
+            let row_end = row_start + self.token_mask_words;
+            let row = &self.token_masks[row_start..row_end];
+
+            let prepared_state = if bitmask_is_all_allowed(row) {
+                GuidedPreparedState::all_allowed(matcher_state)
+            } else {
+                GuidedPreparedState::masked(matcher_state, row.to_vec().into_boxed_slice())
+            };
+            results.push((item_id, Ok(prepared_state)));
+        }
+
+        results
+    }
+
+    fn ensure_token_mask_capacity(&mut self, batch_size: usize) {
+        let total_words = batch_size
+            .checked_mul(self.token_mask_words)
+            .expect("guided token mask batch size overflow");
+        if self.token_masks.len() != total_words {
+            self.token_masks = vec![-1_i32; total_words].into_boxed_slice();
+        }
+        self.bitmask_shape = [batch_size as i64, self.token_mask_words as i64];
+        self.bitmask_strides = [self.token_mask_words as i64, 1];
+    }
+
+    fn token_masks_tensor(&mut self, batch_size: usize) -> DLTensor {
+        debug_assert_eq!(
+            self.token_masks.len(),
+            batch_size * self.token_mask_words,
+            "guided token mask worker scratch size mismatch"
+        );
+
+        DLTensor {
+            data: self.token_masks.as_mut_ptr().cast::<c_void>(),
+            device: DLDevice {
+                device_type: DLDeviceType::kDLCPU,
+                device_id: 0,
+            },
+            ndim: 2,
+            dtype: DLDataType {
+                code: DLDataTypeCode::kDLInt as u8,
+                bits: 32,
+                lanes: 1,
+            },
+            shape: self.bitmask_shape.as_mut_ptr(),
+            strides: self.bitmask_strides.as_mut_ptr(),
+            byte_offset: 0,
+        }
+    }
 }
 
 impl Queue {
@@ -59,76 +328,131 @@ impl Queue {
             return Ok(());
         };
 
-        let guided_decoding_state = GuidedDecodingState::new(
+        let guided_matcher_state = GuidedMatcherState::new(
             &guided_decoding_config,
             &self.guided_tokenizer_info,
             self.guided_vocab_size,
         )?;
 
         self.guided_decode_sender
-            .send((item_id, guided_decoding_state))
+            .send((item_id, guided_matcher_state))
             .map_err(|_| "guided decode worker closed".to_string())?;
-        item.guided_decoding_pending = true;
+        item.guided_decoding_status = GuidedDecodingStatus::Pending;
         Ok(())
     }
 
-    pub(super) fn apply_guided_token_after_sample(
+    pub(super) fn materialize_guided_prepared_states(&mut self, item_ids: &[usize]) {
+        let token_mask_state = &mut self.guided_token_mask_state;
+        let items = &mut self.items;
+
+        for &item_id in item_ids {
+            let item = items
+                .get_mut(&item_id)
+                .expect("scheduled item_id must exist in queue");
+            let batch_id = item
+                .batch_id
+                .expect("batch_id should be assigned before guided materialization");
+
+            if let GuidedDecodingStatus::Ready(prepared_state) = &mut item.guided_decoding_status {
+                prepared_state.materialize_token_mask(token_mask_state, batch_id);
+            }
+        }
+    }
+
+    pub(super) fn apply_guided_prepared_state(
         &mut self,
         item_id: usize,
         token_id: i32,
-        should_finish: &mut bool,
-    ) -> Result<(), String> {
-        let mut guided_decoding_state = {
-            let item = self
-                .items
-                .get_mut(&item_id)
-                .expect("scheduled item_id must exist in queue");
-            let Some(guided_decoding_state) = item.guided_decoding_state.take() else {
-                return Ok(());
-            };
-
-            item.guided_token_mask = None;
-            guided_decoding_state
+        requeue_next_step: bool,
+    ) -> Result<bool, String> {
+        let batch_id = self
+            .items
+            .get(&item_id)
+            .expect("scheduled item_id must exist in queue")
+            .batch_id
+            .expect("scheduled item must have batch_id");
+        let Some(mut prepared_state) = self.take_guided_prepared_state(item_id) else {
+            return Ok(false);
         };
 
-        *should_finish |= guided_decoding_state.accept_token(token_id)?;
+        assert!(
+            prepared_state.allows_token(&self.guided_token_mask_state, batch_id, token_id),
+            "sampler violated guided mask for item {item_id}, token {token_id}"
+        );
 
-        if *should_finish {
+        let terminated = prepared_state
+            .matcher_state
+            .accept_token(token_id)
+            .unwrap_or_else(|err| {
+                panic!("guided mask/state mismatch for item {item_id}, token {token_id}: {err}")
+            });
+
+        if terminated {
             let item = self
                 .items
                 .get_mut(&item_id)
                 .expect("scheduled item_id must exist in queue");
-            item.guided_decoding_state = Some(guided_decoding_state);
-            item.guided_decoding_pending = false;
-            return Ok(());
+            item.guided_decoding_status = GuidedDecodingStatus::Disabled;
+            return Ok(true);
+        }
+
+        if !requeue_next_step {
+            let item = self
+                .items
+                .get_mut(&item_id)
+                .expect("scheduled item_id must exist in queue");
+            item.guided_decoding_status = GuidedDecodingStatus::Disabled;
+            return Ok(false);
         }
 
         self.guided_decode_sender
-            .send((item_id, guided_decoding_state))
+            .send((item_id, prepared_state.matcher_state))
             .map_err(|_| "guided decode worker closed".to_string())?;
 
         let item = self
             .items
             .get_mut(&item_id)
             .expect("scheduled item_id must exist in queue");
-        item.guided_decoding_pending = true;
-        Ok(())
+        item.guided_decoding_status = GuidedDecodingStatus::Pending;
+        Ok(false)
+    }
+
+    fn take_guided_prepared_state(&mut self, item_id: usize) -> Option<GuidedPreparedState> {
+        let item = self
+            .items
+            .get_mut(&item_id)
+            .expect("scheduled item_id must exist in queue");
+
+        match std::mem::replace(
+            &mut item.guided_decoding_status,
+            GuidedDecodingStatus::Disabled,
+        ) {
+            GuidedDecodingStatus::Disabled => None,
+            GuidedDecodingStatus::Pending => {
+                panic!("guided decoding sampled before prepared state was ready for item {item_id}")
+            }
+            GuidedDecodingStatus::Ready(prepared_state) => Some(prepared_state),
+        }
     }
 
     pub(super) fn drain_guided_decode_results(&mut self) {
         let mut removed_item_ids = Vec::new();
 
         while let Ok((item_id, result)) = self.guided_decode_receiver.try_recv() {
-            let Some(item) = self.items.get_mut(&item_id) else {
+            let Some(batch_id) = self.items.get(&item_id).map(|item| item.batch_id) else {
                 continue;
             };
 
-            item.guided_decoding_pending = false;
-
             match result {
-                Ok((guided_decoding_state, guided_token_mask)) => {
-                    item.guided_decoding_state = Some(guided_decoding_state);
-                    item.guided_token_mask = guided_token_mask;
+                Ok(mut prepared_state) => {
+                    if let Some(batch_id) = batch_id {
+                        prepared_state
+                            .materialize_token_mask(&mut self.guided_token_mask_state, batch_id);
+                    }
+
+                    if let Some(item) = self.items.get_mut(&item_id) {
+                        item.guided_decoding_status = GuidedDecodingStatus::Ready(prepared_state);
+                    }
                 }
                 Err(_) => removed_item_ids.push(item_id),
             }
@@ -148,32 +472,26 @@ pub struct GuidedDecodingConfig {
     pub strict_mode: bool,
 }
 
-pub struct GuidedDecodingState {
+#[repr(transparent)]
+pub struct GuidedMatcherState {
     matcher: GrammarMatcher,
-    token_bitmask: Box<[i32]>,
-    bitmask_shape: Vec<i64>,
-    bitmask_strides: Vec<i64>,
 }
 
-impl std::fmt::Debug for GuidedDecodingState {
+impl std::fmt::Debug for GuidedMatcherState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GuidedDecodingState")
-            .field("token_bitmask_len", &self.token_bitmask.len())
-            .field("bitmask_shape", &self.bitmask_shape)
-            .field("bitmask_strides", &self.bitmask_strides)
-            .finish()
+        f.debug_struct("GuidedMatcherState").finish()
     }
 }
 
 // Safety: the matcher is always moved between the queue thread and a single
 // background worker, and is never accessed concurrently.
-unsafe impl Send for GuidedDecodingState {}
+unsafe impl Send for GuidedMatcherState {}
 
-impl GuidedDecodingState {
+impl GuidedMatcherState {
     pub fn new(
         guided_decoding_config: &GuidedDecodingConfig,
         tokenizer_info: &TokenizerInfo,
-        vocab_size: usize,
+        _vocab_size: usize,
     ) -> Result<Self, String> {
         let mut compiler =
             GrammarCompiler::new(tokenizer_info, 1, true, -1).map_err(|err| err.to_string())?;
@@ -189,15 +507,8 @@ impl GuidedDecodingState {
             .map_err(|err| err.to_string())?;
         let matcher =
             GrammarMatcher::new(&compiled, None, true, -1).map_err(|err| err.to_string())?;
-        let token_bitmask = xgrammar::allocate_token_bitmask(1, vocab_size);
-        let (_, bitmask_size) = get_bitmask_shape(1, vocab_size);
 
-        Ok(Self {
-            matcher,
-            token_bitmask,
-            bitmask_shape: vec![1, bitmask_size as i64],
-            bitmask_strides: vec![bitmask_size as i64, 1],
-        })
+        Ok(Self { matcher })
     }
 
     pub fn accept_token(&mut self, token_id: i32) -> Result<bool, String> {
@@ -210,14 +521,20 @@ impl GuidedDecodingState {
         Ok(self.matcher.is_terminated())
     }
 
-    pub fn fill_token_mask(&mut self) -> Result<Option<Box<[i32]>>, String> {
+    fn is_terminated(&self) -> bool {
+        self.matcher.is_terminated()
+    }
+
+    fn fill_token_mask(mut self, token_mask_words: usize) -> Result<GuidedPreparedState, String> {
         if self.matcher.is_terminated() {
             return Err("guided decoding matcher terminated before fill_token_mask".to_string());
         }
 
-        reset_token_bitmask(&mut self.token_bitmask);
-        let mut token_bitmask = DLTensor {
-            data: self.token_bitmask.as_mut_ptr() as *mut std::ffi::c_void,
+        let mut token_mask = vec![-1_i32; token_mask_words].into_boxed_slice();
+        let mut bitmask_shape = [1_i64, token_mask_words as i64];
+        let mut bitmask_strides = [token_mask_words as i64, 1_i64];
+        let mut token_masks = DLTensor {
+            data: token_mask.as_mut_ptr().cast::<c_void>(),
             device: DLDevice {
                 device_type: DLDeviceType::kDLCPU,
                 device_id: 0,
@@ -228,15 +545,29 @@ impl GuidedDecodingState {
                 bits: 32,
                 lanes: 1,
             },
-            shape: self.bitmask_shape.as_mut_ptr(),
-            strides: self.bitmask_strides.as_mut_ptr(),
+            shape: bitmask_shape.as_mut_ptr(),
+            strides: bitmask_strides.as_mut_ptr(),
             byte_offset: 0,
         };
 
-        Ok(self
-            .matcher
-            .fill_next_token_bitmask(&mut token_bitmask, 0, false)
-            .then(|| self.token_bitmask.clone()))
+        reset_token_bitmask(&mut token_mask);
+        Ok(
+            if self
+                .matcher
+                .fill_next_token_bitmask(&mut token_masks, 0, false)
+            {
+                GuidedPreparedState::masked(self, token_mask)
+            } else {
+                GuidedPreparedState::all_allowed(self)
+            },
+        )
+    }
+
+    fn matchers_ref(states: &[GuidedMatcherState]) -> &[GrammarMatcher] {
+        // Safety: GuidedMatcherState is `#[repr(transparent)]` over `GrammarMatcher`.
+        unsafe {
+            std::slice::from_raw_parts(states.as_ptr().cast::<GrammarMatcher>(), states.len())
+        }
     }
 }
 
@@ -256,4 +587,19 @@ pub fn build_tokenizer_info_from_vocab(
         vocab_tokens.iter().map(Vec::as_slice),
         &to_string(&metadata).unwrap_or_else(|_| "{}".to_string()),
     )
+}
+
+fn bitmask_allows_token(token_mask: &[i32], token_id: i32) -> bool {
+    let Ok(token_id) = usize::try_from(token_id) else {
+        return false;
+    };
+    let word_index = token_id / 32;
+    let bit_index = token_id % 32;
+    token_mask
+        .get(word_index)
+        .is_some_and(|&word| ((word as u32) & (1_u32 << bit_index)) != 0)
+}
+
+fn bitmask_is_all_allowed(token_mask: &[i32]) -> bool {
+    token_mask.iter().all(|&word| word == -1_i32)
 }

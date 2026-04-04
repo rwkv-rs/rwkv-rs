@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use super::{BatchStatus, Queue, QueueItem, QueueItemStatus};
+use super::{BatchStatus, Queue, QueueItem, QueueItemStatus, guided_decode::GuidedDecodingStatus};
 
 impl Queue {
     pub(super) fn assign_batch_ids(&mut self, item_ids: &[usize]) {
@@ -11,11 +11,13 @@ impl Queue {
             .collect();
 
         for item_id in item_ids {
-            let item = self
+            if self
                 .items
-                .get_mut(item_id)
-                .expect("scheduled item_id must exist in queue");
-            if item.batch_id.is_some() {
+                .get(item_id)
+                .expect("scheduled item_id must exist in queue")
+                .batch_id
+                .is_some()
+            {
                 continue;
             }
 
@@ -23,7 +25,11 @@ impl Queue {
                 .find(|candidate| !used_batch_ids.contains(candidate))
                 .expect("scheduler should not select more items than free batch slots");
 
-            item.batch_id = Some(batch_id);
+            self.guided_token_mask_state.reset(batch_id);
+            self.items
+                .get_mut(item_id)
+                .expect("scheduled item_id must exist in queue")
+                .batch_id = Some(batch_id);
             used_batch_ids.insert(batch_id);
         }
     }
@@ -107,19 +113,11 @@ fn step_group(item: &QueueItem) -> Option<(BatchStatus, usize)> {
 fn ready_step_group(item: &QueueItem) -> Option<(BatchStatus, usize)> {
     let step_group = step_group(item)?;
 
-    if step_group.0 == BatchStatus::PrefillWithoutOutput
-        || !uses_guided_decoding(item)
-        || item.guided_token_mask.is_some()
-    {
-        Some(step_group)
-    } else {
-        None
+    match step_group.0 {
+        BatchStatus::PrefillWithoutOutput => Some(step_group),
+        BatchStatus::Prefill | BatchStatus::Decode => match item.guided_decoding_status {
+            GuidedDecodingStatus::Pending => None,
+            GuidedDecodingStatus::Disabled | GuidedDecodingStatus::Ready(_) => Some(step_group),
+        },
     }
-}
-
-fn uses_guided_decoding(item: &QueueItem) -> bool {
-    item.guided_decoding_config.is_some()
-        || item.guided_decoding_pending
-        || item.guided_decoding_state.is_some()
-        || item.guided_token_mask.is_some()
 }

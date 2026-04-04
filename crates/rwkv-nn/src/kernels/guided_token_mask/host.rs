@@ -24,10 +24,12 @@ pub(crate) fn apply_guided_token_masks_launch<
     BT: BoolElement,
 >(
     logits: FloatTensor<CubeBackend<R, F, I, BT>>,
+    batch_ids: IntTensor<CubeBackend<R, F, I, BT>>,
     guided_token_masks: IntTensor<CubeBackend<R, F, I, BT>>,
     guided_token_mask_words: usize,
 ) -> FloatTensor<CubeBackend<R, F, I, BT>> {
     let logits = cast::<R>(into_contiguous(logits), DType::F32);
+    let batch_ids = cast::<R>(into_contiguous(batch_ids), DType::U32);
     let guided_token_masks = cast::<R>(into_contiguous(guided_token_masks), DType::U32);
 
     let client = logits.client.clone();
@@ -41,11 +43,23 @@ pub(crate) fn apply_guided_token_masks_launch<
 
     let active_batch_size = logits_shape[0];
     let vocab_size = logits_shape[1];
+    let full_batch_shape = guided_token_masks.meta.shape().clone();
+    debug_assert_eq!(
+        full_batch_shape.num_dims(),
+        2,
+        "guided token masks expect state shape [full_batch_size, guided_token_mask_words]"
+    );
+    let full_batch_size = full_batch_shape[0];
     debug_assert!(vocab_size > 0, "guided token masks expect vocab_size > 0");
     debug_assert_eq!(
+        batch_ids.meta.shape(),
+        &Shape::new([active_batch_size]),
+        "guided token masks expect batch_ids with shape [active_batch_size]"
+    );
+    debug_assert_eq!(
         guided_token_masks.meta.shape(),
-        &Shape::new([active_batch_size, guided_token_mask_words]),
-        "guided token masks shape mismatch with active batch"
+        &Shape::new([full_batch_size, guided_token_mask_words]),
+        "guided token masks shape mismatch with full batch"
     );
 
     let output = empty_device::<R, f32>(client.clone(), device, logits_shape.clone());
@@ -60,6 +74,7 @@ pub(crate) fn apply_guided_token_masks_launch<
         cube_count,
         CubeDim::new_1d(BLOCK_SIZE),
         logits.as_tensor_arg(1),
+        batch_ids.as_tensor_arg(1),
         guided_token_masks.as_tensor_arg(1),
         output.clone().as_tensor_arg(1),
         ScalarArg::new(vocab_size as u32),

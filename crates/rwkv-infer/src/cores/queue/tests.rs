@@ -1,5 +1,6 @@
 use std::{
     fs,
+    panic::{self, AssertUnwindSafe},
     sync::{Arc, Mutex},
     thread,
     time::Duration,
@@ -21,7 +22,12 @@ use super::{
 };
 use crate::cores::{
     forward::{ModelForward, StepMode, TokenId},
-    queue::guided_decode::GuidedDecodingConfig,
+    queue::guided_decode::{
+        GuidedDecodingConfig,
+        GuidedDecodingStatus,
+        GuidedMatcherState,
+        GuidedPreparedState,
+    },
 };
 
 #[derive(Default)]
@@ -42,23 +48,25 @@ impl ModelForward for DummyModelForward {
         match mode {
             StepMode::PrefillNoOutput => None,
             StepMode::Sample {
-                guided_token_masks, ..
+                guided_token_mask_ref,
+                ..
             } => {
-                self.sample_guided_token_masks.lock().unwrap().push(
-                    guided_token_masks
-                        .iter()
-                        .map(|guided_token_mask| guided_token_mask.map(|mask| mask.to_vec()))
-                        .collect(),
-                );
+                let sampled_guided_token_masks =
+                    collect_sample_guided_token_masks(batch_ids, guided_token_mask_ref);
+                self.sample_guided_token_masks
+                    .lock()
+                    .unwrap()
+                    .push(sampled_guided_token_masks.clone());
 
                 Some(
                     batch_ids
                         .iter()
                         .copied()
-                        .zip(guided_token_masks.iter())
+                        .zip(sampled_guided_token_masks.iter())
                         .map(|(batch_index, guided_token_mask)| {
                             let token_id = if self.choose_first_allowed_token {
                                 guided_token_mask
+                                    .as_deref()
                                     .and_then(bitmask_first_allowed_token_id)
                                     .unwrap_or(END_TOKEN_ID)
                             } else {
@@ -82,7 +90,7 @@ impl ModelForward for DummyModelForward {
 }
 
 #[test]
-fn prefill_without_output_does_not_wait_for_guided_token_mask() {
+fn prefill_without_output_does_not_wait_for_guided_step() {
     let mut queue = Queue::new(
         Box::new(DummyModelForward::default()),
         test_tokenizer(),
@@ -110,7 +118,7 @@ fn prefill_without_output_does_not_wait_for_guided_token_mask() {
 }
 
 #[test]
-fn prefill_waits_for_guided_token_mask() {
+fn prefill_waits_for_guided_step() {
     let mut queue = Queue::new(
         Box::new(DummyModelForward::default()),
         test_tokenizer(),
@@ -140,23 +148,18 @@ fn prefill_waits_for_guided_token_mask() {
         queue.drain_guided_decode_results();
         queue.update_batch_status();
 
-        if queue
-            .items
-            .get(&1)
-            .is_some_and(|item| item.guided_token_mask.is_some())
-        {
+        if queue.items.get(&1).is_some_and(|item| {
+            matches!(item.guided_decoding_status, GuidedDecodingStatus::Ready(_))
+        }) {
             break;
         }
 
         thread::sleep(Duration::from_millis(1));
     }
 
-    assert!(
-        queue
-            .items
-            .get(&1)
-            .is_some_and(|item| item.guided_token_mask.is_some())
-    );
+    assert!(queue.items.get(&1).is_some_and(|item| {
+        matches!(item.guided_decoding_status, GuidedDecodingStatus::Ready(_))
+    }));
     assert_eq!(queue.collect_step_item_ids(), vec![1]);
 }
 
@@ -190,8 +193,12 @@ fn step_passes_guided_token_masks_to_sample() {
         )
         .expect("push item");
 
+    let prepared_state = GuidedPreparedState::masked(
+        test_guided_matcher_state(&queue),
+        vec![123].into_boxed_slice(),
+    );
     let item = queue.items.get_mut(&1).expect("queue item");
-    item.guided_token_mask = Some(vec![123, 456].into_boxed_slice());
+    item.guided_decoding_status = GuidedDecodingStatus::Ready(prepared_state);
 
     queue.update_batch_status();
     let item_ids = queue.collect_step_item_ids();
@@ -201,7 +208,52 @@ fn step_passes_guided_token_masks_to_sample() {
     assert_eq!(new_tokens.len(), 1);
 
     let sample_guided_token_masks = sample_guided_token_masks.lock().unwrap().clone();
-    assert_eq!(sample_guided_token_masks, vec![vec![Some(vec![123, 456])]]);
+    assert_eq!(sample_guided_token_masks, vec![vec![Some(vec![123])]]);
+}
+
+#[test]
+fn step_passes_all_allowed_guided_step_as_none_to_sample() {
+    let sample_guided_token_masks = Arc::new(Mutex::new(Vec::new()));
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward {
+            choose_first_allowed_token: false,
+            fixed_token_id: END_TOKEN_ID,
+            sample_guided_token_masks: Arc::clone(&sample_guided_token_masks),
+        }),
+        test_tokenizer(),
+        4,
+        2,
+        new_perf_history(),
+    );
+    let (completions_tx, _completions_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(
+                vec![0, 1],
+                Default::default(),
+                None,
+                vec![],
+                completions_tx,
+                None,
+            ),
+        )
+        .expect("push item");
+
+    let prepared_state = GuidedPreparedState::all_allowed(test_guided_matcher_state(&queue));
+    let item = queue.items.get_mut(&1).expect("queue item");
+    item.guided_decoding_status = GuidedDecodingStatus::Ready(prepared_state);
+
+    queue.update_batch_status();
+    let item_ids = queue.collect_step_item_ids();
+    assert_eq!(item_ids, vec![1]);
+
+    let new_tokens = queue.step(&item_ids).expect("sample output");
+    assert_eq!(new_tokens.len(), 1);
+
+    let sample_guided_token_masks = sample_guided_token_masks.lock().unwrap().clone();
+    assert_eq!(sample_guided_token_masks, vec![vec![None]]);
 }
 
 #[test]
@@ -281,6 +333,119 @@ fn late_guided_result_is_ignored_after_remove() {
     }
 
     assert!(queue.items.is_empty());
+}
+
+#[test]
+fn guided_mask_violation_panics_before_detokenize() {
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward::default()),
+        test_tokenizer(),
+        4,
+        1,
+        new_perf_history(),
+    );
+    let (completions_tx, _completions_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(
+                vec![0],
+                Default::default(),
+                None,
+                vec![],
+                completions_tx,
+                None,
+            ),
+        )
+        .expect("push item");
+
+    let prepared_state = GuidedPreparedState::masked(
+        test_guided_matcher_state(&queue),
+        build_guided_token_mask(queue.guided_vocab_size, &[1]),
+    );
+    let item = queue.items.get_mut(&1).expect("queue item");
+    item.batch_id = Some(0);
+    item.status = QueueItemStatus::Decode(0);
+    item.guided_decoding_status = GuidedDecodingStatus::Ready(prepared_state);
+
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        queue.apply_output_tokens(
+            &[1],
+            vec![TokenId {
+                batch_index: 0,
+                token_id: 2,
+                logprob: None,
+                finish_after_token: false,
+            }],
+        );
+    }));
+
+    let panic_message = panic_message(result.expect_err("guided mask violation should panic"));
+    assert!(panic_message.contains("sampler violated guided mask"));
+    assert_eq!(
+        queue
+            .items
+            .get(&1)
+            .expect("queue item")
+            .pending_detokenize_tasks,
+        0
+    );
+}
+
+#[test]
+fn guided_mask_state_mismatch_panics_before_detokenize() {
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward::default()),
+        test_tokenizer(),
+        4,
+        1,
+        new_perf_history(),
+    );
+    let (completions_tx, _completions_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(
+                vec![0],
+                Default::default(),
+                None,
+                vec![],
+                completions_tx,
+                None,
+            ),
+        )
+        .expect("push item");
+
+    let prepared_state = GuidedPreparedState::all_allowed(test_guided_matcher_state(&queue));
+    let item = queue.items.get_mut(&1).expect("queue item");
+    item.batch_id = Some(0);
+    item.status = QueueItemStatus::Decode(0);
+    item.guided_decoding_status = GuidedDecodingStatus::Ready(prepared_state);
+
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        queue.apply_output_tokens(
+            &[1],
+            vec![TokenId {
+                batch_index: 0,
+                token_id: 3,
+                logprob: None,
+                finish_after_token: false,
+            }],
+        );
+    }));
+
+    let panic_message = panic_message(result.expect_err("guided state mismatch should panic"));
+    assert!(panic_message.contains("guided mask/state mismatch"));
+    assert_eq!(
+        queue
+            .items
+            .get(&1)
+            .expect("queue item")
+            .pending_detokenize_tasks,
+        0
+    );
 }
 
 #[test]
@@ -484,6 +649,15 @@ fn test_guided_decoding_config() -> GuidedDecodingConfig {
     }
 }
 
+fn test_guided_matcher_state(queue: &Queue) -> GuidedMatcherState {
+    GuidedMatcherState::new(
+        &test_guided_decoding_config(),
+        &queue.guided_tokenizer_info,
+        queue.guided_vocab_size,
+    )
+    .expect("guided matcher state")
+}
+
 fn test_tokenizer() -> Arc<Tokenizer> {
     test_tokenizer_with_vocab("1 \"{\" 1\n2 \"}\" 1\n3 \"a\" 1\n4 \":\" 1\n5 \"1\" 1\n")
 }
@@ -510,6 +684,47 @@ fn wait_for_detokenize(queue: &mut Queue, item_id: usize) {
     panic!("timed out waiting for detokenize");
 }
 
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    match payload.downcast::<String>() {
+        Ok(message) => *message,
+        Err(payload) => match payload.downcast::<&'static str>() {
+            Ok(message) => (*message).to_string(),
+            Err(_) => "non-string panic payload".to_string(),
+        },
+    }
+}
+
+fn collect_sample_guided_token_masks(
+    batch_ids: &[usize],
+    guided_token_mask_ref: Option<crate::cores::forward::GuidedTokenMaskBatchRef<'_>>,
+) -> Vec<Option<Vec<i32>>> {
+    match guided_token_mask_ref {
+        Some(guided_token_mask_ref) => batch_ids
+            .iter()
+            .map(|&batch_id| {
+                let token_mask = guided_token_mask_ref.row(batch_id);
+                if token_mask.iter().all(|&word| word == -1_i32) {
+                    None
+                } else {
+                    Some(token_mask.to_vec())
+                }
+            })
+            .collect(),
+        None => vec![None; batch_ids.len()],
+    }
+}
+
+fn build_guided_token_mask(vocab_size: usize, allowed_token_ids: &[i32]) -> Box<[i32]> {
+    let mut guided_token_mask = vec![0_i32; vocab_size.div_ceil(32)];
+    for &token_id in allowed_token_ids {
+        let token_id = usize::try_from(token_id).expect("token id must be non-negative");
+        let word_index = token_id / 32;
+        let bit_index = token_id % 32;
+        guided_token_mask[word_index] |= 1_i32 << bit_index;
+    }
+    guided_token_mask.into_boxed_slice()
+}
+
 fn bitmask_first_allowed_token_id(guided_token_mask: &[i32]) -> Option<i32> {
     for (word_index, &word) in guided_token_mask.iter().enumerate() {
         if word == 0 {
@@ -518,9 +733,6 @@ fn bitmask_first_allowed_token_id(guided_token_mask: &[i32]) -> Option<i32> {
 
         for bit_index in 0..32 {
             let token_id = word_index * 32 + bit_index;
-            if token_id == 0 {
-                continue;
-            }
             if word & (1 << bit_index) != 0 {
                 return Some(token_id as i32);
             }

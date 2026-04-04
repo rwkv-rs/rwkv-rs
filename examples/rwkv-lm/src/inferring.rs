@@ -27,6 +27,7 @@ use rwkv::{
     infer::{
         cores::{
             forward::{
+                GuidedTokenMaskBatchRef,
                 ModelForward,
                 StepMode,
                 TokenId,
@@ -139,51 +140,50 @@ fn bitmask_allows_token(guided_token_mask: &[i32], token_id: usize) -> bool {
         .is_some_and(|&word| ((word as u32) & (1_u32 << bit_index)) != 0)
 }
 
-fn build_guided_token_masks_tensor<B: Backend>(
-    guided_token_masks: &[Option<&[i32]>],
+fn build_guided_token_mask_state_tensor<B: Backend>(
+    guided_token_mask_ref: GuidedTokenMaskBatchRef<'_>,
+    batch_ids: &[usize],
     vocab_size: usize,
     device: &B::Device,
-) -> Result<Option<(Tensor<B, 2, Int>, usize)>, String> {
-    if guided_token_masks.iter().all(Option::is_none) {
-        return Ok(None);
+) -> Result<(Tensor<B, 2, Int>, usize), String> {
+    let guided_token_mask_words = vocab_size.div_ceil(32);
+    if guided_token_mask_ref.token_mask_words != guided_token_mask_words {
+        return Err(format!(
+            "guided_token_mask_ref has {} words, expected {guided_token_mask_words} for vocab_size={vocab_size}",
+            guided_token_mask_ref.token_mask_words
+        ));
     }
 
-    let guided_token_mask_words = vocab_size.div_ceil(32);
-    let mut flattened = Vec::with_capacity(guided_token_masks.len() * guided_token_mask_words);
+    for &batch_id in batch_ids {
+        if batch_id >= guided_token_mask_ref.full_batch_size() {
+            return Err(format!(
+                "guided_token_mask_ref batch_id {batch_id} out of range for full_batch_size={}",
+                guided_token_mask_ref.full_batch_size()
+            ));
+        }
 
-    for (row_index, guided_token_mask) in guided_token_masks.iter().enumerate() {
-        match guided_token_mask {
-            Some(guided_token_mask) => {
-                if guided_token_mask.len() != guided_token_mask_words {
-                    return Err(format!(
-                        "guided_token_masks[{row_index}] has {} words, expected {guided_token_mask_words} for vocab_size={vocab_size}",
-                        guided_token_mask.len()
-                    ));
-                }
-
-                if !(0..vocab_size)
-                    .any(|token_id| bitmask_allows_token(guided_token_mask, token_id))
-                {
-                    return Err(format!(
-                        "guided_token_masks[{row_index}] disallows every token in vocab_size={vocab_size}"
-                    ));
-                }
-
-                flattened.extend_from_slice(guided_token_mask);
-            }
-            None => flattened.extend(std::iter::repeat_n(-1_i32, guided_token_mask_words)),
+        let guided_token_mask = guided_token_mask_ref.row(batch_id);
+        if !guided_token_mask.iter().all(|&word| word == -1_i32)
+            && !(0..vocab_size).any(|token_id| bitmask_allows_token(guided_token_mask, token_id))
+        {
+            return Err(format!(
+                "guided_token_mask_ref row {batch_id} disallows every token in vocab_size={vocab_size}"
+            ));
         }
     }
 
     let guided_token_masks = Tensor::<B, 2, Int>::from_data(
         TensorData::new(
-            flattened,
-            [guided_token_masks.len(), guided_token_mask_words],
+            guided_token_mask_ref.token_masks.to_vec(),
+            [
+                guided_token_mask_ref.full_batch_size(),
+                guided_token_mask_words,
+            ],
         ),
         device,
     );
 
-    Ok(Some((guided_token_masks, guided_token_mask_words)))
+    Ok((guided_token_masks, guided_token_mask_words))
 }
 
 impl<B> ModelForward for RwkvLmForward<B>
@@ -271,7 +271,7 @@ where
             StepMode::Sample {
                 sampling_configs,
                 token_logprobs_configs,
-                guided_token_masks,
+                guided_token_mask_ref,
             } => {
                 let Some(logits) = logits else {
                     return Some(Vec::new());
@@ -279,18 +279,22 @@ where
                 rwkv_bench::trace_scope!("rwkv.infer.executor.sample");
                 assert_eq!(batch_ids.len(), sampling_configs.len());
                 assert_eq!(batch_ids.len(), token_logprobs_configs.len());
-                assert_eq!(batch_ids.len(), guided_token_masks.len());
 
-                let logits = match build_guided_token_masks_tensor::<B>(
-                    guided_token_masks,
-                    self.vocab_size,
-                    &self.device,
-                )
-                .expect("guided_token_masks must match vocab size and allow at least one token")
-                {
-                    Some((guided_token_masks, guided_token_mask_words)) => {
+                let logits = match guided_token_mask_ref {
+                    Some(guided_token_mask_ref) => {
+                        let (guided_token_masks, guided_token_mask_words) =
+                            build_guided_token_mask_state_tensor::<B>(
+                                guided_token_mask_ref,
+                                batch_ids,
+                                self.vocab_size,
+                                &self.device,
+                            )
+                            .expect(
+                                "guided_token_mask_ref must match vocab size and allow at least one token for every masked active row",
+                            );
                         apply_guided_token_masks(
                             logits,
+                            batch_ids_tensor.clone(),
                             guided_token_masks,
                             guided_token_mask_words,
                         )

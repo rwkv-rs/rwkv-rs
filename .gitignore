@@ -29,3 +29,4 @@ reference_for_agents/
 /examples/rwkv-lm/logs
 /examples/rwkv-lm/weights
 /examples/rwkv-lm-eval/datasets/
+.codex

@@ -8,6 +8,7 @@ use super::{
     QueueFinishMeta,
     QueueFinishReason,
     QueueItemStatus,
+    guided_decode::GuidedDecodingStatus,
 };
 
 pub(super) struct StepInputs {
@@ -16,7 +17,7 @@ pub(super) struct StepInputs {
     pub(super) context_masks: Vec<Vec<u8>>,
     pub(super) sampling_configs: Vec<crate::cores::forward::sampling::SamplingConfig>,
     pub(super) token_logprobs_configs: Vec<Option<TokenIdLogprobsConfig>>,
-    pub(super) guided_token_masks: Vec<Option<Box<[i32]>>>,
+    pub(super) has_masked_guided_token: bool,
 }
 
 impl Queue {
@@ -26,7 +27,7 @@ impl Queue {
         let mut context_masks = Vec::with_capacity(item_ids.len());
         let mut sampling_configs = Vec::with_capacity(item_ids.len());
         let mut token_logprobs_configs = Vec::with_capacity(item_ids.len());
-        let mut guided_token_masks = Vec::with_capacity(item_ids.len());
+        let mut has_masked_guided_token = false;
 
         for item_id in item_ids {
             let item = self
@@ -71,7 +72,15 @@ impl Queue {
             context_masks.push(context_mask);
             sampling_configs.push(item.sampling_config);
             token_logprobs_configs.push(item.token_logprobs_config.clone());
-            guided_token_masks.push(item.guided_token_mask.clone());
+            match &item.guided_decoding_status {
+                GuidedDecodingStatus::Disabled => {}
+                GuidedDecodingStatus::Pending => {
+                    panic!("guided decoding step scheduled before prepared state was ready")
+                }
+                GuidedDecodingStatus::Ready(prepared_state) => {
+                    has_masked_guided_token |= prepared_state.has_masked_token();
+                }
+            }
         }
 
         StepInputs {
@@ -80,7 +89,7 @@ impl Queue {
             context_masks,
             sampling_configs,
             token_logprobs_configs,
-            guided_token_masks,
+            has_masked_guided_token,
         }
     }
 
@@ -140,8 +149,18 @@ impl Queue {
             let token_id = token.token_id;
             let finished_by_model = token_id == END_TOKEN_ID || token.finish_after_token;
             let finished_by_length = next_len >= max_new_tokens;
-            let mut should_finish = finished_by_model || finished_by_length;
-            let should_finish_before_guided = should_finish;
+            let finished_by_guided = match self.apply_guided_prepared_state(
+                item_id,
+                token_id,
+                !(finished_by_model || finished_by_length),
+            ) {
+                Ok(finished_by_guided) => finished_by_guided,
+                Err(_) => {
+                    removed_item_ids.push(item_id);
+                    continue;
+                }
+            };
+            let should_finish = finished_by_model || finished_by_guided || finished_by_length;
 
             if token_id != END_TOKEN_ID
                 && self.queue_detokenize_token(item_id, token.clone()).is_err()
@@ -150,16 +169,8 @@ impl Queue {
                 continue;
             }
 
-            if self
-                .apply_guided_token_after_sample(item_id, token_id, &mut should_finish)
-                .is_err()
-            {
-                removed_item_ids.push(item_id);
-                continue;
-            }
-
             let finish_reason = if should_finish {
-                Some(if finished_by_model || !should_finish_before_guided {
+                Some(if finished_by_model || finished_by_guided {
                     QueueFinishReason::Stop
                 } else if finished_by_length {
                     QueueFinishReason::Length
@@ -208,16 +219,16 @@ impl Queue {
     }
 
     pub(super) fn build_step_mode<'a>(
-        &self,
+        batch_status: BatchStatus,
         step_inputs: &'a StepInputs,
-        guided_token_masks: &'a [Option<&'a [i32]>],
+        guided_token_mask_ref: Option<crate::cores::forward::GuidedTokenMaskBatchRef<'a>>,
     ) -> StepMode<'a> {
-        match self.batch_status {
+        match batch_status {
             BatchStatus::PrefillWithoutOutput => StepMode::PrefillNoOutput,
             BatchStatus::Prefill | BatchStatus::Decode => StepMode::Sample {
                 sampling_configs: &step_inputs.sampling_configs,
                 token_logprobs_configs: &step_inputs.token_logprobs_configs,
-                guided_token_masks,
+                guided_token_mask_ref,
             },
         }
     }

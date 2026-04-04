@@ -17,11 +17,13 @@ where
 {
     fn apply_guided_token_masks(
         logits: FloatTensor<Self>,
+        batch_ids: IntTensor<Self>,
         guided_token_masks: IntTensor<Self>,
         guided_token_mask_words: usize,
     ) -> FloatTensor<Self> {
         apply_guided_token_masks_launch::<R, F, I, BT>(
             logits,
+            batch_ids,
             guided_token_masks,
             guided_token_mask_words,
         )
@@ -43,6 +45,7 @@ mod fusion_impl {
     impl<B: FusionBackend + GuidedTokenMaskBackend> GuidedTokenMaskBackend for Fusion<B> {
         fn apply_guided_token_masks(
             logits: FloatTensor<Self>,
+            batch_ids: IntTensor<Self>,
             guided_token_masks: IntTensor<Self>,
             guided_token_mask_words: usize,
         ) -> FloatTensor<Self> {
@@ -65,13 +68,16 @@ mod fusion_impl {
                         <B1::FusionRuntime as FusionRuntime>::FusionHandle,
                     >,
                 ) {
-                    let ([logits, guided_token_masks], [output_out]) = self.desc.as_fixed();
+                    let ([logits, batch_ids, guided_token_masks], [output_out]) =
+                        self.desc.as_fixed();
 
                     let logits_tensor = handles.get_float_tensor::<B1>(logits);
+                    let batch_ids_tensor = handles.get_int_tensor::<B1>(batch_ids);
                     let guided_token_masks_tensor =
                         handles.get_int_tensor::<B1>(guided_token_masks);
                     let output = B1::apply_guided_token_masks(
                         logits_tensor,
+                        batch_ids_tensor,
                         guided_token_masks_tensor,
                         self.guided_token_mask_words,
                     );
@@ -82,6 +88,7 @@ mod fusion_impl {
 
             let mut streams = OperationStreams::default();
             streams.tensor(&logits);
+            streams.tensor(&batch_ids);
             streams.tensor(&guided_token_masks);
 
             let output_desc = [TensorIr::uninit(
@@ -92,7 +99,11 @@ mod fusion_impl {
 
             let desc = CustomOpIr::new(
                 "guided_token_mask",
-                &[logits.into_ir(), guided_token_masks.into_ir()],
+                &[
+                    logits.into_ir(),
+                    batch_ids.into_ir(),
+                    guided_token_masks.into_ir(),
+                ],
                 &output_desc,
             );
 
