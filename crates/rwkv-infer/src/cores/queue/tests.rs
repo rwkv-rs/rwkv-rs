@@ -139,6 +139,36 @@ fn prefill_without_output_does_not_wait_for_guided_step() {
 }
 
 #[test]
+fn prefill_without_output_step_does_not_require_guided_prepared_state() {
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward::default()),
+        test_tokenizer(),
+        4,
+        2,
+        new_perf_history(),
+    );
+    let (completions_tx, _completions_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(
+                vec![0, 1, 0, 1],
+                Default::default(),
+                None,
+                vec![],
+                completions_tx,
+                Some(test_guided_decoding_config()),
+            ),
+        )
+        .expect("push guided item");
+
+    let item_ids = queue.collect_step_item_ids();
+    assert_eq!(item_ids, vec![1]);
+    assert!(queue.step(&item_ids).is_none());
+}
+
+#[test]
 fn prefill_waits_for_guided_step() {
     let mut queue = Queue::new(
         Box::new(DummyModelForward::default()),

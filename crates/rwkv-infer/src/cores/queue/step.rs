@@ -72,13 +72,15 @@ impl Queue {
             context_masks.push(context_mask);
             sampling_configs.push(item.sampling_config);
             token_logprobs_configs.push(item.token_logprobs_config.clone());
-            match &item.guided_decoding_status {
-                GuidedDecodingStatus::Disabled => {}
-                GuidedDecodingStatus::Pending => {
-                    panic!("guided decoding step scheduled before prepared state was ready")
-                }
-                GuidedDecodingStatus::Ready(prepared_state) => {
-                    has_masked_guided_token |= prepared_state.has_masked_token();
+            if self.batch_status != BatchStatus::PrefillWithoutOutput {
+                match &item.guided_decoding_status {
+                    GuidedDecodingStatus::Disabled => {}
+                    GuidedDecodingStatus::Pending => {
+                        panic!("guided decoding step scheduled before prepared state was ready")
+                    }
+                    GuidedDecodingStatus::Ready(prepared_state) => {
+                        has_masked_guided_token |= prepared_state.has_masked_token();
+                    }
                 }
             }
         }
