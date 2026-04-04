@@ -23,7 +23,7 @@ model_data_version = "g1d"
 model_num_params = "0.1b"
 base_url = "127.0.0.1:8083"
 api_key = ""
-model = "rwkv7-g1d-0.1b"  # 和推理后端配置的model_name保持一致
+model = "rwkv7-0.1b-g1d"  # 和推理后端配置的model_name保持一致
 max_batch_size = 2048  # 该模型的并发槽位上限，调度器会尽量持续喂满
 
 [[models]]
@@ -32,7 +32,7 @@ model_data_version = "g1d"
 model_num_params = "0.4b"
 base_url = "127.0.0.1:8083"
 api_key = ""
-model = "rwkv7-g1d-0.4b"  # 和推理后端配置的model_name保持一致
+model = "rwkv7-0.4b-g1d"  # 和推理后端配置的model_name保持一致
 max_batch_size = 2048  # 该模型的并发槽位上限，调度器会尽量持续喂满
 
 [[models]]
@@ -41,7 +41,7 @@ model_data_version = "g1e"
 model_num_params = "1.5b"
 base_url = "127.0.0.1:8083"
 api_key = ""
-model = "rwkv7-g1e-1.5b"  # 和推理后端配置的model_name保持一致
+model = "rwkv7-1.5b-g1e"  # 和推理后端配置的model_name保持一致
 max_batch_size = 1024  # 该模型的并发槽位上限，调度器会尽量持续喂满
 
 [[models]]
@@ -50,7 +50,7 @@ model_data_version = "g1e"
 model_num_params = "2.9b"
 base_url = "127.0.0.1:8083"
 api_key = ""
-model = "rwkv7-g1e-2.9b"  # 和推理后端配置的model_name保持一致
+model = "rwkv7-2.9b-g1e"  # 和推理后端配置的model_name保持一致
 max_batch_size = 512  # 该模型的并发槽位上限，调度器会尽量持续喂满
 
 [[models]]
@@ -59,7 +59,7 @@ model_data_version = "g1e"
 model_num_params = "7.2b"
 base_url = "127.0.0.1:8082"
 api_key = ""
-model = "rwkv7-g1e-7.2b"  # 和推理后端配置的model_name保持一致
+model = "rwkv7-7.2b-g1e"  # 和推理后端配置的model_name保持一致
 max_batch_size = 384  # 该模型的并发槽位上限，调度器会尽量持续喂满
 
 [[models]]
@@ -68,7 +68,7 @@ model_data_version = "g1e"
 model_num_params = "13.3b"
 base_url = "127.0.0.1:8081"
 api_key = ""
-model = "rwkv7-g1e-13.3b"  # 和推理后端配置的model_name保持一致
+model = "rwkv7-13.3b-g1e"  # 和推理后端配置的model_name保持一致
 max_batch_size = 512  # 该模型的并发槽位上限，调度器会尽量持续喂满
 
 [llm_judger]

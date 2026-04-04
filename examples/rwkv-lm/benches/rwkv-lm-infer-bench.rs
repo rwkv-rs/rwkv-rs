@@ -62,6 +62,7 @@ mod bench {
     };
     use serde::de::DeserializeOwned;
     use tokio::task::JoinSet;
+    use rwkv::nn::kernels::guided_token_mask::GuidedTokenMaskBackend;
     use rwkv_lm::{
         inferring::{RwkvLmForward, infer_cli_args},
         model::AutoRegressiveModelConfig,
@@ -138,6 +139,7 @@ mod bench {
             + TokenShiftDiffBackend
             + AddcmulBackend
             + Wkv7Backend
+            + GuidedTokenMaskBackend
             + RapidSampleBackend
             + Send
             + Sync
@@ -856,6 +858,7 @@ mod bench {
             + TokenShiftDiffBackend
             + AddcmulBackend
             + Wkv7Backend
+            + GuidedTokenMaskBackend
             + RapidSampleBackend
             + Send
             + Sync
@@ -883,6 +886,7 @@ mod bench {
             + TokenShiftDiffBackend
             + AddcmulBackend
             + Wkv7Backend
+            + GuidedTokenMaskBackend
             + RapidSampleBackend
             + Send
             + Sync
@@ -904,6 +908,7 @@ mod bench {
             + TokenShiftDiffBackend
             + AddcmulBackend
             + Wkv7Backend
+            + GuidedTokenMaskBackend
             + RapidSampleBackend
             + Send
             + Sync
