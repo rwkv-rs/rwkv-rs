@@ -25,7 +25,7 @@ impl Queue {
                 .find(|candidate| !used_batch_ids.contains(candidate))
                 .expect("scheduler should not select more items than free batch slots");
 
-            self.guided_token_mask_state.reset(batch_id);
+            self.set_guided_token_mask_row(batch_id, None);
             self.items
                 .get_mut(item_id)
                 .expect("scheduled item_id must exist in queue")

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     panic::{self, AssertUnwindSafe},
     sync::{Arc, Mutex},
@@ -35,6 +36,7 @@ struct DummyModelForward {
     choose_first_allowed_token: bool,
     fixed_token_id: i32,
     sample_guided_token_masks: Arc<Mutex<Vec<Vec<Option<Vec<i32>>>>>>,
+    guided_token_masks_by_batch: HashMap<usize, Vec<i32>>,
 }
 
 impl ModelForward for DummyModelForward {
@@ -48,11 +50,19 @@ impl ModelForward for DummyModelForward {
         match mode {
             StepMode::PrefillNoOutput => None,
             StepMode::Sample {
-                guided_token_mask_ref,
+                has_masked_guided_token,
                 ..
             } => {
-                let sampled_guided_token_masks =
-                    collect_sample_guided_token_masks(batch_ids, guided_token_mask_ref);
+                let sampled_guided_token_masks = batch_ids
+                    .iter()
+                    .map(|batch_id| self.guided_token_masks_by_batch.get(batch_id).cloned())
+                    .collect::<Vec<_>>();
+                if !has_masked_guided_token {
+                    assert!(
+                        sampled_guided_token_masks.iter().all(Option::is_none),
+                        "sample step declared no masked guided token but forward still saw masked rows"
+                    );
+                }
                 self.sample_guided_token_masks
                     .lock()
                     .unwrap()
@@ -86,7 +96,18 @@ impl ModelForward for DummyModelForward {
         }
     }
 
-    fn reset(&mut self, _batch_index: usize) {}
+    fn set_guided_token_mask_row(&mut self, batch_index: usize, token_mask: Option<&[i32]>) {
+        if let Some(token_mask) = token_mask {
+            self.guided_token_masks_by_batch
+                .insert(batch_index, token_mask.to_vec());
+        } else {
+            self.guided_token_masks_by_batch.remove(&batch_index);
+        }
+    }
+
+    fn reset(&mut self, batch_index: usize) {
+        self.guided_token_masks_by_batch.remove(&batch_index);
+    }
 }
 
 #[test]
@@ -171,6 +192,7 @@ fn step_passes_guided_token_masks_to_sample() {
             choose_first_allowed_token: false,
             fixed_token_id: END_TOKEN_ID,
             sample_guided_token_masks: Arc::clone(&sample_guided_token_masks),
+            guided_token_masks_by_batch: HashMap::new(),
         }),
         test_tokenizer(),
         4,
@@ -219,6 +241,7 @@ fn step_passes_all_allowed_guided_step_as_none_to_sample() {
             choose_first_allowed_token: false,
             fixed_token_id: END_TOKEN_ID,
             sample_guided_token_masks: Arc::clone(&sample_guided_token_masks),
+            guided_token_masks_by_batch: HashMap::new(),
         }),
         test_tokenizer(),
         4,
@@ -257,12 +280,91 @@ fn step_passes_all_allowed_guided_step_as_none_to_sample() {
 }
 
 #[test]
+fn slot_reuse_resets_persistent_guided_mask_state() {
+    let sample_guided_token_masks = Arc::new(Mutex::new(Vec::new()));
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward {
+            choose_first_allowed_token: false,
+            fixed_token_id: END_TOKEN_ID,
+            sample_guided_token_masks: Arc::clone(&sample_guided_token_masks),
+            guided_token_masks_by_batch: HashMap::new(),
+        }),
+        test_tokenizer(),
+        1,
+        1,
+        new_perf_history(),
+    );
+    let (first_completions_tx, _first_completions_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(
+                vec![0],
+                Default::default(),
+                None,
+                vec![],
+                first_completions_tx,
+                None,
+            ),
+        )
+        .expect("push first item");
+
+    let first_guided_token_mask = build_guided_token_mask(queue.guided_vocab_size, &[1]).to_vec();
+    queue
+        .items
+        .get_mut(&1)
+        .expect("queue item")
+        .guided_decoding_status = GuidedDecodingStatus::Ready(GuidedPreparedState::masked(
+        test_guided_matcher_state(&queue),
+        first_guided_token_mask.clone().into_boxed_slice(),
+    ));
+
+    queue.update_batch_status();
+    let first_item_ids = queue.collect_step_item_ids();
+    assert_eq!(first_item_ids, vec![1]);
+    let first_new_tokens = queue.step(&first_item_ids).expect("sample output");
+    assert_eq!(first_new_tokens.len(), 1);
+
+    queue.remove(&[1]);
+    assert!(queue.items.is_empty());
+
+    let (second_completions_tx, _second_completions_rx) = mpsc::channel(8);
+    queue
+        .push(
+            2,
+            QueueItem::new(
+                vec![0],
+                Default::default(),
+                None,
+                vec![],
+                second_completions_tx,
+                None,
+            ),
+        )
+        .expect("push second item");
+
+    queue.update_batch_status();
+    let second_item_ids = queue.collect_step_item_ids();
+    assert_eq!(second_item_ids, vec![2]);
+    let second_new_tokens = queue.step(&second_item_ids).expect("sample output");
+    assert_eq!(second_new_tokens.len(), 1);
+
+    let sample_guided_token_masks = sample_guided_token_masks.lock().unwrap().clone();
+    assert_eq!(
+        sample_guided_token_masks,
+        vec![vec![Some(first_guided_token_mask)], vec![None]]
+    );
+}
+
+#[test]
 fn run_guided_item_end_to_end() {
     let mut queue = Queue::new(
         Box::new(DummyModelForward {
             choose_first_allowed_token: true,
             fixed_token_id: END_TOKEN_ID,
             sample_guided_token_masks: Arc::new(Mutex::new(Vec::new())),
+            guided_token_masks_by_batch: HashMap::new(),
         }),
         test_tokenizer(),
         4,
@@ -691,26 +793,6 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
             Ok(message) => (*message).to_string(),
             Err(_) => "non-string panic payload".to_string(),
         },
-    }
-}
-
-fn collect_sample_guided_token_masks(
-    batch_ids: &[usize],
-    guided_token_mask_ref: Option<crate::cores::forward::GuidedTokenMaskBatchRef<'_>>,
-) -> Vec<Option<Vec<i32>>> {
-    match guided_token_mask_ref {
-        Some(guided_token_mask_ref) => batch_ids
-            .iter()
-            .map(|&batch_id| {
-                let token_mask = guided_token_mask_ref.row(batch_id);
-                if token_mask.iter().all(|&word| word == -1_i32) {
-                    None
-                } else {
-                    Some(token_mask.to_vec())
-                }
-            })
-            .collect(),
-        None => vec![None; batch_ids.len()],
     }
 }
 

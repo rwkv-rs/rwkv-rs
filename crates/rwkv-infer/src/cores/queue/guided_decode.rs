@@ -17,7 +17,6 @@ use xgrammar::{
 };
 
 use super::Queue;
-use crate::cores::forward::GuidedTokenMaskBatchRef;
 
 pub(super) type GuidedDecodeTask = (usize, GuidedMatcherState);
 pub(super) type GuidedDecodeResult = (usize, Result<GuidedPreparedState, String>);
@@ -40,6 +39,7 @@ pub(super) struct GuidedPreparedState {
     pub(super) matcher_state: GuidedMatcherState,
     pub(super) token_mask_status: GuidedTokenMaskStatus,
     token_mask_data: Option<Box<[i32]>>,
+    token_mask_synced: bool,
 }
 
 impl GuidedPreparedState {
@@ -48,6 +48,7 @@ impl GuidedPreparedState {
             matcher_state,
             token_mask_status: GuidedTokenMaskStatus::Masked,
             token_mask_data: Some(token_mask_data),
+            token_mask_synced: false,
         }
     }
 
@@ -56,6 +57,7 @@ impl GuidedPreparedState {
             matcher_state,
             token_mask_status: GuidedTokenMaskStatus::AllAllowed,
             token_mask_data: None,
+            token_mask_synced: false,
         }
     }
 
@@ -63,20 +65,16 @@ impl GuidedPreparedState {
         self.token_mask_status == GuidedTokenMaskStatus::Masked
     }
 
-    pub(super) fn materialize_token_mask(
-        &mut self,
-        token_mask_state: &mut GuidedTokenMaskBatchState,
-        batch_id: usize,
-    ) {
-        match self.token_mask_status {
-            GuidedTokenMaskStatus::Masked => {
-                if let Some(token_mask_data) = self.token_mask_data.as_deref() {
-                    token_mask_state.write_mask(batch_id, token_mask_data);
-                    self.token_mask_data = None;
-                }
-            }
-            GuidedTokenMaskStatus::AllAllowed => token_mask_state.reset(batch_id),
-        }
+    pub(super) fn take_token_mask_data(&mut self) -> Option<Box<[i32]>> {
+        self.token_mask_data.take()
+    }
+
+    fn is_token_mask_synced(&self) -> bool {
+        self.token_mask_synced
+    }
+
+    fn mark_token_mask_synced(&mut self) {
+        self.token_mask_synced = true;
     }
 
     pub(super) fn allows_token(
@@ -110,13 +108,6 @@ impl GuidedTokenMaskBatchState {
         Self {
             token_masks,
             token_mask_words,
-        }
-    }
-
-    pub(super) fn as_ref(&self) -> GuidedTokenMaskBatchRef<'_> {
-        GuidedTokenMaskBatchRef {
-            token_masks: &self.token_masks,
-            token_mask_words: self.token_mask_words,
         }
     }
 
@@ -319,6 +310,42 @@ impl GuidedDecodeWorker {
 }
 
 impl Queue {
+    pub(super) fn set_guided_token_mask_row(
+        &mut self,
+        batch_id: usize,
+        token_mask: Option<&[i32]>,
+    ) {
+        if let Some(token_mask) = token_mask {
+            self.guided_token_mask_state
+                .write_mask(batch_id, token_mask);
+        } else {
+            self.guided_token_mask_state.reset(batch_id);
+        }
+        self.model_forward
+            .set_guided_token_mask_row(batch_id, token_mask);
+    }
+
+    fn sync_guided_prepared_state(
+        &mut self,
+        batch_id: usize,
+        prepared_state: &mut GuidedPreparedState,
+    ) {
+        if prepared_state.is_token_mask_synced() {
+            return;
+        }
+
+        match prepared_state.token_mask_status {
+            GuidedTokenMaskStatus::Masked => {
+                if let Some(token_mask_data) = prepared_state.take_token_mask_data() {
+                    self.set_guided_token_mask_row(batch_id, Some(token_mask_data.as_ref()));
+                }
+            }
+            GuidedTokenMaskStatus::AllAllowed => self.set_guided_token_mask_row(batch_id, None),
+        }
+
+        prepared_state.mark_token_mask_synced();
+    }
+
     pub(super) fn prepare_item_for_push(
         &mut self,
         item_id: usize,
@@ -342,19 +369,39 @@ impl Queue {
     }
 
     pub(super) fn materialize_guided_prepared_states(&mut self, item_ids: &[usize]) {
-        let token_mask_state = &mut self.guided_token_mask_state;
-        let items = &mut self.items;
-
         for &item_id in item_ids {
-            let item = items
-                .get_mut(&item_id)
-                .expect("scheduled item_id must exist in queue");
-            let batch_id = item
+            let batch_id = self
+                .items
+                .get(&item_id)
+                .expect("scheduled item_id must exist in queue")
                 .batch_id
                 .expect("batch_id should be assigned before guided materialization");
+            let mut prepared_state = {
+                let item = self
+                    .items
+                    .get_mut(&item_id)
+                    .expect("scheduled item_id must exist in queue");
+                match std::mem::replace(
+                    &mut item.guided_decoding_status,
+                    GuidedDecodingStatus::Disabled,
+                ) {
+                    GuidedDecodingStatus::Ready(prepared_state) => Some(prepared_state),
+                    other_status => {
+                        item.guided_decoding_status = other_status;
+                        None
+                    }
+                }
+            };
 
-            if let GuidedDecodingStatus::Ready(prepared_state) = &mut item.guided_decoding_status {
-                prepared_state.materialize_token_mask(token_mask_state, batch_id);
+            if let Some(ref mut prepared_state) = prepared_state {
+                self.sync_guided_prepared_state(batch_id, prepared_state);
+            }
+
+            if let Some(prepared_state) = prepared_state {
+                self.items
+                    .get_mut(&item_id)
+                    .expect("scheduled item_id must exist in queue")
+                    .guided_decoding_status = GuidedDecodingStatus::Ready(prepared_state);
             }
         }
     }
@@ -446,8 +493,7 @@ impl Queue {
             match result {
                 Ok(mut prepared_state) => {
                     if let Some(batch_id) = batch_id {
-                        prepared_state
-                            .materialize_token_mask(&mut self.guided_token_mask_state, batch_id);
+                        self.sync_guided_prepared_state(batch_id, &mut prepared_state);
                     }
 
                     if let Some(item) = self.items.get_mut(&item_id) {

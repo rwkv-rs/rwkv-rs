@@ -193,11 +193,7 @@ impl Queue {
             .iter()
             .map(Vec::as_slice)
             .collect();
-        let guided_token_mask_ref = step_inputs
-            .has_masked_guided_token
-            .then(|| self.guided_token_mask_state.as_ref());
-        let step_mode =
-            Self::build_step_mode(self.batch_status, &step_inputs, guided_token_mask_ref);
+        let step_mode = Self::build_step_mode(self.batch_status, &step_inputs);
 
         self.model_forward
             .step(&step_inputs.batch_ids, &contexts, &context_masks, step_mode)

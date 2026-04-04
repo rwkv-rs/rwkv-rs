@@ -248,6 +248,8 @@ mod tests {
             }
         }
 
+        fn set_guided_token_mask_row(&mut self, _batch_index: usize, _token_mask: Option<&[i32]>) {}
+
         fn reset(&mut self, _batch_index: usize) {}
     }
 

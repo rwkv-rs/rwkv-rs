@@ -205,6 +205,7 @@ impl Queue {
 
             if let Some(batch_id) = batch_id_to_reset {
                 self.model_forward.reset(batch_id);
+                self.guided_token_mask_state.reset(batch_id);
             }
             if should_remove && self.finish_item_if_ready(item_id) {
                 removed_item_ids.push(item_id);
@@ -221,14 +222,13 @@ impl Queue {
     pub(super) fn build_step_mode<'a>(
         batch_status: BatchStatus,
         step_inputs: &'a StepInputs,
-        guided_token_mask_ref: Option<crate::cores::forward::GuidedTokenMaskBatchRef<'a>>,
     ) -> StepMode<'a> {
         match batch_status {
             BatchStatus::PrefillWithoutOutput => StepMode::PrefillNoOutput,
             BatchStatus::Prefill | BatchStatus::Decode => StepMode::Sample {
                 sampling_configs: &step_inputs.sampling_configs,
                 token_logprobs_configs: &step_inputs.token_logprobs_configs,
-                guided_token_mask_ref,
+                has_masked_guided_token: step_inputs.has_masked_guided_token,
             },
         }
     }
