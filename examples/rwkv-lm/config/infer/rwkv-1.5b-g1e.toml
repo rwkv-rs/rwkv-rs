@@ -3,7 +3,7 @@ request_body_limit_bytes = 52428800
 sse_keep_alive_ms = 10000
 
 [[models]]
-model_name = "rwkv-1.5b-g1e"
+model_name = "rwkv7-1.5b-g1e"
 model_cfg = "rwkv-lm-1.5b"
 weights_path = "../../weights/rwkv7-g1e-1.5b-20260309-ctx8192.bpk"
 tokenizer_vocab_path = "../../assets/rwkv_vocab_v20230424.txt"
