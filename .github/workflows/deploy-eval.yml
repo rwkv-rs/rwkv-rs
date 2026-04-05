@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, linux, x64, alicloud]
+    runs-on: [self-hosted, linux, x64, szx-pro6000x4]
 
     env:
       http_proxy: http://127.0.0.1:7890
@@ -26,6 +26,6 @@ jobs:
         run: |
           env | grep -E '^(http_proxy|https_proxy|no_proxy)=' || true
 
-      - name: Deploy eval on ECS
+      - name: Deploy eval on szx-pro6000x4
         run: |
           /srv/deploy/deploy_eval.sh "$GITHUB_WORKSPACE"
