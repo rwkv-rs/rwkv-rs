@@ -42,7 +42,7 @@ static MMLU_PRO_INFO: BenchmarkInfo = BenchmarkInfo {
         repetition_penalty: 0.1,
         penalty_decay: 0.99,
     },
-    n_shots: &[0, 5],
+    n_shots: &[0],
     avg_ks: &[1.0],
     pass_ks: &[1],
     with_llm_judger: false,
