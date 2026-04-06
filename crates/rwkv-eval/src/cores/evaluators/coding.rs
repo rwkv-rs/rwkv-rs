@@ -1,16 +1,12 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use async_openai::{Client, config::OpenAIConfig};
 use microsandbox::Sandbox;
-use once_cell::sync::Lazy;
 use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::cores::{
     datasets::SamplingConfig,
     inferers::{CompletionRequest, CompletionResponse},
 };
-
-static SANDBOX_COUNTER: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(1));
 
 const DEFAULT_MEMORY_MB: u32 = 512;
 const DEFAULT_CPUS: u8 = 1;
@@ -63,7 +59,10 @@ print(json.dumps({"passed": True, "fail_reason": ""}))
     if verdict.passed {
         Ok(())
     } else {
-        Err(format!("microsandbox probe failed: {}", verdict.fail_reason))
+        Err(format!(
+            "microsandbox probe failed: {}",
+            verdict.fail_reason
+        ))
     }
 }
 
@@ -80,6 +79,8 @@ pub async fn run_python_verdict_script(script: &str) -> Result<SandboxVerdict, S
     let execution = sandbox.exec("python", ["-c", script]).await;
     if let Err(err) = sandbox.stop_and_wait().await {
         eprintln!("failed to stop microsandbox `{name}`: {err}");
+    } else if let Err(err) = sandbox.remove_persisted().await {
+        eprintln!("failed to remove persisted microsandbox `{name}`: {err}");
     }
 
     match execution {
@@ -119,8 +120,7 @@ pub async fn run_python_verdict_script(script: &str) -> Result<SandboxVerdict, S
 }
 
 fn next_sandbox_name() -> String {
-    let id = SANDBOX_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("rwkv-eval-coding-{id}")
+    format!("rwkv-eval-coding-{}", Uuid::new_v4().simple())
 }
 
 fn parse_verdict_line(stdout: &str) -> Option<SandboxVerdictWire> {
@@ -132,7 +132,7 @@ fn parse_verdict_line(stdout: &str) -> Option<SandboxVerdictWire> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_verdict_line;
+    use super::{next_sandbox_name, parse_verdict_line};
 
     #[test]
     fn parses_last_json_line() {
@@ -140,5 +140,14 @@ mod tests {
         let verdict = parse_verdict_line(stdout).unwrap();
         assert!(!verdict.passed);
         assert_eq!(verdict.fail_reason, "bad");
+    }
+
+    #[test]
+    fn generates_unique_sandbox_names() {
+        let first = next_sandbox_name();
+        let second = next_sandbox_name();
+        assert!(first.starts_with("rwkv-eval-coding-"));
+        assert!(second.starts_with("rwkv-eval-coding-"));
+        assert_ne!(first, second);
     }
 }

@@ -80,6 +80,13 @@ pub(crate) async fn ensure_microsandbox_for_coding_benchmarks(
     }
 
     ensure_microsandbox_available().await.unwrap_or_else(|err| {
+        if err.contains("already exists") {
+            panic!(
+                "coding benchmark requires microsandbox, but the probe hit a stale sandbox name collision: {err}. \
+please remove the leftover sandbox state and retry."
+            );
+        }
+
         panic!(
             "coding benchmark requires microsandbox, but the Rust SDK probe failed: {err}. \
 please check the host runtime requirements for microsandbox."
