@@ -10,11 +10,13 @@ use std::{
 };
 
 use indicatif::{ProgressBar, ProgressStyle};
+use once_cell::sync::Lazy;
 use reqwest::{Client, RequestBuilder, Url};
 use tokio::{sync::Semaphore, time::sleep};
 use walkdir::WalkDir;
 
 const DOWNLOAD_TASKS_ENV: &str = "RWKV_EVAL_DOWNLOAD_TASKS";
+static HF_NETWORK_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(1));
 
 #[derive(Debug, Clone)]
 pub struct UrlDownloadFile {
@@ -90,6 +92,7 @@ pub async fn download_hf_repo<P: AsRef<Path>>(
             let url =
                 build_hf_resolve_url(&base, &repo_id, &revision, &item.rel_path.to_string_lossy());
             let out_path = repo_dir.join(&item.rel_path);
+            let _network_permit = HF_NETWORK_SEMAPHORE.acquire().await.unwrap();
 
             let body = retry(
                 &format!("下载 LFS 文件 {}", item.rel_path.display()),
@@ -187,6 +190,7 @@ pub async fn download_url_files<P: AsRef<Path>>(
         handles.push(tokio::spawn(async move {
             let _permit = permit;
             let out_path = root_dir.join(&file.relative_path);
+            let _network_permit = HF_NETWORK_SEMAPHORE.acquire().await.unwrap();
 
             let body = retry(
                 &format!("下载文件 {}", file.relative_path.display()),
@@ -306,6 +310,7 @@ pub async fn download_hf_files<P: AsRef<Path>>(
             let _permit = permit;
             let url = build_hf_resolve_url(&base, &repo_id, &revision, &rel_path);
             let out_path = root_dir.join(&rel_path);
+            let _network_permit = HF_NETWORK_SEMAPHORE.acquire().await.unwrap();
 
             let body = retry(&format!("下载文件 {}", rel_path), || {
                 let client = client.clone();
@@ -356,6 +361,7 @@ pub async fn download_hf_files<P: AsRef<Path>>(
 }
 
 async fn clone_repo_with_retry(url: &str, repo_dir: &Path, token: Option<&str>) {
+    let _network_permit = HF_NETWORK_SEMAPHORE.acquire().await.unwrap();
     retry("git clone", || {
         let url = url.to_string();
         let repo_dir = repo_dir.to_path_buf();
