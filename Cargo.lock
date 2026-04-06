@@ -4932,7 +4932,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -6161,9 +6161,9 @@ dependencies = [
 
 [[package]]
 name = "microsandbox"
-version = "0.3.11"
+version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6535df6595ddf48506ff9f07f11b53c9e75e935cf5a20aec81cc19cfadf4ca22"
+checksum = "7de3be20e09b7b0c3bb4535ffba4cfccef696ac4443e0192241ae27bd8e6417e"
 dependencies = [
  "bytes",
  "chrono",
@@ -6199,18 +6199,18 @@ dependencies = [
 
 [[package]]
 name = "microsandbox-db"
-version = "0.3.11"
+version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eaa75b76e59c2d6b459f825b0be4a335fde07c0c054d44e4e75eca99bb29a2e2"
+checksum = "df9af1d519dd597b1f2258b492fb2732b265e47cfc539972146fcf2710d203cc"
 dependencies = [
  "sea-orm",
 ]
 
 [[package]]
 name = "microsandbox-filesystem"
-version = "0.3.11"
+version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b634f532ecc01f6f7e3f80eeedaa3571781e77b7420cca20904224488d2c359"
+checksum = "0eccf6dee1f0aa0385759f09cbd0489a2e49075132f3124a7946f1f703ac2b5c"
 dependencies = [
  "libc",
  "microsandbox-utils",
@@ -6223,9 +6223,9 @@ dependencies = [
 
 [[package]]
 name = "microsandbox-image"
-version = "0.3.11"
+version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99bcc95ad3ceb04bf8535776d7e17c7595dd165958ce6955d5cddd4f517224b1"
+checksum = "d784c1eedb06e654631a99f3f244d0f1c5f8dc15ace301374ef11863e7dcac97"
 dependencies = [
  "astral-tokio-tar",
  "async-compression",
@@ -6248,18 +6248,18 @@ dependencies = [
 
 [[package]]
 name = "microsandbox-migration"
-version = "0.3.11"
+version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d87ddb05ff95bd2c27d439026df0d3b928c32908953bdb534668c033bd8347a5"
+checksum = "6536341f9547f6f8ec9ee47790ab978b0eac213d4d17db9762289423812a8f42"
 dependencies = [
  "sea-orm-migration",
 ]
 
 [[package]]
 name = "microsandbox-network"
-version = "0.3.11"
+version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b05260b18866965dd359dff291ad6862dbba5a793d4a8f3de73345e3533c21b"
+checksum = "e27242214612a447381cc227408faffa0c5a0c9d1a1004946aad64b119dee768"
 dependencies = [
  "bytes",
  "crossbeam-queue",
@@ -6284,9 +6284,9 @@ dependencies = [
 
 [[package]]
 name = "microsandbox-protocol"
-version = "0.3.11"
+version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b051850230ea67d691f741c00659930bb9366e461b7174f0394de01acb9c4c19"
+checksum = "8dea7706d28bf6b5c1048967d8ed0858c88e8073f71263c71b316abffb014f12"
 dependencies = [
  "chrono",
  "ciborium",
@@ -6298,9 +6298,9 @@ dependencies = [
 
 [[package]]
 name = "microsandbox-runtime"
-version = "0.3.11"
+version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fc46685712abb2f30e8a7a8b9ec8214cbe7920dae3d0aaf471f0f39b271c0c6"
+checksum = "1170cf90388ae9125ae7e69555efc83971ab6e762ed2141ddfd613faf10c8bd0"
 dependencies = [
  "bytes",
  "chrono",
@@ -6326,9 +6326,9 @@ dependencies = [
 
 [[package]]
 name = "microsandbox-utils"
-version = "0.3.11"
+version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f709ed2ac0b2059e8517f78d621b43d36055297a3e5537469cbafa75e65107f"
+checksum = "d8f488b643809213b2479e312f475cb95500c1bb3a7b0727258c2495e482b8d3"
 dependencies = [
  "crc32c",
  "libc",
@@ -7979,7 +7979,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -8017,7 +8017,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.60.2",
 ]

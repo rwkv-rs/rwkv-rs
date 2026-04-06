@@ -1,10 +1,6 @@
-use std::{
-    collections::BTreeMap,
-    process::{Command, Stdio},
-};
+use std::collections::BTreeMap;
 
 use rwkv_config::validated::eval::EVAL_CFG;
-use tokio::time::{Duration, sleep};
 
 use crate::cores::{
     datasets::{ALL_BENCHMARKS, Benchmark, BenchmarkInfo, Field, get_benchmarks_with_field},
@@ -83,61 +79,12 @@ pub(crate) async fn ensure_microsandbox_for_coding_benchmarks(
         return;
     }
 
-    if ensure_microsandbox_available().await.is_ok() {
-        return;
-    }
-
-    start_microsandbox_service().unwrap_or_else(|err| {
+    ensure_microsandbox_available().await.unwrap_or_else(|err| {
         panic!(
-            "coding benchmark requires microsandbox, but automatic startup failed: {err}. \
-please check microsandbox installation and ensure `msb server start --dev` or `microsandbox-server` is available."
+            "coding benchmark requires microsandbox, but the Rust SDK probe failed: {err}. \
+please check the host runtime requirements for microsandbox."
         )
     });
-
-    let mut last_err = String::new();
-    for _ in 0..20 {
-        match ensure_microsandbox_available().await {
-            Ok(()) => return,
-            Err(err) => last_err = err,
-        }
-        sleep(Duration::from_millis(500)).await;
-    }
-
-    panic!(
-        "coding benchmark requires microsandbox, but the service is still unavailable after automatic startup: {}. \
-please check microsandbox installation and server startup logs.",
-        last_err
-    );
-}
-
-fn start_microsandbox_service() -> Result<(), String> {
-    let mut errors = Vec::new();
-
-    for (program, args) in [
-        ("msb", &["server", "start", "--dev"][..]),
-        ("microsandbox-server", &[][..]),
-    ] {
-        let mut command = Command::new(program);
-        command
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-
-        match command.spawn() {
-            Ok(_) => return Ok(()),
-            Err(err) => {
-                let rendered_args = if args.is_empty() {
-                    String::new()
-                } else {
-                    format!(" {}", args.join(" "))
-                };
-                errors.push(format!("`{program}{rendered_args}`: {err}"));
-            }
-        }
-    }
-
-    Err(errors.join("; "))
 }
 
 fn parse_field(field_name: &str) -> Field {

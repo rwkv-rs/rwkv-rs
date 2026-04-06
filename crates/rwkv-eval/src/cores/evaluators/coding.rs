@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_openai::{Client, config::OpenAIConfig};
-use microsandbox::sandbox::Sandbox;
+use microsandbox::Sandbox;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 
@@ -58,17 +58,12 @@ print(json.dumps({"passed": True, "fail_reason": ""}))
 
     let verdict = run_python_verdict_script(probe_script)
         .await
-        .map_err(|err| {
-            format!("microsandbox unavailable: {err}. start it first with `msb server start --dev`")
-        })?;
+        .map_err(|err| format!("microsandbox unavailable: {err}"))?;
 
     if verdict.passed {
         Ok(())
     } else {
-        Err(format!(
-            "microsandbox probe failed: {}. start it first with `msb server start --dev`",
-            verdict.fail_reason
-        ))
+        Err(format!("microsandbox probe failed: {}", verdict.fail_reason))
     }
 }
 
@@ -83,12 +78,8 @@ pub async fn run_python_verdict_script(script: &str) -> Result<SandboxVerdict, S
         .map_err(|err| format!("create sandbox `{name}` failed: {err}"))?;
 
     let execution = sandbox.exec("python", ["-c", script]).await;
-    let stop_result = sandbox.stop().await;
-
-    if let Err(err) = stop_result {
+    if let Err(err) = sandbox.stop_and_wait().await {
         eprintln!("failed to stop microsandbox `{name}`: {err}");
-    } else if let Err(err) = sandbox.wait().await {
-        eprintln!("failed to wait for microsandbox `{name}` shutdown: {err}");
     }
 
     match execution {
