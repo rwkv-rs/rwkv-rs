@@ -7,6 +7,7 @@ use crate::{
     cores::{
         checkers::run_checker,
         datasets::{Benchmark, CoTMode},
+        sandbox_queue::SandboxQueue,
     },
     db::{
         CheckerInsert,
@@ -30,6 +31,7 @@ pub(crate) async fn execute_attempt(
     judger_model_name: Option<String>,
     judger_client: Option<Arc<Client<OpenAIConfig>>>,
     checker_runtime: Option<Arc<CheckerRuntime>>,
+    sandbox_queue: SandboxQueue,
     cot_mode: CoTMode,
     n_shot: u8,
     db: Option<Db>,
@@ -42,6 +44,7 @@ pub(crate) async fn execute_attempt(
             &target_model.client,
             judger_model_name.as_deref(),
             judger_client.as_deref(),
+            &sandbox_queue,
             cot_mode,
             n_shot,
             key.sample_index,

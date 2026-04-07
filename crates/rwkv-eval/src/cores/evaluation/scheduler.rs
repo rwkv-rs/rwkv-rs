@@ -9,7 +9,10 @@ use async_openai::{Client, config::OpenAIConfig};
 use tokio::{sync::Semaphore, task::JoinSet};
 
 use crate::{
-    cores::datasets::{Benchmark, BenchmarkInfo, CoTMode},
+    cores::{
+        datasets::{Benchmark, BenchmarkInfo, CoTMode},
+        sandbox_queue::SandboxQueue,
+    },
     db::{Db, ScoreInsert, TaskStatus, insert_score, update_task_status},
     services::admin::{DesiredState, EvalRuntimeControl, ObservedStatus},
 };
@@ -37,6 +40,7 @@ pub(crate) struct TaskRunState {
     pub judger_model_name: Option<String>,
     pub judger_client: Option<Arc<Client<OpenAIConfig>>>,
     pub checker_runtime: Option<Arc<CheckerRuntime>>,
+    pub sandbox_queue: SandboxQueue,
     pub target_model: Arc<ClientWithConfig>,
     pub model_key: String,
     pub avg_k_plan: AvgKExecutionPlan,
@@ -322,6 +326,7 @@ fn dispatch_one_attempt(
     let judger_model_name = task_run.judger_model_name.clone();
     let judger_client = task_run.judger_client.clone();
     let checker_runtime = task_run.checker_runtime.clone();
+    let sandbox_queue = task_run.sandbox_queue.clone();
     let cot_mode = task_run.cot_mode;
     let n_shot = task_run.n_shot;
     let db = db.clone();
@@ -335,6 +340,7 @@ fn dispatch_one_attempt(
             judger_model_name,
             judger_client,
             checker_runtime,
+            sandbox_queue,
             cot_mode,
             n_shot,
             db,
@@ -703,6 +709,7 @@ mod tests {
             judger_model_name: None,
             judger_client: None,
             checker_runtime: None,
+            sandbox_queue: tokio::sync::mpsc::channel(1).0,
             target_model: Arc::new(ClientWithConfig {
                 api_cfg: IntApiConfig {
                     model_arch_version: "rwkv7".to_string(),
@@ -777,6 +784,7 @@ mod tests {
             _: &Client<OpenAIConfig>,
             _: Option<&str>,
             _: Option<&Client<OpenAIConfig>>,
+            _: &crate::cores::sandbox_queue::SandboxQueue,
             _: CoTMode,
             _: u8,
             _: usize,

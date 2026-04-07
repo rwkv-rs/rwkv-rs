@@ -19,10 +19,14 @@ use std::{
 };
 
 use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfigBuilder};
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, mpsc};
 
 use crate::{
-    cores::datasets::{Benchmark, maths::set_llm_judger_semaphore},
+    cores::{
+        datasets::{Benchmark, maths::set_llm_judger_semaphore},
+        evaluators::coding::run_python_verdict_script_direct,
+        sandbox_queue::SandboxQueue,
+    },
     db::{
         BenchmarkInsert,
         Db,
@@ -55,6 +59,7 @@ use self::{
 };
 
 const EVALUATOR_NAME: &str = "rwkv-lm-eval";
+const SANDBOX_QUEUE_CAPACITY: usize = 64;
 
 pub async fn run_evaluation(
     eval_cfg_builder: FinalEvalConfigBuilder,
@@ -125,6 +130,14 @@ pub async fn run_evaluation(
         &llm_judger_cfg.base_url,
         &llm_judger_cfg.api_key,
     ));
+    let (sandbox_queue, mut sandbox_queue_rx) =
+        mpsc::channel::<crate::cores::sandbox_queue::SandboxQueueRequest>(SANDBOX_QUEUE_CAPACITY);
+    tokio::spawn(async move {
+        while let Some(request) = sandbox_queue_rx.recv().await {
+            let verdict = run_python_verdict_script_direct(&request.script).await;
+            let _ = request.result_tx.send(verdict);
+        }
+    });
 
     if let Some(control) = runtime_control.as_ref() {
         control
@@ -138,6 +151,7 @@ pub async fn run_evaluation(
     println!("skip dataset check: {}", options.skip_dataset_check);
     println!("judger concurrency: {}", options.judger_concurrency);
     println!("checker concurrency: {}", options.checker_concurrency);
+    println!("sandbox_queue: serial");
     println!(
         "db pool max connections: {}",
         options.db_pool_max_connections
@@ -212,6 +226,7 @@ pub async fn run_evaluation(
         &llm_judger_cfg.model,
         &llm_judger_client,
         checker_runtime,
+        &sandbox_queue,
     )
     .await;
 
@@ -320,6 +335,7 @@ async fn build_task_runs(
     llm_judger_model_name: &str,
     llm_judger_client: &Arc<async_openai::Client<async_openai::config::OpenAIConfig>>,
     checker_runtime: Option<Arc<CheckerRuntime>>,
+    sandbox_queue: &SandboxQueue,
 ) -> Vec<TaskRunState> {
     let mut task_runs = Vec::new();
 
@@ -480,6 +496,7 @@ async fn build_task_runs(
                             judger_model_name: judger_model_name.clone(),
                             judger_client: judger_client.clone(),
                             checker_runtime: checker_runtime.clone(),
+                            sandbox_queue: sandbox_queue.clone(),
                             target_model: Arc::clone(target_model),
                             model_key: model_key.clone(),
                             avg_k_plan,

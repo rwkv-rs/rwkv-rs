@@ -165,6 +165,7 @@ impl Benchmark for MbppPlus {
         model_client: &Client<OpenAIConfig>,
         _judger_model_name: Option<&str>,
         _judger_client: Option<&Client<OpenAIConfig>>,
+        sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
@@ -181,16 +182,19 @@ impl Benchmark for MbppPlus {
         )
         .await;
         let answer = extract_code(&generated.completion);
-        let verdict = run_python_verdict_script(&get_judge_script(
-            &item.task_id,
-            &answer,
-            &item.entry_point,
-            &item.canonical_solution,
-            &item.base_input,
-            &item.plus_input,
-            item.atol,
-            3,
-        ))
+        let verdict = run_python_verdict_script(
+            &get_judge_script(
+                &item.task_id,
+                &answer,
+                &item.entry_point,
+                &item.canonical_solution,
+                &item.base_input,
+                &item.plus_input,
+                item.atol,
+                3,
+            ),
+            sandbox_queue,
+        )
         .await
         .unwrap_or_else(|err| {
             panic!(

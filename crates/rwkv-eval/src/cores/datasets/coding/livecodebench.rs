@@ -233,6 +233,7 @@ impl Benchmark for LiveCodeBench {
         model_client: &Client<OpenAIConfig>,
         _judger_model_name: Option<&str>,
         _judger_client: Option<&Client<OpenAIConfig>>,
+        sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
@@ -256,13 +257,16 @@ impl Benchmark for LiveCodeBench {
         } else {
             format!("{}\n{}", item.starter_code.trim_end(), completion)
         };
-        let verdict = run_python_verdict_script(&get_judge_script(
-            &answer,
-            &item.public_test_cases,
-            &item.private_test_cases,
-            &item.metadata,
-            6,
-        ))
+        let verdict = run_python_verdict_script(
+            &get_judge_script(
+                &answer,
+                &item.public_test_cases,
+                &item.private_test_cases,
+                &item.metadata,
+                6,
+            ),
+            sandbox_queue,
+        )
         .await
         .unwrap_or_else(|err| {
             panic!(

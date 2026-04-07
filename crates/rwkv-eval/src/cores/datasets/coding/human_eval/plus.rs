@@ -267,6 +267,7 @@ impl Benchmark for HumanEvalPlus {
         model_client: &Client<OpenAIConfig>,
         _judger_model_name: Option<&str>,
         _judger_client: Option<&Client<OpenAIConfig>>,
+        sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
@@ -284,17 +285,20 @@ impl Benchmark for HumanEvalPlus {
         .await;
         let completion = extract_code(&generated.completion);
         let answer = format!("{}{}", item.prompt, completion);
-        let verdict = run_python_verdict_script(&get_judge_script(
-            &item.prompt,
-            &completion,
-            &item.entry_point,
-            &item.canonical_solution,
-            &item.contract,
-            &item.base_input,
-            &item.plus_input,
-            item.atol,
-            3,
-        ))
+        let verdict = run_python_verdict_script(
+            &get_judge_script(
+                &item.prompt,
+                &completion,
+                &item.entry_point,
+                &item.canonical_solution,
+                &item.contract,
+                &item.base_input,
+                &item.plus_input,
+                item.atol,
+                3,
+            ),
+            sandbox_queue,
+        )
         .await
         .unwrap_or_else(|err| {
             panic!(

@@ -129,6 +129,7 @@ impl Benchmark for HumanEval {
         model_client: &Client<OpenAIConfig>,
         _judger_model_name: Option<&str>,
         _judger_client: Option<&Client<OpenAIConfig>>,
+        sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
@@ -146,15 +147,17 @@ impl Benchmark for HumanEval {
         .await;
         let completion = extract_code(&generated.completion);
         let answer = format!("{}{}", item.prompt, completion);
-        let verdict =
-            run_python_verdict_script(&get_judge_script(&answer, &item.test, &item.entry_point, 3))
-                .await
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "human_eval sandbox execution failed: {err}; task={}",
-                        item.task_id
-                    )
-                });
+        let verdict = run_python_verdict_script(
+            &get_judge_script(&answer, &item.test, &item.entry_point, 3),
+            sandbox_queue,
+        )
+        .await
+        .unwrap_or_else(|err| {
+            panic!(
+                "human_eval sandbox execution failed: {err}; task={}",
+                item.task_id
+            )
+        });
 
         Record {
             context: generated.context,
