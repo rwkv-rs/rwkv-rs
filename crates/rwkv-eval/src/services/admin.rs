@@ -846,6 +846,7 @@ mod tests {
             admin_api_key: None,
             run_mode: Some("new".to_string()),
             skip_checker: Some(false),
+            skip_dataset_check: Some(false),
             judger_concurrency: Some(1),
             checker_concurrency: Some(1),
             db_pool_max_connections: Some(1),

@@ -3,6 +3,7 @@ experiment_desc = "desc desc"
 admin_api_key = ""
 run_mode = "new"  # new / resume / rerun
 skip_checker = false
+skip_dataset_check = false
 judger_concurrency = 8
 checker_concurrency = 8
 db_pool_max_connections = 32

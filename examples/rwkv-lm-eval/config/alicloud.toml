@@ -3,6 +3,7 @@ experiment_desc = "g1d-0.1b-0.4b-g1e-1.5b-13.3b"
 admin_api_key = "Rwkv2023,"
 run_mode = "new"  # new / resume / rerun
 skip_checker = true
+skip_dataset_check = true
 judger_concurrency = 8
 checker_concurrency = 8
 db_pool_max_connections = 32

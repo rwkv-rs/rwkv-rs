@@ -135,6 +135,7 @@ pub async fn run_evaluation(
     println!("experiment: {experiment_name}");
     println!("run mode: {}", options.run_mode.as_str());
     println!("skip checker: {}", options.skip_checker);
+    println!("skip dataset check: {}", options.skip_dataset_check);
     println!("judger concurrency: {}", options.judger_concurrency);
     println!("checker concurrency: {}", options.checker_concurrency);
     println!(

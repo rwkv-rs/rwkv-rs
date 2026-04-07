@@ -44,9 +44,12 @@ pub(crate) async fn prepare_benchmark(
     benchmark_info: &BenchmarkInfo,
     benchmark: &mut dyn Benchmark,
 ) {
+    let skip_dataset_check = EVAL_CFG.get().unwrap().skip_dataset_check;
     let load_invalid = benchmark.load();
     let check_invalid = if load_invalid {
         true
+    } else if skip_dataset_check {
+        false
     } else {
         benchmark.check().await
     };
@@ -57,6 +60,8 @@ pub(crate) async fn prepare_benchmark(
         let load_invalid = benchmark.load();
         let check_invalid = if load_invalid {
             true
+        } else if skip_dataset_check {
+            false
         } else {
             benchmark.check().await
         };

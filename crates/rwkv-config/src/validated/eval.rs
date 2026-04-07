@@ -14,6 +14,7 @@ pub struct FinalEvalConfig {
     pub admin_api_key: Option<String>,
     pub run_mode: String,
     pub skip_checker: bool,
+    pub skip_dataset_check: bool,
     pub judger_concurrency: usize,
     pub checker_concurrency: usize,
     pub db_pool_max_connections: u32,

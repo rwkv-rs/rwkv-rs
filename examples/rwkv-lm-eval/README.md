@@ -122,6 +122,7 @@ experiment_name = "your_experiment_name"
 experiment_desc = "desc desc"
 run_mode = "new"
 skip_checker = false
+skip_dataset_check = false
 judger_concurrency = 8
 checker_concurrency = 8
 db_pool_max_connections = 32
@@ -130,6 +131,7 @@ git_hash = "a8dc285c786fc425c9effee232453213b4b5ce8e"
 
 - `run_mode` must be one of `new`, `resume`, `rerun`.
 - `skip_checker = true` disables checker requests and skips retrying missing checker rows on `resume`.
+- `skip_dataset_check = true` skips benchmark dataset remote validation and only relies on local dataset loading.
 - `judger_concurrency` must be `> 0`.
 - `checker_concurrency` must be `> 0` when checker is enabled.
 - `db_pool_max_connections` must be `> 0`.

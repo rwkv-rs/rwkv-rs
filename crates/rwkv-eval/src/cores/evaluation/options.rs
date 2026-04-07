@@ -37,6 +37,7 @@ impl RunMode {
 pub(crate) struct EvaluatingOptions {
     pub run_mode: RunMode,
     pub skip_checker: bool,
+    pub skip_dataset_check: bool,
     pub judger_concurrency: usize,
     pub checker_concurrency: usize,
     pub db_pool_max_connections: u32,
@@ -47,6 +48,7 @@ impl Default for EvaluatingOptions {
         Self {
             run_mode: RunMode::New,
             skip_checker: false,
+            skip_dataset_check: false,
             judger_concurrency: DEFAULT_JUDGER_CONCURRENCY,
             checker_concurrency: DEFAULT_CHECKER_CONCURRENCY,
             db_pool_max_connections: DEFAULT_DB_POOL_MAX_CONNECTIONS,
@@ -75,6 +77,7 @@ pub(crate) fn build_evaluating_options(eval_cfg: &FinalEvalConfig) -> Evaluating
     EvaluatingOptions {
         run_mode,
         skip_checker: eval_cfg.skip_checker,
+        skip_dataset_check: eval_cfg.skip_dataset_check,
         judger_concurrency: eval_cfg.judger_concurrency,
         checker_concurrency: eval_cfg.checker_concurrency,
         db_pool_max_connections: eval_cfg.db_pool_max_connections,

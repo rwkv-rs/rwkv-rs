@@ -9,6 +9,7 @@ pub struct RawEvalConfig {
     pub admin_api_key: Option<String>,
     pub run_mode: Option<String>,
     pub skip_checker: Option<bool>,
+    pub skip_dataset_check: Option<bool>,
     pub judger_concurrency: Option<usize>,
     pub checker_concurrency: Option<usize>,
     pub db_pool_max_connections: Option<u32>,
@@ -32,6 +33,7 @@ impl RawEvalConfig {
             upload_to_space: false,
             run_mode: "new".to_string(),
             skip_checker: false,
+            skip_dataset_check: false,
             judger_concurrency: 8,
             checker_concurrency: 8,
             db_pool_max_connections: 32
@@ -85,6 +87,7 @@ mod tests {
             admin_api_key: Some("admin-secret".to_string()),
             run_mode: Some("new".to_string()),
             skip_checker: Some(false),
+            skip_dataset_check: Some(false),
             judger_concurrency: Some(8),
             checker_concurrency: Some(8),
             db_pool_max_connections: Some(32),
