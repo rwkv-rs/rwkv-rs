@@ -8997,6 +8997,7 @@ dependencies = [
  "csv",
  "flate2",
  "fs4",
+ "futures",
  "indicatif 0.18.4",
  "langdetect-rs",
  "linkme",

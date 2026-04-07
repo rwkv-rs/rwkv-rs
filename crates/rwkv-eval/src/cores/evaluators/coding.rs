@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::cores::{
     datasets::SamplingConfig,
-    inferers::{CompletionRequest, CompletionResponse},
+    inferers::{CompletionRequest, create_completion_streamed},
     sandbox_queue::{SandboxQueue, SandboxQueueRequest, SandboxVerdict},
 };
 
@@ -36,7 +36,9 @@ pub async fn get_completion(
         None,
         None,
     );
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
+    let resp = create_completion_streamed(model_client, &req)
+        .await
+        .unwrap();
     resp.choices[0].text.clone()
 }
 

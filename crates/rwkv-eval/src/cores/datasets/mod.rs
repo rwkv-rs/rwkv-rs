@@ -68,7 +68,7 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use once_cell::sync::Lazy;
 
-use crate::cores::inferers::{CompletionRequest, CompletionResponse};
+use crate::cores::inferers::{CompletionRequest, CompletionResponse, create_completion_streamed};
 
 pub struct BenchmarkInfo {
     pub name: BenchmarkName,
@@ -200,7 +200,9 @@ pub async fn get_completions_of_cot(
         None,
     );
 
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
+    let resp: CompletionResponse = create_completion_streamed(model_client, &req)
+        .await
+        .unwrap();
 
     resp.choices[0].text.clone()
 }

@@ -1,6 +1,6 @@
 use crate::datasets::{CoTMode, SamplingConfig};
 use crate::evaluators::{get_completions_of_cot, get_prompt_for_cot, get_prompt_for_final_answer};
-use crate::inferers::{CompletionRequest, CompletionResponse};
+use crate::inferers::{CompletionRequest, create_completion_streamed};
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 
@@ -81,7 +81,7 @@ async fn get_final_answer(
         Some(choice_token_texts.clone()),
     );
 
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
+    let resp = create_completion_streamed(model_client, &req).await.unwrap();
 
     let choice_logprobs = resp.choices[0]
         .logprobs

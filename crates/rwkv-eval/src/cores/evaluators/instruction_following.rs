@@ -5,7 +5,7 @@ use sonic_rs::{Object as Map, Value, prelude::*};
 
 use crate::cores::{
     datasets::SamplingConfig,
-    inferers::{CompletionRequest, CompletionResponse},
+    inferers::{CompletionRequest, create_completion_streamed},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,7 +170,9 @@ pub async fn generate_response(
         None,
     );
 
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
+    let resp = create_completion_streamed(model_client, &req)
+        .await
+        .unwrap();
     resp.choices[0].text.clone()
 }
 

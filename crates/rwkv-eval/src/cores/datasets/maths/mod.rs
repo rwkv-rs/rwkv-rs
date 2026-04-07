@@ -14,7 +14,7 @@ use crate::cores::{
         get_completions_of_cot,
         render_context,
     },
-    inferers::{CompletionRequest, CompletionResponse},
+    inferers::{CompletionRequest, CompletionResponse, create_completion_streamed},
 };
 
 pub mod aime24;
@@ -218,7 +218,9 @@ async fn get_final_answer(
         None,
     );
 
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
+    let resp: CompletionResponse = create_completion_streamed(model_client, &req)
+        .await
+        .unwrap();
     resp.choices[0].text.clone()
 }
 
