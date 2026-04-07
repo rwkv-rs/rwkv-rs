@@ -1,0 +1,53 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deployment target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - infer
+          - eval
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-szx-pro6000x4
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, x64, szx-pro6000x4]
+
+    env:
+      http_proxy: http://127.0.0.1:7890
+      https_proxy: http://127.0.0.1:7890
+      no_proxy: 127.0.0.1,localhost
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Show proxy env
+        run: |
+          env | grep -E '^(http_proxy|https_proxy|no_proxy)=' || true
+
+      - name: Deploy infer on szx-pro6000x4
+        if: github.event_name == 'push' || github.event.inputs.target == 'all' || github.event.inputs.target == 'infer'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          /srv/deploy/deploy_infer.sh "$GITHUB_WORKSPACE"
+
+      - name: Deploy eval on szx-pro6000x4
+        if: github.event_name == 'push' || github.event.inputs.target == 'all' || github.event.inputs.target == 'eval'
+        run: |
+          /srv/deploy/deploy_eval.sh "$GITHUB_WORKSPACE"
