@@ -8,6 +8,7 @@ use tokio::{sync::Semaphore, time::sleep};
 const PARQUET_ENDPOINT: &str = "https://datasets-server.huggingface.co/parquet";
 const ROWS_ENDPOINT: &str = "https://datasets-server.huggingface.co/rows";
 const VIEWER_RETRY_ATTEMPTS: usize = 3;
+const VIEWER_REQUEST_DELAY_MS: u64 = 200;
 static VIEWER_REQUEST_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(1));
 
 #[derive(Debug, Clone, Deserialize)]
@@ -79,6 +80,7 @@ async fn fetch_viewer_body(endpoint: &str, query: &[(&str, &str)], operation_nam
     let mut last_error = String::new();
 
     for attempt in 1..=VIEWER_RETRY_ATTEMPTS {
+        sleep(Duration::from_millis(VIEWER_REQUEST_DELAY_MS)).await;
         match client.get(endpoint).query(query).send().await {
             Ok(response) => {
                 let status = response.status();
