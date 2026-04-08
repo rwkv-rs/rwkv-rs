@@ -374,13 +374,33 @@ pub(crate) mod test_utils {
     }
 
     pub(crate) async fn assert_load_dataset(info: &BenchmarkInfo) {
-        assert_eq!(
-            info.avg_ks.len(),
-            1,
-            "benchmark {} should expose exactly one avg_k in tests",
+        assert!(
+            !info.avg_ks.is_empty(),
+            "benchmark {} should expose at least one avg_k",
             info.name.0
         );
-        let avg_k = info.avg_ks[0];
+        for &avg_k in info.avg_ks {
+            assert!(
+                avg_k.is_finite() && avg_k > 0.0 && avg_k <= 64.0,
+                "benchmark {} has invalid avg_k={avg_k}; avg_k must be finite, > 0, and <= 64",
+                info.name.0
+            );
+            if avg_k >= 1.0 {
+                let rounded = avg_k.round();
+                assert!(
+                    (avg_k - rounded).abs() <= f32::EPSILON,
+                    "benchmark {} has invalid avg_k={avg_k}; avg_k >= 1 must be an integer power of two <= 64",
+                    info.name.0
+                );
+                let integer = rounded as u32;
+                assert!(
+                    integer.is_power_of_two(),
+                    "benchmark {} has invalid avg_k={avg_k}; avg_k >= 1 must be an integer power of two <= 64",
+                    info.name.0
+                );
+            }
+        }
+        let avg_k = info.avg_ks.iter().copied().max_by(f32::total_cmp).unwrap();
 
         let dataset_root = rwkv_lm_eval_datasets_path();
         let _lock = acquire_shared_benchmark_lock(info, &dataset_root);
@@ -397,6 +417,17 @@ pub(crate) mod test_utils {
         assert!(len > 0, "benchmark {} loaded zero samples", info.name.0);
 
         let scaled_len = len as f32 * avg_k;
+        if avg_k < 64.0 {
+            assert!(
+                scaled_len >= 4000.0,
+                "benchmark {} expected len * max(avg_ks) >= 4000, got len={} max_avg_k={} scaled_len={} dataset_root={}",
+                info.name.0,
+                len,
+                avg_k,
+                scaled_len,
+                dataset_root.display()
+            );
+        }
         println!(
             "benchmark_load_summary name={} len={} avg_k={} scaled_len={} dataset_root={}",
             info.name.0,

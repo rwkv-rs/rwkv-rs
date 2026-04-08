@@ -45,7 +45,7 @@ static IFEVAL_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[4.0],
+    avg_ks: &[8.0],
     pass_ks: &[1],
     with_llm_judger: false,
     create: |dataset_root| Box::new(Ifeval::new(dataset_root)),

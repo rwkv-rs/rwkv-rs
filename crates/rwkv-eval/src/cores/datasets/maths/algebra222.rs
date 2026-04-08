@@ -36,7 +36,7 @@ static ALGEBRA222_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[4.0],
+    avg_ks: &[32.0],
     pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Algebra222::new(dataset_root)),

@@ -33,7 +33,7 @@ static SVAMP_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[1.0],
+    avg_ks: &[4.0],
     pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Svamp::new(dataset_root)),

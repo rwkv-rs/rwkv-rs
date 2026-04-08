@@ -37,7 +37,7 @@ static BRUMO25_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.997,
     },
     n_shots: &[0],
-    avg_ks: &[8.0],
+    avg_ks: &[64.0],
     pass_ks: &[8],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Brumo25::new(dataset_root)),
