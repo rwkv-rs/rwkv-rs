@@ -11,7 +11,6 @@ use sonic_rs::{Value, prelude::*};
 
 use super::{
     super::{
-        FunctionCall,
         FunctionCallingDecision,
         FunctionCallingStep,
         build_turn_completion_prompt,
@@ -20,10 +19,14 @@ use super::{
         parse_tool_call_or_final_answer,
         render_fc_output,
     },
+    EvaluationContext,
+    EvaluationType,
     TauDomain,
     TauTask,
+    build_full_trajectory,
     create_domain_env,
-    evaluate_task,
+    evaluate_simulation,
+    initialize_env,
     render_system_prompt,
     render_user_prompt,
 };
@@ -59,7 +62,7 @@ static TAU_BENCH_INFO: BenchmarkInfo = BenchmarkInfo {
     n_shots: &[0],
     avg_ks: &[16.0],
     pass_ks: &[1],
-    with_llm_judger: false,
+    with_llm_judger: true,
     create: |dataset_root| Box::new(TauBench::new(dataset_root)),
 };
 
@@ -126,6 +129,28 @@ impl TauBench {
                 task,
             })
             .collect())
+    }
+
+    fn evaluation_type_for_item(
+        &self,
+        item: &TauBenchItem,
+        judger_model_name: Option<&str>,
+        judger_client: Option<&Client<OpenAIConfig>>,
+    ) -> Result<EvaluationType, String> {
+        let reward_basis = item
+            .task
+            .evaluation_criteria
+            .as_ref()
+            .map(|criteria| criteria.reward_basis.as_slice())
+            .unwrap_or(&[]);
+        let includes_nl_assertion = reward_basis.contains(&super::RewardType::NlAssertion);
+        if !includes_nl_assertion {
+            return Ok(EvaluationType::All);
+        }
+        if judger_model_name.is_none() || judger_client.is_none() {
+            return Err("nl assertion judge unavailable".to_string());
+        }
+        Ok(EvaluationType::AllWithNlAssertions)
     }
 }
 
@@ -258,8 +283,8 @@ impl Benchmark for TauBench {
         &self,
         model_name: &str,
         model_client: &Client<OpenAIConfig>,
-        _judger_model_name: Option<&str>,
-        _judger_client: Option<&Client<OpenAIConfig>>,
+        judger_model_name: Option<&str>,
+        judger_client: Option<&Client<OpenAIConfig>>,
         _sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
@@ -290,51 +315,18 @@ impl Benchmark for TauBench {
                 };
             }
         };
-        if let Some(initial_state) = &item.task.initial_state {
-            if let Some(data) = &initial_state.initialization_data {
-                if let Some(agent_data) = &data.agent_data {
-                    if env.update_agent_data(agent_data).is_err() {
-                        return Record {
-                            context: self.get_expected_context(index, cot_mode, n_shot),
-                            answer: String::new(),
-                            ref_answer,
-                            is_passed: false,
-                            fail_reason: "failed to initialize agent data".to_string(),
-                        };
-                    }
-                }
-                if let Some(user_data) = &data.user_data {
-                    if env.update_user_data(user_data).is_err() {
-                        return Record {
-                            context: self.get_expected_context(index, cot_mode, n_shot),
-                            answer: String::new(),
-                            ref_answer,
-                            is_passed: false,
-                            fail_reason: "failed to initialize user data".to_string(),
-                        };
-                    }
-                }
-            }
-            for action in initial_state
-                .initialization_actions
-                .as_deref()
-                .unwrap_or(&[])
-            {
-                if env.run_env_function(action).is_err() {
-                    return Record {
-                        context: self.get_expected_context(index, cot_mode, n_shot),
-                        answer: String::new(),
-                        ref_answer,
-                        is_passed: false,
-                        fail_reason: "failed to run initialization action".to_string(),
-                    };
-                }
-            }
+        if let Err(err) = initialize_env(env.as_mut(), &item.task) {
+            return Record {
+                context: self.get_expected_context(index, cot_mode, n_shot),
+                answer: String::new(),
+                ref_answer,
+                is_passed: false,
+                fail_reason: format!("failed to initialize environment: {err}"),
+            };
         }
 
         let mut steps = Vec::<FunctionCallingStep>::new();
-        let mut tool_calls = Vec::<FunctionCall>::new();
-        let mut assistant_messages = Vec::<String>::new();
+        let mut final_answer = None::<String>;
         let mut last_context = self.get_expected_context(index, cot_mode, n_shot);
         let mut last_response = String::new();
 
@@ -366,7 +358,6 @@ impl Benchmark for TauBench {
                 Ok(FunctionCallingDecision::ToolCall(tool_call)) => {
                     let outcome = env.execute_tool_call(&tool_call);
                     let fc_output = render_fc_output(&tool_call, outcome);
-                    tool_calls.push(tool_call.clone());
                     steps.push(FunctionCallingStep {
                         cot,
                         tool_call,
@@ -374,7 +365,7 @@ impl Benchmark for TauBench {
                     });
                 }
                 Ok(FunctionCallingDecision::FinalAnswer(answer)) => {
-                    assistant_messages.push(answer);
+                    final_answer = Some(answer);
                     break;
                 }
                 Err(err) => {
@@ -389,7 +380,7 @@ impl Benchmark for TauBench {
             }
         }
 
-        if assistant_messages.is_empty() {
+        if final_answer.is_none() {
             return Record {
                 context: last_context,
                 answer: last_response,
@@ -399,27 +390,52 @@ impl Benchmark for TauBench {
             };
         }
 
-        match evaluate_task(
-            item.domain,
-            &self.dataset_root,
+        let evaluation_type =
+            match self.evaluation_type_for_item(item, judger_model_name, judger_client) {
+                Ok(evaluation_type) => evaluation_type,
+                Err(err) => {
+                    return Record {
+                        context: last_context,
+                        answer: final_answer.unwrap(),
+                        ref_answer,
+                        is_passed: false,
+                        fail_reason: format!("task evaluation failed: {err}"),
+                    };
+                }
+            };
+        let final_answer = final_answer.unwrap();
+        let full_trajectory = build_full_trajectory(
             &item.task,
-            &tool_calls,
-            &assistant_messages,
-        ) {
-            Ok(is_passed) => Record {
+            &item.system_prompt,
+            &item.user_prompt,
+            &steps,
+            Some(&final_answer),
+        );
+        match evaluate_simulation(EvaluationContext {
+            domain: item.domain,
+            dataset_root: &self.dataset_root,
+            task: &item.task,
+            full_trajectory: &full_trajectory,
+            evaluation_type,
+            judger_model_name,
+            judger_client,
+        })
+        .await
+        {
+            Ok(reward_info) => Record {
                 context: last_context,
-                answer: assistant_messages.last().cloned().unwrap_or_default(),
+                answer: final_answer,
                 ref_answer,
-                is_passed,
-                fail_reason: if is_passed {
+                is_passed: reward_info.reward > 0.0,
+                fail_reason: if reward_info.reward > 0.0 {
                     String::new()
                 } else {
-                    "task evaluation returned false".to_string()
+                    reward_info.failure_reason()
                 },
             },
             Err(err) => Record {
                 context: last_context,
-                answer: assistant_messages.last().cloned().unwrap_or_default(),
+                answer: final_answer,
                 ref_answer,
                 is_passed: false,
                 fail_reason: format!("task evaluation failed: {err}"),
