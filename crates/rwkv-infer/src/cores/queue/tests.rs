@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use super::{
+    BatchStatus,
     END_TOKEN_ID,
     Queue,
     QueueEvent,
@@ -135,7 +136,7 @@ fn prefill_without_output_does_not_wait_for_guided_step() {
         )
         .expect("push guided item");
 
-    assert_eq!(queue.collect_step_item_ids(), vec![1]);
+    assert_next_batch(&queue, BatchStatus::PrefillWithoutOutput, &[1]);
 }
 
 #[test]
@@ -163,7 +164,8 @@ fn prefill_without_output_step_does_not_require_guided_prepared_state() {
         )
         .expect("push guided item");
 
-    let item_ids = queue.collect_step_item_ids();
+    let (batch_status, item_ids) = queue.select_next_batch().expect("scheduled batch");
+    assert_eq!(batch_status, BatchStatus::PrefillWithoutOutput);
     assert_eq!(item_ids, vec![1]);
     assert!(queue.step(&item_ids).is_none());
 }
@@ -193,11 +195,10 @@ fn prefill_waits_for_guided_step() {
         )
         .expect("push guided item");
 
-    assert!(queue.collect_step_item_ids().is_empty());
+    assert!(queue.select_next_batch().is_none());
 
     for _ in 0..100 {
         queue.drain_guided_decode_results();
-        queue.update_batch_status();
 
         if queue.items.get(&1).is_some_and(|item| {
             matches!(item.guided_decoding_status, GuidedDecodingStatus::Ready(_))
@@ -211,7 +212,7 @@ fn prefill_waits_for_guided_step() {
     assert!(queue.items.get(&1).is_some_and(|item| {
         matches!(item.guided_decoding_status, GuidedDecodingStatus::Ready(_))
     }));
-    assert_eq!(queue.collect_step_item_ids(), vec![1]);
+    assert_next_batch(&queue, BatchStatus::Prefill, &[1]);
 }
 
 #[test]
@@ -252,8 +253,8 @@ fn step_passes_guided_token_masks_to_sample() {
     let item = queue.items.get_mut(&1).expect("queue item");
     item.guided_decoding_status = GuidedDecodingStatus::Ready(prepared_state);
 
-    queue.update_batch_status();
-    let item_ids = queue.collect_step_item_ids();
+    let (batch_status, item_ids) = queue.select_next_batch().expect("scheduled batch");
+    assert_eq!(batch_status, BatchStatus::Prefill);
     assert_eq!(item_ids, vec![1]);
 
     let new_tokens = queue.step(&item_ids).expect("sample output");
@@ -298,8 +299,8 @@ fn step_passes_all_allowed_guided_step_as_none_to_sample() {
     let item = queue.items.get_mut(&1).expect("queue item");
     item.guided_decoding_status = GuidedDecodingStatus::Ready(prepared_state);
 
-    queue.update_batch_status();
-    let item_ids = queue.collect_step_item_ids();
+    let (batch_status, item_ids) = queue.select_next_batch().expect("scheduled batch");
+    assert_eq!(batch_status, BatchStatus::Prefill);
     assert_eq!(item_ids, vec![1]);
 
     let new_tokens = queue.step(&item_ids).expect("sample output");
@@ -350,8 +351,8 @@ fn slot_reuse_resets_persistent_guided_mask_state() {
         first_guided_token_mask.clone().into_boxed_slice(),
     ));
 
-    queue.update_batch_status();
-    let first_item_ids = queue.collect_step_item_ids();
+    let (first_batch_status, first_item_ids) = queue.select_next_batch().expect("scheduled batch");
+    assert_eq!(first_batch_status, BatchStatus::Prefill);
     assert_eq!(first_item_ids, vec![1]);
     let first_new_tokens = queue.step(&first_item_ids).expect("sample output");
     assert_eq!(first_new_tokens.len(), 1);
@@ -374,8 +375,9 @@ fn slot_reuse_resets_persistent_guided_mask_state() {
         )
         .expect("push second item");
 
-    queue.update_batch_status();
-    let second_item_ids = queue.collect_step_item_ids();
+    let (second_batch_status, second_item_ids) =
+        queue.select_next_batch().expect("scheduled batch");
+    assert_eq!(second_batch_status, BatchStatus::Prefill);
     assert_eq!(second_item_ids, vec![2]);
     let second_new_tokens = queue.step(&second_item_ids).expect("sample output");
     assert_eq!(second_new_tokens.len(), 1);
@@ -385,6 +387,263 @@ fn slot_reuse_resets_persistent_guided_mask_state() {
         sample_guided_token_masks,
         vec![vec![Some(first_guided_token_mask)], vec![None]]
     );
+}
+
+#[test]
+fn prefill_is_preferred_over_decode_while_decode_batch_is_not_full() {
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward::default()),
+        test_tokenizer(),
+        2,
+        1,
+        new_perf_history(),
+    );
+    let (first_tx, _first_rx) = mpsc::channel(8);
+    let (second_tx, _second_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(vec![0], Default::default(), None, vec![], first_tx, None),
+        )
+        .expect("push decode item");
+    queue
+        .push(
+            2,
+            QueueItem::new(vec![0], Default::default(), None, vec![], second_tx, None),
+        )
+        .expect("push waiting item");
+
+    let decode_item = queue.items.get_mut(&1).expect("decode item");
+    decode_item.batch_id = Some(0);
+    decode_item.status = QueueItemStatus::Decode(1);
+
+    assert_next_batch(&queue, BatchStatus::Prefill, &[2]);
+}
+
+#[test]
+fn resident_prefill_is_preferred_over_decode_until_decode_batch_is_full() {
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward::default()),
+        test_tokenizer(),
+        2,
+        2,
+        new_perf_history(),
+    );
+    let (decode_tx, _decode_rx) = mpsc::channel(8);
+    let (prefill_tx, _prefill_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(
+                vec![0, 1],
+                Default::default(),
+                None,
+                vec![],
+                decode_tx,
+                None,
+            ),
+        )
+        .expect("push decode item");
+    queue
+        .push(
+            2,
+            QueueItem::new(
+                vec![0, 1, 0, 1],
+                Default::default(),
+                None,
+                vec![],
+                prefill_tx,
+                None,
+            ),
+        )
+        .expect("push prefill item");
+
+    let decode_item = queue.items.get_mut(&1).expect("decode item");
+    decode_item.batch_id = Some(0);
+    decode_item.status = QueueItemStatus::Decode(1);
+
+    let prefill_item = queue.items.get_mut(&2).expect("prefill item");
+    prefill_item.batch_id = Some(1);
+    prefill_item.status = QueueItemStatus::Prefill(1);
+
+    assert_next_batch(&queue, BatchStatus::Prefill, &[2]);
+}
+
+#[test]
+fn decode_is_preferred_when_decode_batch_is_full() {
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward::default()),
+        test_tokenizer(),
+        1,
+        1,
+        new_perf_history(),
+    );
+    let (decode_tx, _decode_rx) = mpsc::channel(8);
+    let (waiting_tx, _waiting_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(vec![0], Default::default(), None, vec![], decode_tx, None),
+        )
+        .expect("push decode item");
+    queue
+        .push(
+            2,
+            QueueItem::new(vec![0], Default::default(), None, vec![], waiting_tx, None),
+        )
+        .expect("push waiting item");
+
+    let decode_item = queue.items.get_mut(&1).expect("decode item");
+    decode_item.batch_id = Some(0);
+    decode_item.status = QueueItemStatus::Decode(1);
+
+    assert_next_batch(&queue, BatchStatus::Decode, &[1]);
+}
+
+#[test]
+fn public_step_rejects_mixed_batch_status_item_ids_without_panicking() {
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward::default()),
+        test_tokenizer(),
+        2,
+        1,
+        new_perf_history(),
+    );
+    let (decode_tx, _decode_rx) = mpsc::channel(8);
+    let (waiting_tx, _waiting_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(vec![0], Default::default(), None, vec![], decode_tx, None),
+        )
+        .expect("push decode item");
+    queue
+        .push(
+            2,
+            QueueItem::new(vec![0], Default::default(), None, vec![], waiting_tx, None),
+        )
+        .expect("push waiting item");
+
+    let decode_item = queue.items.get_mut(&1).expect("decode item");
+    decode_item.batch_id = Some(0);
+    decode_item.status = QueueItemStatus::Decode(1);
+
+    let step_result = panic::catch_unwind(AssertUnwindSafe(|| queue.step(&[1, 2])));
+    assert!(step_result.is_ok());
+    assert!(step_result.unwrap().is_none());
+}
+
+#[test]
+fn prefill_selection_respects_free_slot_count() {
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward::default()),
+        test_tokenizer(),
+        2,
+        1,
+        new_perf_history(),
+    );
+    let (decode_tx, _decode_rx) = mpsc::channel(8);
+    let (waiting_a_tx, _waiting_a_rx) = mpsc::channel(8);
+    let (waiting_b_tx, _waiting_b_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(vec![0], Default::default(), None, vec![], decode_tx, None),
+        )
+        .expect("push decode item");
+    queue
+        .push(
+            2,
+            QueueItem::new(
+                vec![0],
+                Default::default(),
+                None,
+                vec![],
+                waiting_a_tx,
+                None,
+            ),
+        )
+        .expect("push waiting item a");
+    queue
+        .push(
+            3,
+            QueueItem::new(
+                vec![0],
+                Default::default(),
+                None,
+                vec![],
+                waiting_b_tx,
+                None,
+            ),
+        )
+        .expect("push waiting item b");
+
+    let decode_item = queue.items.get_mut(&1).expect("decode item");
+    decode_item.batch_id = Some(0);
+    decode_item.status = QueueItemStatus::Decode(1);
+
+    let (batch_status, item_ids) = queue.select_next_batch().expect("scheduled batch");
+    assert_eq!(batch_status, BatchStatus::Prefill);
+    assert_eq!(item_ids, vec![2]);
+
+    let _ = queue.step(&item_ids);
+
+    assert_eq!(queue.items.get(&2).expect("item 2").batch_id, Some(1));
+    assert_eq!(queue.items.get(&3).expect("item 3").batch_id, None);
+}
+
+#[test]
+fn request_keeps_same_batch_id_from_prefill_into_decode() {
+    let mut queue = Queue::new(
+        Box::new(DummyModelForward {
+            fixed_token_id: 1,
+            ..Default::default()
+        }),
+        test_tokenizer(),
+        2,
+        2,
+        new_perf_history(),
+    );
+    let (completions_tx, _completions_rx) = mpsc::channel(8);
+
+    queue
+        .push(
+            1,
+            QueueItem::new(
+                vec![0, 1, 0, 1],
+                Default::default(),
+                None,
+                vec![],
+                completions_tx,
+                None,
+            ),
+        )
+        .expect("push item");
+
+    let (prefill_no_output_status, first_item_ids) =
+        queue.select_next_batch().expect("first scheduled batch");
+    assert_eq!(prefill_no_output_status, BatchStatus::PrefillWithoutOutput);
+    assert_eq!(first_item_ids, vec![1]);
+    assert!(queue.step(&first_item_ids).is_none());
+    queue.advance_prefill_items(&first_item_ids);
+
+    let first_batch_id = queue.items.get(&1).expect("item").batch_id;
+    assert_eq!(first_batch_id, Some(0));
+
+    let (prefill_status, second_item_ids) =
+        queue.select_next_batch().expect("second scheduled batch");
+    assert_eq!(prefill_status, BatchStatus::Prefill);
+    let new_tokens = queue.step(&second_item_ids).expect("prefill output");
+    queue.apply_output_tokens(prefill_status, &second_item_ids, new_tokens);
+
+    let item = queue.items.get(&1).expect("item");
+    assert_eq!(item.batch_id, first_batch_id);
+    assert_eq!(item.status, QueueItemStatus::Decode(1));
 }
 
 #[test]
@@ -503,6 +762,7 @@ fn guided_mask_violation_panics_before_detokenize() {
 
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
         queue.apply_output_tokens(
+            BatchStatus::Decode,
             &[1],
             vec![TokenId {
                 batch_index: 0,
@@ -558,6 +818,7 @@ fn guided_mask_state_mismatch_panics_before_detokenize() {
 
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
         queue.apply_output_tokens(
+            BatchStatus::Decode,
             &[1],
             vec![TokenId {
                 batch_index: 0,
@@ -799,6 +1060,12 @@ fn test_tokenizer_with_vocab(vocab: &str) -> Arc<Tokenizer> {
     fs::write(&vocab_path, vocab).expect("write test vocab");
 
     Arc::new(Tokenizer::new(vocab_path.to_str().expect("vocab path")).expect("tokenizer"))
+}
+
+fn assert_next_batch(queue: &Queue, expected_status: BatchStatus, expected_item_ids: &[usize]) {
+    let (batch_status, item_ids) = queue.select_next_batch().expect("scheduled batch");
+    assert_eq!(batch_status, expected_status);
+    assert_eq!(item_ids, expected_item_ids);
 }
 
 fn wait_for_detokenize(queue: &mut Queue, item_id: usize) {
