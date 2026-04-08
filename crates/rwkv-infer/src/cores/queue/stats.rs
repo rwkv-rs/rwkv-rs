@@ -28,8 +28,8 @@ pub fn record_perf_sample(
     let now = current_unix_millis();
     let duration_secs = duration.as_secs_f64().max(f64::EPSILON);
     let instant_tokens_per_sec = match stage {
-        QueuePerfStage::Prefill => paragraph_len as f64 / duration_secs,
-        QueuePerfStage::Decode => 1.0 / duration_secs,
+        QueuePerfStage::Prefill => batch_used as f64 * paragraph_len as f64 / duration_secs,
+        QueuePerfStage::Decode => batch_used as f64 / duration_secs,
     };
 
     let mut guard = history
