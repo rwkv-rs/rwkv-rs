@@ -92,7 +92,12 @@ pub(crate) async fn run_python_verdict_script_direct(
     let script_path = workdir.path().join(SANDBOX_SCRIPT_NAME);
     tokio::fs::write(&script_path, script)
         .await
-        .map_err(|err| format!("write temp judge script `{}` failed: {err}", script_path.display()))?;
+        .map_err(|err| {
+            format!(
+                "write temp judge script `{}` failed: {err}",
+                script_path.display()
+            )
+        })?;
     let sandbox = Sandbox::builder(name.clone())
         .image("python:3.12")
         .memory(DEFAULT_MEMORY_MB)

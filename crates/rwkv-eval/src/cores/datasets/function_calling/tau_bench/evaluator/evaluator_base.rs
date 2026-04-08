@@ -1,5 +1,4 @@
 use crate::cores::datasets::function_calling::FunctionCall;
-
 use super::super::data_model::message::Message;
 
 pub struct EvaluatorBase;

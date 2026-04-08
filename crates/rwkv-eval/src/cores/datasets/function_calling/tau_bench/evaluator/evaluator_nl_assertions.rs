@@ -90,7 +90,10 @@ impl NLAssertionsEvaluator {
             return Ok(RewardInfo {
                 reward: 1.0,
                 nl_assertions: Some(Vec::new()),
-                reward_breakdown: Some(std::collections::BTreeMap::from([(RewardType::NlAssertion, 1.0)])),
+                reward_breakdown: Some(std::collections::BTreeMap::from([(
+                    RewardType::NlAssertion,
+                    1.0,
+                )])),
                 info: Some(json!({ "note": "No nl_assertions to evaluate" })),
                 ..RewardInfo::new(1.0)
             });
@@ -112,7 +115,10 @@ impl NLAssertionsEvaluator {
         Ok(RewardInfo {
             reward,
             nl_assertions: Some(nl_assertions_checks),
-            reward_breakdown: Some(std::collections::BTreeMap::from([(RewardType::NlAssertion, reward)])),
+            reward_breakdown: Some(std::collections::BTreeMap::from([(
+                RewardType::NlAssertion,
+                reward,
+            )])),
             ..RewardInfo::new(reward)
         })
     }
@@ -217,10 +223,8 @@ FORMAT
                 nl_assertions.len()
             ));
         }
-        for (index, (expected_assertion, actual_result)) in nl_assertions
-            .iter()
-            .zip(result.results.iter())
-            .enumerate()
+        for (index, (expected_assertion, actual_result)) in
+            nl_assertions.iter().zip(result.results.iter()).enumerate()
         {
             if actual_result.expected_outcome != *expected_assertion {
                 return Err(format!(

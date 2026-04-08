@@ -4,7 +4,16 @@ pub mod domains;
 pub mod evaluator;
 
 pub use data_model::{
-    message::{AssistantMessage, Message, ParticipantMessageBase, SystemMessage, ToolCall, ToolMessage, UserMessage, build_full_trajectory},
+    message::{
+        AssistantMessage,
+        Message,
+        ParticipantMessageBase,
+        SystemMessage,
+        ToolCall,
+        ToolMessage,
+        UserMessage,
+        build_full_trajectory,
+    },
     simulation::{
         ActionCheck,
         CommunicateCheck,
@@ -19,8 +28,8 @@ pub use data_model::{
         EnvFunctionCall,
         EvaluationCriteria,
         ExpectedAction,
-        InitializationData,
         InitialState,
+        InitializationData,
         RawMessage,
         RewardType,
         StructuredUserInstructions,
@@ -40,7 +49,4 @@ pub use domains::{
     initialize_env,
     render_system_prompt,
 };
-pub use evaluator::{
-    EvaluationContext,
-    evaluate_simulation,
-};
+pub use evaluator::{EvaluationContext, evaluate_simulation};

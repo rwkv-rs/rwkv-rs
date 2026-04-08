@@ -55,18 +55,24 @@ impl EnvironmentEvaluator {
             .and_then(|criteria| criteria.actions.as_deref())
             .unwrap_or(&[]);
         for action in golden_actions {
-            let _ = gold_environment.execute_tool_call(&crate::cores::datasets::function_calling::FunctionCall {
-                requestor: action.requestor,
-                name: action.name.clone(),
-                arguments: action.arguments.clone(),
-            });
+            let _ = gold_environment.execute_tool_call(
+                &crate::cores::datasets::function_calling::FunctionCall {
+                    requestor: action.requestor,
+                    name: action.name.clone(),
+                    arguments: action.arguments.clone(),
+                },
+            );
         }
 
         let db_match = canonical_db(gold_environment.agent_db())
             == canonical_db(predicted_environment.agent_db())
-            && canonical_db(gold_environment.user_db()) == canonical_db(predicted_environment.user_db());
+            && canonical_db(gold_environment.user_db())
+                == canonical_db(predicted_environment.user_db());
         let db_reward = if db_match { 1.0 } else { 0.0 };
-        let db_check = DBCheck { db_match, db_reward };
+        let db_check = DBCheck {
+            db_match,
+            db_reward,
+        };
 
         let env_assertions = task
             .evaluation_criteria
@@ -76,7 +82,8 @@ impl EnvironmentEvaluator {
         let mut env_assertion_reward = 1.0;
         let mut env_assertion_checks = Vec::with_capacity(env_assertions.len());
         for env_assertion in env_assertions {
-            let met = predicted_environment.run_env_assertion(env_assertion)? == env_assertion.assert_value;
+            let met = predicted_environment.run_env_assertion(env_assertion)?
+                == env_assertion.assert_value;
             let reward = if met { 1.0 } else { 0.0 };
             env_assertion_reward *= reward;
             env_assertion_checks.push(EnvAssertionCheck {

@@ -118,14 +118,15 @@ fn merge_completion_chunk(
     chunk: CompletionResponse,
 ) {
     for chunk_choice in chunk.choices {
-        let choice = response
-            .entry(chunk_choice.index)
-            .or_insert_with(|| CompletionResponseChoice {
-                text: String::new(),
-                index: chunk_choice.index,
-                finish_reason: None,
-                logprobs: None,
-            });
+        let choice =
+            response
+                .entry(chunk_choice.index)
+                .or_insert_with(|| CompletionResponseChoice {
+                    text: String::new(),
+                    index: chunk_choice.index,
+                    finish_reason: None,
+                    logprobs: None,
+                });
         choice.text.push_str(&chunk_choice.text);
         choice.finish_reason = chunk_choice.finish_reason.or(choice.finish_reason.take());
         merge_logprobs(&mut choice.logprobs, chunk_choice.logprobs);

@@ -8,7 +8,14 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use sonic_rs::{Array, JsonContainerTrait, JsonValueMutTrait, JsonValueTrait, Object as Map, Value};
+use sonic_rs::{
+    Array,
+    JsonContainerTrait,
+    JsonValueMutTrait,
+    JsonValueTrait,
+    Object as Map,
+    Value,
+};
 
 pub use super::data_model::tasks::{EnvAssertion, EnvFunctionCall, TauTask};
 pub use crate::cores::datasets::function_calling::{FunctionCall, ToolRequestor};

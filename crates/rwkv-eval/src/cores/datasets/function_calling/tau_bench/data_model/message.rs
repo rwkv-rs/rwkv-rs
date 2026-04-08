@@ -1,5 +1,4 @@
 use crate::cores::datasets::function_calling::{FunctionCall, FunctionCallingStep, ToolRequestor};
-
 use super::tasks::{RawMessage, TauTask};
 
 #[derive(Debug, Clone)]
@@ -91,7 +90,9 @@ impl Message {
 
     pub fn to_nl_assertion_line(&self) -> String {
         match self {
-            Self::System(message) => format!("system: {}", message.content.as_deref().unwrap_or("")),
+            Self::System(message) => {
+                format!("system: {}", message.content.as_deref().unwrap_or(""))
+            }
             Self::User(message) => render_participant_line("user", message),
             Self::Assistant(message) => render_participant_line("assistant", message),
             Self::Tool(message) => format!(
@@ -146,12 +147,11 @@ pub fn build_full_trajectory(
     ];
 
     full_trajectory.extend(
-        task
-        .initial_state
-        .as_ref()
-        .and_then(|initial_state| initial_state.message_history.as_deref())
-        .map(raw_messages_to_messages)
-        .unwrap_or_default(),
+        task.initial_state
+            .as_ref()
+            .and_then(|initial_state| initial_state.message_history.as_deref())
+            .map(raw_messages_to_messages)
+            .unwrap_or_default(),
     );
 
     for (index, step) in steps.iter().enumerate() {
@@ -159,7 +159,10 @@ pub fn build_full_trajectory(
         full_trajectory.push(Message::Assistant(AssistantMessage {
             role: "assistant",
             content: None,
-            tool_calls: Some(vec![tool_call_from_function_call(&step.tool_call, &tool_call_id)]),
+            tool_calls: Some(vec![tool_call_from_function_call(
+                &step.tool_call,
+                &tool_call_id,
+            )]),
         }));
         full_trajectory.push(Message::Tool(ToolMessage {
             id: tool_call_id,
@@ -197,18 +200,34 @@ fn raw_message_to_message(raw_message: &RawMessage) -> Option<Message> {
         "user" => Some(Message::User(ParticipantMessageBase {
             role: "user",
             content: raw_message.content.clone(),
-            tool_calls: raw_message
-                .tool_calls
-                .as_deref()
-                .map(|tool_calls| tool_calls.iter().enumerate().map(|(index, tool_call)| tool_call_from_function_call(tool_call, &format!("raw_user_tool_call_{}", index + 1))).collect()),
+            tool_calls: raw_message.tool_calls.as_deref().map(|tool_calls| {
+                tool_calls
+                    .iter()
+                    .enumerate()
+                    .map(|(index, tool_call)| {
+                        tool_call_from_function_call(
+                            tool_call,
+                            &format!("raw_user_tool_call_{}", index + 1),
+                        )
+                    })
+                    .collect()
+            }),
         })),
         "assistant" => Some(Message::Assistant(ParticipantMessageBase {
             role: "assistant",
             content: raw_message.content.clone(),
-            tool_calls: raw_message
-                .tool_calls
-                .as_deref()
-                .map(|tool_calls| tool_calls.iter().enumerate().map(|(index, tool_call)| tool_call_from_function_call(tool_call, &format!("raw_assistant_tool_call_{}", index + 1))).collect()),
+            tool_calls: raw_message.tool_calls.as_deref().map(|tool_calls| {
+                tool_calls
+                    .iter()
+                    .enumerate()
+                    .map(|(index, tool_call)| {
+                        tool_call_from_function_call(
+                            tool_call,
+                            &format!("raw_assistant_tool_call_{}", index + 1),
+                        )
+                    })
+                    .collect()
+            }),
         })),
         "tool" => Some(Message::Tool(ToolMessage {
             id: "raw_tool_message".to_string(),

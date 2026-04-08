@@ -128,7 +128,6 @@ fn render_task_lookup_list(tasks: &[TaskLookup]) -> String {
 #[cfg(test)]
 mod tests {
     use crate::db::{TaskLookup, TaskStatus};
-
     use super::select_resume_task_id;
 
     #[test]

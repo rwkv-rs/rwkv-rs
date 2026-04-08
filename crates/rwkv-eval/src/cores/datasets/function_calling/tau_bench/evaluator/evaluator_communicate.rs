@@ -59,19 +59,16 @@ impl CommunicateEvaluator {
                 let content = message.content.as_deref()?;
                 let normalized_content = content.to_lowercase().replace(',', "");
                 let normalized_info = info_str.to_lowercase().replace(',', "");
-                normalized_content.contains(&normalized_info).then_some(content.to_string())
+                normalized_content
+                    .contains(&normalized_info)
+                    .then_some(content.to_string())
             });
             let (met, justification) = match found_message {
                 Some(message) => (
                     true,
-                    format!(
-                        "Information '{info_str}' communicated in the message:\n '{message}'"
-                    ),
+                    format!("Information '{info_str}' communicated in the message:\n '{message}'"),
                 ),
-                None => (
-                    false,
-                    format!("Information '{info_str}' not communicated."),
-                ),
+                None => (false, format!("Information '{info_str}' not communicated.")),
             };
             outputs.push(CommunicateCheck {
                 info: info_str.clone(),
