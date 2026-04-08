@@ -56,7 +56,11 @@ use self::{
     runtime::{CheckerRuntime, TaskExecutionState},
     sampling::build_avg_k_execution_plan,
     scheduler::{ModelRuntime, TaskRunState, run_scheduler},
-    task_persistence::{ensure_existing_results_match_plan, prepare_task_execution, select_resume_task_id},
+    task_persistence::{
+        ensure_existing_results_match_plan,
+        prepare_task_execution,
+        select_resume_task_id,
+    },
 };
 
 const EVALUATOR_NAME: &str = "rwkv-lm-eval";
@@ -70,7 +74,22 @@ pub struct EvaluationRunRequest {
     pub runtime_control: Option<EvalRuntimeControl>,
 }
 
+pub struct PreparedEvaluationRun {
+    task_runs: Vec<TaskRunState>,
+    model_runtimes: BTreeMap<String, ModelRuntime>,
+    db: Option<Db>,
+    checker_concurrency: usize,
+    runtime_control: Option<EvalRuntimeControl>,
+}
+
 pub async fn run_evaluation(request: EvaluationRunRequest) -> crate::services::ServiceResult<()> {
+    let prepared = prepare_evaluation(request).await?;
+    execute_prepared_evaluation(prepared).await
+}
+
+pub async fn prepare_evaluation(
+    request: EvaluationRunRequest,
+) -> crate::services::ServiceResult<PreparedEvaluationRun> {
     let EvaluationRunRequest {
         config,
         datasets_path,
@@ -238,12 +257,32 @@ pub async fn run_evaluation(request: EvaluationRunRequest) -> crate::services::S
     )
     .await;
 
+    Ok(PreparedEvaluationRun {
+        task_runs,
+        model_runtimes,
+        db,
+        checker_concurrency: options.checker_concurrency,
+        runtime_control,
+    })
+}
+
+pub async fn execute_prepared_evaluation(
+    prepared: PreparedEvaluationRun,
+) -> crate::services::ServiceResult<()> {
+    let PreparedEvaluationRun {
+        task_runs,
+        model_runtimes,
+        db,
+        checker_concurrency,
+        runtime_control,
+    } = prepared;
+
     run_scheduler(
         task_runs,
         model_runtimes,
         db,
-        options.checker_concurrency,
-        runtime_control.clone(),
+        checker_concurrency,
+        runtime_control,
     )
     .await;
 
@@ -288,7 +327,8 @@ pub async fn validate_resume_request(
         let judger_model_name = benchmark_info
             .with_llm_judger
             .then_some(eval_cfg.llm_judger.model.as_str());
-        let checker_model_name = (!options.skip_checker).then_some(eval_cfg.llm_checker.model.as_str());
+        let checker_model_name =
+            (!options.skip_checker).then_some(eval_cfg.llm_checker.model.as_str());
 
         for target_model in &target_models {
             for &cot_mode in benchmark_info.cot_mode {

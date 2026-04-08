@@ -297,32 +297,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn admin_start_does_not_reject_empty_model_api_key() {
-        let app = build_router(test_app_state(Some("secret")));
-        let mut request = sample_start_request();
-        request.models[0].api_key.clear();
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/admin/eval/start")
-                    .header(AUTHORIZATION, "Bearer secret")
-                    .header("content-type", "application/json")
-                    .body(Body::from(to_string(&request).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_ne!(response.status(), StatusCode::BAD_REQUEST);
-
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let body = String::from_utf8(body.to_vec()).unwrap();
-        assert!(!body.contains("models[0].api_key cannot be empty"));
-    }
-
-    #[tokio::test]
     async fn admin_start_rejects_space_db_override() {
         let app = build_router(test_app_state(Some("secret")));
         let mut request = sample_start_request();

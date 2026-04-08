@@ -10,10 +10,10 @@ use super::service::admin_eval_status_response;
     post,
     path = "/api/v1/admin/eval/resume",
     responses(
-        (status = 200, description = "Resumed a paused evaluation", body = AdminEvalStatusResponse),
+        (status = 200, description = "Resumed a paused in-process evaluation. Historical task recovery must use /api/v1/admin/eval/start with run_mode=resume", body = AdminEvalStatusResponse),
         (status = 401, description = "Unauthorized", body = super::super::super::error::ErrorResponse),
         (status = 403, description = "Forbidden", body = super::super::super::error::ErrorResponse),
-        (status = 404, description = "No active evaluation", body = super::super::super::error::ErrorResponse),
+        (status = 404, description = "No paused in-process evaluation", body = super::super::super::error::ErrorResponse),
         (status = 409, description = "Conflict", body = super::super::super::error::ErrorResponse),
         (status = 500, description = "Internal server error", body = super::super::super::error::ErrorResponse)
     ),

@@ -10,14 +10,10 @@ use reqwest::Client;
 use rwkv_config::{raw::eval::RawEvalConfig, validated::eval::FinalEvalConfigBuilder};
 use serde::{Deserialize, Serialize};
 use sonic_rs::Value;
-use tokio::{
-    sync::Mutex,
-    task::JoinHandle,
-};
+use tokio::{sync::Mutex, task::JoinHandle};
 
 use crate::{
-    cores::evaluation::{EvaluationRunRequest, run_evaluation, validate_resume_request},
-    db::Db,
+    cores::evaluation::{EvaluationRunRequest, execute_prepared_evaluation, prepare_evaluation},
     services::{ServiceError, ServiceResult},
 };
 
@@ -388,7 +384,7 @@ impl EvalController {
         }
     }
 
-    pub async fn start(&self, db: &Db, run_cfg: &RawEvalConfig) -> ServiceResult<EvalRunSnapshot> {
+    pub async fn start(&self, run_cfg: &RawEvalConfig) -> ServiceResult<EvalRunSnapshot> {
         let mut guard = self.inner.lock().await;
         refresh_active_run(guard.active.as_mut()).await?;
 
@@ -400,7 +396,7 @@ impl EvalController {
             }
         }
 
-        let active = ActiveEvalRun::spawn(db, run_cfg).await?;
+        let active = ActiveEvalRun::spawn(run_cfg).await?;
         let snapshot = active.snapshot()?;
         guard.active = Some(active);
         Ok(snapshot)
@@ -411,7 +407,33 @@ impl EvalController {
     }
 
     pub async fn resume(&self) -> ServiceResult<EvalRunSnapshot> {
-        self.set_desired_state(DesiredState::Running).await
+        let mut guard = self.inner.lock().await;
+        refresh_active_run(guard.active.as_mut()).await?;
+        let active = guard.active.as_ref().ok_or_else(|| {
+            ServiceError::not_found(
+                "no paused in-process evaluation; use /api/v1/admin/eval/start with run_mode=resume to recover historical progress",
+            )
+        })?;
+        let snapshot = active.snapshot()?;
+        if snapshot.runtime.observed_status.is_terminal() {
+            return Err(ServiceError::conflict(format!(
+                "evaluation is already {}",
+                snapshot.runtime.observed_status.as_str()
+            )));
+        }
+        if snapshot.runtime.observed_status != ObservedStatus::Paused
+            && snapshot.desired_state != DesiredState::Paused
+        {
+            return Err(ServiceError::conflict(
+                "admin resume only applies to a paused in-process evaluation; use /api/v1/admin/eval/start with run_mode=resume to recover historical progress",
+            ));
+        }
+
+        active
+            .runtime_control
+            .set_desired_state(DesiredState::Running)
+            .map_err(ServiceError::internal)?;
+        active.snapshot()
     }
 
     pub async fn cancel(&self) -> ServiceResult<EvalRunSnapshot> {
@@ -421,7 +443,11 @@ impl EvalController {
     pub async fn snapshot(&self) -> ServiceResult<Option<EvalRunSnapshot>> {
         let mut guard = self.inner.lock().await;
         refresh_active_run(guard.active.as_mut()).await?;
-        guard.active.as_ref().map(ActiveEvalRun::snapshot).transpose()
+        guard
+            .active
+            .as_ref()
+            .map(ActiveEvalRun::snapshot)
+            .transpose()
     }
 
     async fn set_desired_state(
@@ -451,15 +477,12 @@ impl EvalController {
 }
 
 impl ActiveEvalRun {
-    async fn spawn(db: &Db, run_cfg: &RawEvalConfig) -> ServiceResult<Self> {
+    async fn spawn(run_cfg: &RawEvalConfig) -> ServiceResult<Self> {
         let mut run_cfg = run_cfg.clone();
         run_cfg.fill_default();
         run_cfg.admin_api_key = None;
         run_cfg.upload_to_space = Some(true);
         let eval_cfg = FinalEvalConfigBuilder::load_from_raw(run_cfg.clone()).build_local();
-        validate_resume_request(db, eval_cfg.as_ref(), &rwkv_lm_eval_datasets_path())
-            .await
-            .map_err(ServiceError::bad_request)?;
 
         let temp_dir = build_temp_dir();
         fs::create_dir_all(&temp_dir).map_err(|err| {
@@ -481,17 +504,19 @@ impl ActiveEvalRun {
         let runtime_control = EvalRuntimeControl::new(DesiredState::Running, runtime);
         let task_runtime_control = runtime_control.clone();
         let task_config_path = config_path.clone();
+        let prepared = prepare_evaluation(EvaluationRunRequest {
+            config: eval_cfg,
+            datasets_path: rwkv_lm_eval_datasets_path(),
+            config_path: task_config_path.clone(),
+            logs_path: rwkv_lm_eval_logs_path(),
+            runtime_control: Some(task_runtime_control.clone()),
+        })
+        .await?;
         let join_handle = tokio::spawn(async move {
-            let result = run_evaluation(EvaluationRunRequest {
-                config: eval_cfg,
-                datasets_path: rwkv_lm_eval_datasets_path(),
-                config_path: task_config_path,
-                logs_path: rwkv_lm_eval_logs_path(),
-                runtime_control: Some(task_runtime_control.clone()),
-            })
-            .await;
+            let result = execute_prepared_evaluation(prepared).await;
             if let Err(err) = &result {
-                let _ = task_runtime_control.write_status(ObservedStatus::Failed, Some(err.message()));
+                let _ =
+                    task_runtime_control.write_status(ObservedStatus::Failed, Some(err.message()));
             }
             result
         });
@@ -505,7 +530,10 @@ impl ActiveEvalRun {
     }
 
     fn snapshot(&self) -> ServiceResult<EvalRunSnapshot> {
-        let (desired_state, runtime) = self.runtime_control.snapshot().map_err(ServiceError::internal)?;
+        let (desired_state, runtime) = self
+            .runtime_control
+            .snapshot()
+            .map_err(ServiceError::internal)?;
         Ok(EvalRunSnapshot {
             config_path: self.config_path.clone(),
             desired_state,
@@ -604,12 +632,18 @@ async fn refresh_active_run(active: Option<&mut ActiveEvalRun>) -> ServiceResult
         Err(err) => {
             active
                 .runtime_control
-                .write_status(ObservedStatus::Failed, Some(&format!("join evaluator task failed: {err}")))
+                .write_status(
+                    ObservedStatus::Failed,
+                    Some(&format!("join evaluator task failed: {err}")),
+                )
                 .map_err(ServiceError::internal)?;
             return Ok(());
         }
     };
-    let (_, runtime) = active.runtime_control.snapshot().map_err(ServiceError::internal)?;
+    let (_, runtime) = active
+        .runtime_control
+        .snapshot()
+        .map_err(ServiceError::internal)?;
     if runtime.observed_status.is_terminal() {
         return Ok(());
     }
@@ -666,9 +700,12 @@ mod tests {
     use tokio::{net::TcpListener, task::JoinHandle};
 
     use super::{
+        ActiveEvalRun,
         DependencyRole,
         DependencyStatus,
         DesiredState,
+        EvalController,
+        EvalControllerState,
         EvalRunSnapshot,
         EvalRuntimeControl,
         ObservedStatus,
@@ -810,6 +847,48 @@ mod tests {
         let (_, runtime) = control.snapshot().unwrap();
         assert_eq!(runtime.dependencies, vec![dependency]);
         assert_eq!(runtime.observed_status, ObservedStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn admin_resume_rejects_non_paused_runs_and_points_to_start_resume() {
+        let controller = EvalController {
+            inner: tokio::sync::Mutex::new(EvalControllerState {
+                active: Some(ActiveEvalRun {
+                    config_path: temp_path("active.toml").display().to_string(),
+                    health_targets: Vec::new(),
+                    runtime_control: EvalRuntimeControl::new(
+                        DesiredState::Running,
+                        RuntimeFile::new(ObservedStatus::Running, None),
+                    ),
+                    join_handle: None,
+                }),
+            }),
+        };
+
+        let err = controller.resume().await.unwrap_err();
+        assert_eq!(err.kind(), crate::services::ServiceErrorKind::Conflict);
+        assert!(err.message().contains("/api/v1/admin/eval/start"));
+        assert!(err.message().contains("run_mode=resume"));
+    }
+
+    #[tokio::test]
+    async fn admin_resume_allows_paused_in_process_runs() {
+        let controller = EvalController {
+            inner: tokio::sync::Mutex::new(EvalControllerState {
+                active: Some(ActiveEvalRun {
+                    config_path: temp_path("active.toml").display().to_string(),
+                    health_targets: Vec::new(),
+                    runtime_control: EvalRuntimeControl::new(
+                        DesiredState::Paused,
+                        RuntimeFile::new(ObservedStatus::Paused, None),
+                    ),
+                    join_handle: None,
+                }),
+            }),
+        };
+
+        let snapshot = controller.resume().await.unwrap();
+        assert_eq!(snapshot.desired_state, DesiredState::Running);
     }
 
     #[test]
