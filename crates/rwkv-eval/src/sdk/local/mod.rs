@@ -19,7 +19,14 @@ impl LocalClient {
         config_path: PathBuf,
         logs_path: PathBuf,
     ) -> ServiceResult<()> {
-        evaluation::run_evaluation(eval_cfg_builder, datasets_path, config_path, logs_path).await
+        evaluation::run_evaluation(evaluation::EvaluationRunRequest {
+            config: eval_cfg_builder.build_local(),
+            datasets_path,
+            config_path,
+            logs_path,
+            runtime_control: None,
+        })
+        .await
     }
 }
 

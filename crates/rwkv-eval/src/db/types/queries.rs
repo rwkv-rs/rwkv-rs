@@ -1,7 +1,6 @@
 use super::TaskStatus;
 
 pub struct TaskIdentity {
-    pub config_path: Option<String>,
     pub evaluator: String,
     pub git_hash: String,
     pub model_id: i32,

@@ -18,7 +18,7 @@ use std::{
     sync::Arc,
 };
 
-use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfigBuilder};
+use rwkv_config::validated::eval::FinalEvalConfig;
 use tokio::sync::{Semaphore, mpsc};
 
 use crate::{
@@ -33,6 +33,7 @@ use crate::{
         ModelInsert,
         TaskInsert,
         TaskStatus,
+        find_tasks_by_resume_params,
         upsert_benchmark,
         upsert_model,
     },
@@ -55,29 +56,35 @@ use self::{
     runtime::{CheckerRuntime, TaskExecutionState},
     sampling::build_avg_k_execution_plan,
     scheduler::{ModelRuntime, TaskRunState, run_scheduler},
-    task_persistence::{ensure_existing_results_match_plan, prepare_task_execution},
+    task_persistence::{ensure_existing_results_match_plan, prepare_task_execution, select_resume_task_id},
 };
 
 const EVALUATOR_NAME: &str = "rwkv-lm-eval";
 const SANDBOX_QUEUE_CAPACITY: usize = 64;
 
-pub async fn run_evaluation(
-    eval_cfg_builder: FinalEvalConfigBuilder,
-    datasets_path: PathBuf,
-    config_path: PathBuf,
-    logs_path: PathBuf,
-) -> crate::services::ServiceResult<()> {
-    let runtime_control = EvalRuntimeControl::from_env()
-        .unwrap_or_else(|err| panic!("failed to initialize runtime control: {err}"));
+pub struct EvaluationRunRequest {
+    pub config: Arc<FinalEvalConfig>,
+    pub datasets_path: PathBuf,
+    pub config_path: PathBuf,
+    pub logs_path: PathBuf,
+    pub runtime_control: Option<EvalRuntimeControl>,
+}
+
+pub async fn run_evaluation(request: EvaluationRunRequest) -> crate::services::ServiceResult<()> {
+    let EvaluationRunRequest {
+        config,
+        datasets_path,
+        config_path,
+        logs_path,
+        runtime_control,
+    } = request;
     if let Some(control) = runtime_control.as_ref() {
         control
             .write_status(ObservedStatus::Starting, None)
             .unwrap_or_else(|err| panic!("failed to write runtime status: {err}"));
     }
 
-    eval_cfg_builder.build();
-
-    let eval_cfg = EVAL_CFG.get().unwrap();
+    let eval_cfg = config.as_ref();
     let options = build_evaluating_options(eval_cfg);
     let experiment_name = eval_cfg.experiment_name.clone();
     let experiment_desc = eval_cfg.experiment_desc.clone();
@@ -93,7 +100,7 @@ pub async fn run_evaluation(
         panic!("run_mode=resume requires database persistence");
     }
 
-    let target_models = collect_models();
+    let target_models = collect_models(eval_cfg);
     assert!(
         !target_models.is_empty(),
         "no target model matched model_arch_versions/model_data_versions/model_num_params"
@@ -207,7 +214,7 @@ pub async fn run_evaluation(
 
     let model_runtimes = build_model_runtimes(&clients_with_cfg);
 
-    let benchmark_infos = collect_benchmarks();
+    let benchmark_infos = collect_benchmarks(eval_cfg);
     assert!(!benchmark_infos.is_empty(), "no benchmark selected");
     ensure_microsandbox_for_coding_benchmarks(&benchmark_infos).await;
 
@@ -220,6 +227,7 @@ pub async fn run_evaluation(
         &model_ids,
         &db,
         &options,
+        eval_cfg.skip_dataset_check,
         &experiment_name,
         &experiment_desc,
         &git_hash,
@@ -238,6 +246,84 @@ pub async fn run_evaluation(
         runtime_control.clone(),
     )
     .await;
+
+    Ok(())
+}
+
+pub async fn validate_resume_request(
+    db: &Db,
+    eval_cfg: &FinalEvalConfig,
+    datasets_path: &Path,
+) -> Result<(), String> {
+    let options = build_evaluating_options(eval_cfg);
+    if options.run_mode != RunMode::Resume {
+        return Ok(());
+    }
+
+    let target_models = collect_models(eval_cfg);
+    assert!(
+        !target_models.is_empty(),
+        "no target model matched model_arch_versions/model_data_versions/model_num_params"
+    );
+
+    let benchmark_infos = collect_benchmarks(eval_cfg);
+    assert!(!benchmark_infos.is_empty(), "no benchmark selected");
+
+    for &benchmark_info in &benchmark_infos {
+        validate_benchmark_info(benchmark_info);
+        let mut benchmark_box = (benchmark_info.create)(datasets_path.to_path_buf());
+        prepare_benchmark(
+            benchmark_info,
+            benchmark_box.as_mut(),
+            eval_cfg.skip_dataset_check,
+        )
+        .await;
+        let benchmark_len = benchmark_box.len();
+        let max_pass_k = benchmark_info
+            .pass_ks
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or_else(|| panic!("benchmark `{}` has empty pass_ks", benchmark_info.name.0));
+        let judger_model_name = benchmark_info
+            .with_llm_judger
+            .then_some(eval_cfg.llm_judger.model.as_str());
+        let checker_model_name = (!options.skip_checker).then_some(eval_cfg.llm_checker.model.as_str());
+
+        for target_model in &target_models {
+            for &cot_mode in benchmark_info.cot_mode {
+                for &n_shot in benchmark_info.n_shots {
+                    for &avg_k in benchmark_info.avg_ks {
+                        let avg_k_plan =
+                            build_avg_k_execution_plan(benchmark_info.name.0, benchmark_len, avg_k);
+                        let sampling_config_json = build_task_sampling_config_json(
+                            benchmark_info,
+                            cot_mode,
+                            n_shot,
+                            &avg_k_plan,
+                            avg_k,
+                            max_pass_k,
+                            judger_model_name,
+                            checker_model_name,
+                        );
+                        let matches = find_tasks_by_resume_params(
+                            db,
+                            EVALUATOR_NAME,
+                            &eval_cfg.git_hash,
+                            &target_model.model,
+                            &target_model.model_arch_version,
+                            &target_model.model_data_version,
+                            &target_model.model_num_params,
+                            benchmark_info.name.0,
+                            &sampling_config_json,
+                        )
+                        .await?;
+                        select_resume_task_id(&matches)?;
+                    }
+                }
+            }
+        }
+    }
 
     Ok(())
 }
@@ -329,6 +415,7 @@ async fn build_task_runs(
     model_ids: &BTreeMap<String, i32>,
     db: &Option<Db>,
     options: &options::EvaluatingOptions,
+    skip_dataset_check: bool,
     experiment_name: &str,
     experiment_desc: &str,
     git_hash: &str,
@@ -344,7 +431,7 @@ async fn build_task_runs(
 
         println!("prepare benchmark: {}", benchmark_info.name.0);
         let mut benchmark_box = (benchmark_info.create)(datasets_path.to_path_buf());
-        prepare_benchmark(benchmark_info, benchmark_box.as_mut()).await;
+        prepare_benchmark(benchmark_info, benchmark_box.as_mut(), skip_dataset_check).await;
         let benchmark: Arc<dyn Benchmark> = Arc::from(benchmark_box);
 
         let benchmark_id = if let Some(db) = db.as_ref() {
@@ -430,7 +517,6 @@ async fn build_task_runs(
                                 options.run_mode,
                                 options.skip_checker,
                                 crate::db::TaskIdentity {
-                                    config_path: Some(config_path.display().to_string()),
                                     evaluator: EVALUATOR_NAME.to_string(),
                                     git_hash: git_hash.to_string(),
                                     model_id,

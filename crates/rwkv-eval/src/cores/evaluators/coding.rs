@@ -1,6 +1,9 @@
+use std::path::PathBuf;
+
 use async_openai::{Client, config::OpenAIConfig};
 use microsandbox::Sandbox;
 use serde::Deserialize;
+use tempfile::TempDir;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -12,6 +15,8 @@ use crate::cores::{
 
 const DEFAULT_MEMORY_MB: u32 = 512;
 const DEFAULT_CPUS: u8 = 1;
+const SANDBOX_WORKDIR: &str = "/work";
+const SANDBOX_SCRIPT_NAME: &str = "judge.py";
 
 #[derive(Debug, Deserialize)]
 struct SandboxVerdictWire {
@@ -83,15 +88,27 @@ pub(crate) async fn run_python_verdict_script_direct(
     script: &str,
 ) -> Result<SandboxVerdict, String> {
     let name = next_sandbox_name();
+    let workdir = TempDir::new().map_err(|err| format!("create temp workdir failed: {err}"))?;
+    let script_path = workdir.path().join(SANDBOX_SCRIPT_NAME);
+    tokio::fs::write(&script_path, script)
+        .await
+        .map_err(|err| format!("write temp judge script `{}` failed: {err}", script_path.display()))?;
     let sandbox = Sandbox::builder(name.clone())
         .image("python:3.12")
         .memory(DEFAULT_MEMORY_MB)
         .cpus(DEFAULT_CPUS)
+        .volume(SANDBOX_WORKDIR, |mount| mount.bind(workdir.path()))
         .create()
         .await
         .map_err(|err| format!("create sandbox `{name}` failed: {err}"))?;
 
-    let execution = sandbox.exec("python", ["-c", script]).await;
+    let guest_script_path = guest_script_path();
+    let execution = sandbox
+        .exec_with("python", |exec| {
+            exec.args([guest_script_path.as_str()])
+                .env("PYTHONDONTWRITEBYTECODE", "1")
+        })
+        .await;
     if let Err(err) = sandbox.stop_and_wait().await {
         eprintln!("failed to stop microsandbox `{name}`: {err}");
     } else if let Err(err) = sandbox.remove_persisted().await {
@@ -136,6 +153,13 @@ pub(crate) async fn run_python_verdict_script_direct(
 
 fn next_sandbox_name() -> String {
     format!("rwkv-eval-coding-{}", Uuid::new_v4().simple())
+}
+
+fn guest_script_path() -> String {
+    PathBuf::from(SANDBOX_WORKDIR)
+        .join(SANDBOX_SCRIPT_NAME)
+        .display()
+        .to_string()
 }
 
 fn parse_verdict_line(stdout: &str) -> Option<SandboxVerdictWire> {

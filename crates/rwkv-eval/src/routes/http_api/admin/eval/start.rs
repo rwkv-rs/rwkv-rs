@@ -25,6 +25,6 @@ pub(crate) async fn admin_eval_start(
     Json(payload): Json<AdminEvalConfigDto>,
 ) -> ApiResult<AdminEvalStatusResponse> {
     let run_cfg = parse_admin_eval_request(payload, &state.service_config)?;
-    state.eval_controller.start(&run_cfg).await?;
+    state.eval_controller.start(&state.db, &run_cfg).await?;
     admin_eval_status_response(&state).await
 }

@@ -31,6 +31,7 @@ regex = { workspace = true }
 langdetect-rs = { workspace = true }
 flate2 = { workspace = true }
 microsandbox = { workspace = true }
+tempfile = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

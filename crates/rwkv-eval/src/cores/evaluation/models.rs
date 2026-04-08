@@ -1,14 +1,12 @@
-use rwkv_config::{raw::eval::IntApiConfig, validated::eval::EVAL_CFG};
+use rwkv_config::{raw::eval::IntApiConfig, validated::eval::FinalEvalConfig};
 
-pub(crate) fn collect_models() -> Vec<IntApiConfig> {
+pub(crate) fn collect_models(eval_cfg: &FinalEvalConfig) -> Vec<IntApiConfig> {
     let mut target_models = Vec::new();
-    for model_arch_version in &EVAL_CFG.get().unwrap().model_arch_versions {
-        for model_data_version in &EVAL_CFG.get().unwrap().model_data_versions {
-            for model_num_param in &EVAL_CFG.get().unwrap().model_num_params {
+    for model_arch_version in &eval_cfg.model_arch_versions {
+        for model_data_version in &eval_cfg.model_data_versions {
+            for model_num_param in &eval_cfg.model_num_params {
                 target_models.extend(
-                    EVAL_CFG
-                        .get()
-                        .unwrap()
+                    eval_cfg
                         .models
                         .iter()
                         .filter(|model| {
