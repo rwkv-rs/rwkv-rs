@@ -37,7 +37,7 @@ static COLLEGE_MATH_INFO: BenchmarkInfo = BenchmarkInfo {
     },
     n_shots: &[0],
     avg_ks: &[8.0],
-    pass_ks: &[8],
+    pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(CollegeMath::new(dataset_root)),
 };

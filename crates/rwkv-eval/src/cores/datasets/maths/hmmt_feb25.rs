@@ -38,7 +38,7 @@ static HMMT_FEB25_INFO: BenchmarkInfo = BenchmarkInfo {
     },
     n_shots: &[0],
     avg_ks: &[64.0],
-    pass_ks: &[8],
+    pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(HmmtFeb25::new(dataset_root)),
 };

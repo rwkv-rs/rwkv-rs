@@ -37,7 +37,7 @@ static AIME24_INFO: BenchmarkInfo = BenchmarkInfo {
     },
     n_shots: &[0],
     avg_ks: &[64.0],
-    pass_ks: &[1, 2, 4, 8, 16, 32, 64, 128],
+    pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Aime24::new(dataset_root)),
 };

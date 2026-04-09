@@ -1,11 +1,14 @@
 use std::{
+    any::Any,
     collections::{BTreeMap, BTreeSet},
     fs,
+    panic::AssertUnwindSafe,
     path::{Path, PathBuf},
     sync::{Arc, Mutex as StdMutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use futures::FutureExt;
 use reqwest::Client;
 use rwkv_config::{raw::eval::RawEvalConfig, validated::eval::FinalEvalConfigBuilder};
 use serde::{Deserialize, Serialize};
@@ -362,6 +365,13 @@ struct EvalControllerState {
     active: Option<ActiveEvalRun>,
 }
 
+struct PendingActiveEvalRun {
+    config_path: String,
+    health_targets: Vec<HealthTarget>,
+    runtime_control: EvalRuntimeControl,
+    request: EvaluationRunRequest,
+}
+
 struct ActiveEvalRun {
     config_path: String,
     health_targets: Vec<HealthTarget>,
@@ -385,21 +395,52 @@ impl EvalController {
     }
 
     pub async fn start(&self, run_cfg: &RawEvalConfig) -> ServiceResult<EvalRunSnapshot> {
-        let mut guard = self.inner.lock().await;
-        refresh_active_run(guard.active.as_mut()).await?;
+        let pending = PendingActiveEvalRun::build(run_cfg)?;
+        let config_path = pending.config_path.clone();
 
-        if let Some(active) = guard.active.as_ref() {
-            if !active.snapshot()?.runtime.observed_status.is_terminal() {
-                return Err(ServiceError::conflict(
-                    "an evaluation task is already active",
-                ));
+        {
+            let mut guard = self.inner.lock().await;
+            refresh_active_run(guard.active.as_mut()).await?;
+
+            if let Some(active) = guard.active.as_ref() {
+                if !active.snapshot()?.runtime.observed_status.is_terminal() {
+                    return Err(ServiceError::conflict(
+                        "an evaluation task is already active",
+                    ));
+                }
             }
+
+            // Publish a starting snapshot before the heavy prepare phase so /status can respond.
+            guard.active = Some(pending.placeholder());
         }
 
-        let active = ActiveEvalRun::spawn(run_cfg).await?;
-        let snapshot = active.snapshot()?;
-        guard.active = Some(active);
-        Ok(snapshot)
+        let join_handle = match pending.prepare_and_spawn().await {
+            Ok(join_handle) => join_handle,
+            Err(err) => {
+                let mut guard = self.inner.lock().await;
+                if let Some(active) = guard.active.as_mut() {
+                    if active.config_path == config_path {
+                        active
+                            .runtime_control
+                            .write_status(ObservedStatus::Failed, Some(err.message()))
+                            .map_err(ServiceError::internal)?;
+                    }
+                }
+                return Err(err);
+            }
+        };
+
+        let mut guard = self.inner.lock().await;
+        let active = match guard.active.as_mut() {
+            Some(active) if active.config_path == config_path => active,
+            _ => {
+                return Err(ServiceError::internal(
+                    "active evaluation changed while start was preparing",
+                ))
+            }
+        };
+        active.join_handle = Some(join_handle);
+        active.snapshot()
     }
 
     pub async fn pause(&self) -> ServiceResult<EvalRunSnapshot> {
@@ -477,7 +518,22 @@ impl EvalController {
 }
 
 impl ActiveEvalRun {
-    async fn spawn(run_cfg: &RawEvalConfig) -> ServiceResult<Self> {
+    fn snapshot(&self) -> ServiceResult<EvalRunSnapshot> {
+        let (desired_state, runtime) = self
+            .runtime_control
+            .snapshot()
+            .map_err(ServiceError::internal)?;
+        Ok(EvalRunSnapshot {
+            config_path: self.config_path.clone(),
+            desired_state,
+            runtime,
+            health_targets: self.health_targets.clone(),
+        })
+    }
+}
+
+impl PendingActiveEvalRun {
+    fn build(run_cfg: &RawEvalConfig) -> ServiceResult<Self> {
         let mut run_cfg = run_cfg.clone();
         run_cfg.fill_default();
         run_cfg.admin_api_key = None;
@@ -502,45 +558,67 @@ impl ActiveEvalRun {
         let mut runtime = RuntimeFile::new(ObservedStatus::Starting, None);
         runtime.dependencies = build_runtime_dependencies(&run_cfg);
         let runtime_control = EvalRuntimeControl::new(DesiredState::Running, runtime);
-        let task_runtime_control = runtime_control.clone();
-        let task_config_path = config_path.clone();
-        let prepared = prepare_evaluation(EvaluationRunRequest {
-            config: eval_cfg,
-            datasets_path: rwkv_lm_eval_datasets_path(),
-            config_path: task_config_path.clone(),
-            logs_path: rwkv_lm_eval_logs_path(),
-            runtime_control: Some(task_runtime_control.clone()),
+        Ok(Self {
+            config_path: config_path.display().to_string(),
+            health_targets: collect_health_targets(&run_cfg),
+            runtime_control,
+            request: EvaluationRunRequest {
+                config: eval_cfg,
+                datasets_path: rwkv_lm_eval_datasets_path(),
+                config_path,
+                logs_path: rwkv_lm_eval_logs_path(),
+                runtime_control: None,
+            },
         })
-        .await?;
-        let join_handle = tokio::spawn(async move {
+    }
+
+    fn placeholder(&self) -> ActiveEvalRun {
+        ActiveEvalRun {
+            config_path: self.config_path.clone(),
+            health_targets: self.health_targets.clone(),
+            runtime_control: self.runtime_control.clone(),
+            join_handle: None,
+        }
+    }
+
+    async fn prepare_and_spawn(self) -> ServiceResult<JoinHandle<ServiceResult<()>>> {
+        // prepare_evaluation still has assert!/panic! paths. Convert them into a failed run
+        // instead of leaving the controller stuck with a permanent "starting" placeholder.
+        match AssertUnwindSafe(self.prepare_and_spawn_inner())
+            .catch_unwind()
+            .await
+        {
+            Ok(result) => result,
+            Err(panic) => Err(ServiceError::internal(format!(
+                "prepare admin evaluation panicked: {}",
+                panic_payload_message(&panic)
+            ))),
+        }
+    }
+
+    async fn prepare_and_spawn_inner(mut self) -> ServiceResult<JoinHandle<ServiceResult<()>>> {
+        self.request.runtime_control = Some(self.runtime_control.clone());
+        let task_runtime_control = self.runtime_control.clone();
+        let prepared = prepare_evaluation(self.request).await?;
+        Ok(tokio::spawn(async move {
             let result = execute_prepared_evaluation(prepared).await;
             if let Err(err) = &result {
                 let _ =
                     task_runtime_control.write_status(ObservedStatus::Failed, Some(err.message()));
             }
             result
-        });
-
-        Ok(Self {
-            config_path: config_path.display().to_string(),
-            health_targets: collect_health_targets(&run_cfg),
-            runtime_control,
-            join_handle: Some(join_handle),
-        })
+        }))
     }
+}
 
-    fn snapshot(&self) -> ServiceResult<EvalRunSnapshot> {
-        let (desired_state, runtime) = self
-            .runtime_control
-            .snapshot()
-            .map_err(ServiceError::internal)?;
-        Ok(EvalRunSnapshot {
-            config_path: self.config_path.clone(),
-            desired_state,
-            runtime,
-            health_targets: self.health_targets.clone(),
-        })
+fn panic_payload_message(payload: &(dyn Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        return (*message).to_string();
     }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    "non-string panic payload".to_string()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -709,6 +787,7 @@ mod tests {
         EvalRunSnapshot,
         EvalRuntimeControl,
         ObservedStatus,
+        PendingActiveEvalRun,
         RuntimeDependencyStatus,
         RuntimeFile,
         build_runtime_dependencies,
@@ -889,6 +968,49 @@ mod tests {
 
         let snapshot = controller.resume().await.unwrap();
         assert_eq!(snapshot.desired_state, DesiredState::Running);
+    }
+
+    #[tokio::test]
+    async fn admin_snapshot_exposes_starting_placeholder_without_join_handle() {
+        let pending = PendingActiveEvalRun::build(&sample_cfg()).unwrap();
+        let expected_config_path = pending.config_path.clone();
+        let expected_dependencies = pending
+            .runtime_control
+            .snapshot()
+            .unwrap()
+            .1
+            .dependencies
+            .len();
+        let controller = EvalController {
+            inner: tokio::sync::Mutex::new(EvalControllerState {
+                active: Some(pending.placeholder()),
+            }),
+        };
+
+        let snapshot = controller.snapshot().await.unwrap().unwrap();
+        assert_eq!(snapshot.config_path, expected_config_path);
+        assert_eq!(snapshot.desired_state, DesiredState::Running);
+        assert_eq!(snapshot.runtime.observed_status, ObservedStatus::Starting);
+        assert_eq!(snapshot.runtime.dependencies.len(), expected_dependencies);
+    }
+
+    #[tokio::test]
+    async fn admin_start_converts_prepare_panics_into_failed_snapshot() {
+        let controller = EvalController::new();
+
+        let err = controller.start(&sample_cfg()).await.unwrap_err();
+        assert_eq!(err.kind(), crate::services::ServiceErrorKind::Internal);
+        assert!(err.message().contains("prepare admin evaluation panicked"));
+
+        let snapshot = controller.snapshot().await.unwrap().unwrap();
+        assert_eq!(snapshot.runtime.observed_status, ObservedStatus::Failed);
+        assert!(
+            snapshot
+                .runtime
+                .error
+                .as_ref()
+                .is_some_and(|message| message.contains("prepare admin evaluation panicked"))
+        );
     }
 
     #[test]
