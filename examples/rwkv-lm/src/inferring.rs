@@ -54,6 +54,38 @@ use crate::model::{AutoRegressiveModel, AutoRegressiveModelConfig, UnembedMode};
 
 rwkv::custom_mode!();
 
+fn count_valid_tokens(mask: &[u8]) -> i32 {
+    mask.iter().map(|&value| i32::from(value != 0)).sum()
+}
+
+// Keep this contract aligned with the WKV7 infer kernel: elapsed_t advances only over
+// effective timesteps where context_mask != 0, so left-padded prefill chunks reuse the same
+// deterministic dither seeds as the equivalent unpadded execution.
+fn advance_elapsed_t_host(
+    elapsed_t: &mut [i32],
+    batch_ids: &[usize],
+    context_masks: &[&[u8]],
+) -> Vec<usize> {
+    debug_assert_eq!(batch_ids.len(), context_masks.len());
+    let mut updated_slots = Vec::with_capacity(batch_ids.len());
+
+    for (&batch_id, &mask) in batch_ids.iter().zip(context_masks.iter()) {
+        let valid_tokens = count_valid_tokens(mask);
+        if valid_tokens == 0 {
+            continue;
+        }
+
+        elapsed_t[batch_id] = elapsed_t[batch_id].saturating_add(valid_tokens);
+        updated_slots.push(batch_id);
+    }
+
+    updated_slots
+}
+
+fn reset_elapsed_t_host(elapsed_t: &mut [i32], batch_index: usize) {
+    elapsed_t[batch_index] = 0;
+}
+
 pub fn infer_cli_args(args: &[String]) -> (PathBuf, String) {
     let config_dir = get_arg_value(args, "--config-dir")
         .map(PathBuf::from)
@@ -68,6 +100,8 @@ pub struct RwkvLmForward<B: Backend> {
     embedded_token_shift_for_time_mix: Vec<Tensor<B, 2>>,
     state: Vec<Tensor<B, 4>>,
     embedded_token_shift_for_channel_mix: Vec<Tensor<B, 2>>,
+    elapsed_t: Tensor<B, 1, Int>,
+    elapsed_t_host: Vec<i32>,
     rng: Tensor<B, 1, Int>,
     penalties: Tensor<B, 2>,
     guided_token_masks: Tensor<B, 2, Int>,
@@ -106,6 +140,11 @@ impl<B: Backend + Wkv7Backend + RapidSampleBackend> RwkvLmForward<B> {
                 .map(|_| Tensor::zeros([max_batch_size, num_heads, head_size, head_size], &device))
                 .collect::<Vec<_>>()
         };
+        let elapsed_t = Tensor::<B, 1, Int>::from_data(
+            TensorData::new(vec![0_i32; max_batch_size], [max_batch_size]),
+            &device,
+        );
+        let elapsed_t_host = vec![0_i32; max_batch_size];
 
         let rng = Tensor::<B, 1, Int>::from_data(
             TensorData::new(
@@ -137,6 +176,8 @@ impl<B: Backend + Wkv7Backend + RapidSampleBackend> RwkvLmForward<B> {
             embedded_token_shift_for_time_mix: init_embedded_token_shift(),
             state: init_state(),
             embedded_token_shift_for_channel_mix: init_embedded_token_shift(),
+            elapsed_t,
+            elapsed_t_host,
             rng,
             penalties,
             guided_token_masks,
@@ -208,11 +249,11 @@ where
             ),
             &self.device,
         );
-        let contexts: Tensor<B, 2, Int> = Tensor::from_data(
+        let contexts_tensor: Tensor<B, 2, Int> = Tensor::from_data(
             TensorData::new(contexts.concat(), [batch_size, context_len]),
             &self.device,
         );
-        let context_masks: Tensor<B, 2> = Tensor::from_data(
+        let context_mask_tensor: Tensor<B, 2> = Tensor::from_data(
             TensorData::new(
                 context_masks.concat().iter().map(|&m| m as f32).collect(),
                 [batch_size, context_len],
@@ -221,14 +262,21 @@ where
         );
 
         let logits = self.model.infer(
-            contexts,
+            contexts_tensor,
             batch_ids_tensor.clone(),
-            Some(context_masks),
+            self.elapsed_t.clone(),
+            Some(context_mask_tensor),
             &mut self.embedded_token_shift_for_time_mix,
             &mut self.state,
             &mut self.embedded_token_shift_for_channel_mix,
             UnembedMode::LastToken,
         );
+
+        let updated_slots =
+            advance_elapsed_t_host(&mut self.elapsed_t_host, batch_ids, context_masks);
+        for batch_index in updated_slots {
+            self.write_elapsed_t_slot(batch_index);
+        }
 
         let logits = logits.map(|logits| logits.squeeze_dim::<2>(1));
 
@@ -411,6 +459,9 @@ where
                 .slice_assign([batch_index..batch_index + 1], zeros_state.clone());
         }
 
+        reset_elapsed_t_host(&mut self.elapsed_t_host, batch_index);
+        self.write_elapsed_t_slot(batch_index);
+
         let seed = Tensor::<B, 1, Int>::from_data(
             TensorData::new(vec![(batch_index as i32).wrapping_add(1)], [1]),
             &self.device,
@@ -427,6 +478,18 @@ where
         );
 
         self.set_guided_token_mask_row(batch_index, None);
+    }
+}
+
+impl<B: Backend + Wkv7Backend + RapidSampleBackend> RwkvLmForward<B> {
+    fn write_elapsed_t_slot(&mut self, batch_index: usize) {
+        let value = self.elapsed_t_host[batch_index];
+        let update =
+            Tensor::<B, 1, Int>::from_data(TensorData::new(vec![value], [1]), &self.device);
+        self.elapsed_t = self
+            .elapsed_t
+            .clone()
+            .slice_assign([batch_index..batch_index + 1], update);
     }
 }
 
@@ -483,6 +546,42 @@ where
         .with_reload_support(infer_cfg_path, build_queues),
         bind_addr,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{advance_elapsed_t_host, count_valid_tokens, reset_elapsed_t_host};
+
+    #[test]
+    fn count_valid_tokens_counts_only_non_zero_entries() {
+        assert_eq!(count_valid_tokens(&[0, 1, 2, 0, 255]), 3);
+    }
+
+    #[test]
+    fn advance_elapsed_t_host_uses_slot_mapping_and_valid_token_counts() {
+        let mut elapsed_t = vec![7, 11, 13];
+        let batch_ids = vec![2, 0];
+        let context_masks: Vec<&[u8]> = vec![&[1, 1, 0, 1], &[0, 0, 1, 0]];
+
+        let updated_slots = advance_elapsed_t_host(&mut elapsed_t, &batch_ids, &context_masks);
+
+        assert_eq!(updated_slots, vec![2, 0]);
+        assert_eq!(elapsed_t, vec![8, 11, 16]);
+    }
+
+    #[test]
+    fn advance_elapsed_t_host_skips_fully_masked_rows_and_reset_clears_reused_slot() {
+        let mut elapsed_t = vec![5, 9];
+        let batch_ids = vec![1];
+        let context_masks: Vec<&[u8]> = vec![&[0, 0, 0]];
+
+        let updated_slots = advance_elapsed_t_host(&mut elapsed_t, &batch_ids, &context_masks);
+        assert!(updated_slots.is_empty());
+        assert_eq!(elapsed_t, vec![5, 9]);
+
+        reset_elapsed_t_host(&mut elapsed_t, 1);
+        assert_eq!(elapsed_t, vec![5, 0]);
+    }
 }
 
 #[cfg(feature = "ipc")]

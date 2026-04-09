@@ -39,6 +39,7 @@ pub(crate) fn wkv7_infer_forward_impl<
     batch_ids: IntTensor<CubeBackend<R, F, I, BT>>,
     initial_state: FloatTensor<CubeBackend<R, F, I, BT>>,
     context_mask: FloatTensor<CubeBackend<R, F, I, BT>>,
+    elapsed_t: IntTensor<CubeBackend<R, F, I, BT>>,
 ) -> Wkv7InferForwardOutput<FloatTensor<CubeBackend<R, F, I, BT>>> {
     wkv7_infer_forward_impl_inner::<R, F, I, BT>(
         weight_decay,
@@ -50,6 +51,7 @@ pub(crate) fn wkv7_infer_forward_impl<
         batch_ids,
         initial_state,
         context_mask,
+        elapsed_t,
     )
 }
 
@@ -68,6 +70,7 @@ fn wkv7_infer_forward_impl_inner<
     batch_ids: IntTensor<CubeBackend<R, F, I, BT>>,
     initial_state: FloatTensor<CubeBackend<R, F, I, BT>>,
     context_mask: FloatTensor<CubeBackend<R, F, I, BT>>,
+    elapsed_t: IntTensor<CubeBackend<R, F, I, BT>>,
 ) -> Wkv7InferForwardOutput<FloatTensor<CubeBackend<R, F, I, BT>>> {
     let weight_decay = into_contiguous(weight_decay);
     let receptance = into_contiguous(receptance);
@@ -78,6 +81,7 @@ fn wkv7_infer_forward_impl_inner<
     let batch_ids = burn_cubecl::kernel::cast::<R>(into_contiguous(batch_ids), DType::U32);
     let initial_state = into_contiguous(initial_state);
     let context_mask = into_contiguous(context_mask);
+    let elapsed_t = burn_cubecl::kernel::cast::<R>(into_contiguous(elapsed_t), DType::U32);
 
     let client = weight_decay.client.clone();
     let device = weight_decay.device.clone();
@@ -137,6 +141,11 @@ fn wkv7_infer_forward_impl_inner<
         &expected_context_mask_shape,
         "context_mask shape must be [batch_size, context_length]"
     );
+    debug_assert_eq!(
+        elapsed_t.meta.shape(),
+        &Shape::new([full_batch_size]),
+        "elapsed_t shape must be [full_batch_size]"
+    );
 
     let output = empty_device::<R, F>(client.clone(), device.clone(), shape);
     let final_state = initial_state;
@@ -145,6 +154,7 @@ fn wkv7_infer_forward_impl_inner<
         context_length,
         num_heads,
         head_size: dim,
+        use_dither: u32::from(std::mem::size_of::<F>() != std::mem::size_of::<f32>()),
     };
 
     let cube_count = CubeCount::Static(num_heads as u32, active_batch_size as u32, 1);
@@ -163,6 +173,7 @@ fn wkv7_infer_forward_impl_inner<
             replacement.as_tensor_arg(1),
             batch_ids.as_tensor_arg(1),
             context_mask.as_tensor_arg(1),
+            elapsed_t.as_tensor_arg(1),
         ),
         Wkv7InferForwardOutputsLaunch::new(output.as_tensor_arg(1), final_state.as_tensor_arg(1)),
         config,

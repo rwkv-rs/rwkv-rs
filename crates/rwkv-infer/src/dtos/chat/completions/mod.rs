@@ -13,6 +13,7 @@ pub struct ChatCompletionsReq {
     pub top_k: Option<i32>,
     pub top_p: Option<f32>,
     pub presence_penalty: Option<f32>,
+    #[serde(alias = "frequency_penalty")]
     pub repetition_penalty: Option<f32>,
     pub penalty_decay: Option<f32>,
     pub stop: Option<StopField>,
@@ -188,6 +189,20 @@ mod tests {
             }
             other => panic!("unexpected response format: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_frequency_penalty_into_repetition_penalty() {
+        let req: ChatCompletionsReq = sonic_rs::from_str(
+            r#"{
+                "model":"test-model",
+                "messages":[{"role":"user","content":"hi"}],
+                "frequency_penalty":0.25
+            }"#,
+        )
+        .expect("parse chat completions request");
+
+        assert_eq!(req.repetition_penalty, Some(0.25));
     }
 }
 

@@ -436,7 +436,7 @@ impl EvalController {
             _ => {
                 return Err(ServiceError::internal(
                     "active evaluation changed while start was preparing",
-                ))
+                ));
             }
         };
         active.join_handle = Some(join_handle);

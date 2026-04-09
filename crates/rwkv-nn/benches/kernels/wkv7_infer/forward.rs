@@ -16,6 +16,7 @@ fn bench_wkv7_infer_forward(bencher: Bencher<'_, '_>, case: &common::Wkv7Case) {
     let initial_state = common::random_initial_state::<B>(case, &device);
     let context_mask = common::random_context_mask::<B>(case, &device);
     let batch_ids = Tensor::<B, 1, Int>::arange(0..case.batch_size as i64, &device);
+    let elapsed_t = Tensor::<B, 1, Int>::zeros([case.batch_size], &device);
 
     bencher.bench_local(|| {
         black_box(wkv7_infer_forward(
@@ -28,6 +29,7 @@ fn bench_wkv7_infer_forward(bencher: Bencher<'_, '_>, case: &common::Wkv7Case) {
             batch_ids.clone(),
             initial_state.clone(),
             context_mask.clone(),
+            elapsed_t.clone(),
         ))
     });
 }

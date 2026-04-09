@@ -38,7 +38,7 @@ impl SamplingConfig {
     pub fn check(&mut self, vocab_size: i32) {
         self.temperature = self.temperature.clamp(0.001, 1000.0);
 
-        if !(0..=vocab_size).contains(&self.top_k) {
+        if self.top_k <= 0 || self.top_k > vocab_size {
             self.top_k = vocab_size;
         }
 
@@ -112,4 +112,33 @@ pub struct SamplingConfigsTensor<B: Backend> {
     pub presence_penalties: Tensor<B, 1>,
     pub repetition_penalties: Tensor<B, 1>,
     pub penalties_decay: Tensor<B, 1>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SamplingConfig;
+
+    #[test]
+    fn zero_top_k_is_normalized_to_unlimited_vocab() {
+        let mut cfg = SamplingConfig {
+            top_k: 0,
+            ..Default::default()
+        };
+
+        cfg.check(1024);
+
+        assert_eq!(cfg.top_k, 1024);
+    }
+
+    #[test]
+    fn positive_top_k_is_kept() {
+        let mut cfg = SamplingConfig {
+            top_k: 66,
+            ..Default::default()
+        };
+
+        cfg.check(1024);
+
+        assert_eq!(cfg.top_k, 66);
+    }
 }

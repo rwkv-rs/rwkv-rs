@@ -2,6 +2,15 @@ use burn::cubecl;
 use cubecl::{cube, prelude::*};
 
 const W_SCALE: f32 = -0.6065306597; // -exp(-0.5), matches RWKV7 clampw CUDA kernel
+const TWO_TO_NEG_41: f32 = 4.547473508864641e-13;
+const ROTATOR1: u32 = 2654435769u32;
+
+#[cube]
+fn deterministic_dither(seed: u32) -> f32 {
+    let mixed = seed * ROTATOR1;
+    let mixed_signed = i32::reinterpret(mixed);
+    f32::cast_from(mixed_signed) * f32::new(TWO_TO_NEG_41)
+}
 
 #[cube(launch)]
 pub fn wkv7_infer_forward_kernel<F: Float>(
@@ -12,6 +21,7 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
     let context_length = comptime![config.context_length];
     let num_heads = comptime![config.num_heads];
     let head_size = comptime![config.head_size];
+    let use_dither = comptime![config.use_dither] != 0;
 
     let active_batch_index = CUBE_POS_Y as usize;
     let state_batch_index = inputs.batch_ids[active_batch_index] as usize;
@@ -37,6 +47,8 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
     let mut shared_value = SharedMemory::<F>::new(head_size);
     let mut shared_removal = SharedMemory::<F>::new(head_size);
     let mut shared_replacement = SharedMemory::<F>::new(head_size);
+    let elapsed_t = inputs.elapsed_t[state_batch_index];
+    let mut valid_t = 0u32;
 
     let batch_head_base =
         (active_batch_index * context_length * num_heads + head_index) * head_size;
@@ -57,8 +69,13 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
             shared_replacement[head_dim_index] = inputs.replacement[flat_index];
             shared_value[head_dim_index] = inputs.value[flat_index];
             let w_raw = inputs.weight_decay[flat_index];
-            let w_sig = F::new(1.0) / (F::new(1.0) + F::exp(-w_raw));
-            shared_weight_decay[head_dim_index] = F::exp(F::new(W_SCALE) * w_sig);
+            let w_raw_f32 = f32::cast_from(w_raw);
+            let w_sig = f32::new(1.0) / (f32::new(1.0) + f32::exp(-w_raw_f32));
+            let mut weight_decay = f32::exp(f32::new(W_SCALE) * w_sig);
+            if use_dither {
+                weight_decay += deterministic_dither(elapsed_t + valid_t);
+            }
+            shared_weight_decay[head_dim_index] = F::cast_from(weight_decay);
             sync_cube();
 
             let mut removal_state = F::new(0.0);
@@ -79,6 +96,7 @@ pub fn wkv7_infer_forward_kernel<F: Float>(
             }
 
             outputs.output[flat_index] = y;
+            valid_t += 1u32;
         }
     }
 
@@ -105,6 +123,7 @@ pub struct Wkv7InferForwardInputs<F: Float> {
     pub replacement: Tensor<F>,
     pub batch_ids: Tensor<u32>,
     pub context_mask: Tensor<F>,
+    pub elapsed_t: Tensor<u32>,
 }
 
 #[derive(CubeLaunch, CubeType)]
@@ -118,4 +137,5 @@ pub struct Wkv7InferConfig {
     pub context_length: usize,
     pub num_heads: usize,
     pub head_size: usize,
+    pub use_dither: u32,
 }
