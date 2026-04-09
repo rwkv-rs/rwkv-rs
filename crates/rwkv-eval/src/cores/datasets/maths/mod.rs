@@ -211,7 +211,11 @@ async fn get_final_answer(
     let req = CompletionRequest::new(
         model_name.to_string(),
         prompt_for_final_answer.into(),
-        vec![],
+        vec![
+            "}\\).".to_string(), // 实际匹配 `}\).`
+            "}\\)".to_string(),  // 实际匹配 `}\)`
+            "}\\\\".to_string(), // 实际匹配 `}\`
+        ],
         128,
         sampling_config,
         None,
