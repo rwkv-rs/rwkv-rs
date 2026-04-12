@@ -164,6 +164,7 @@ fn to_admin_eval_config_dto(cfg: RawEvalConfig) -> AdminEvalConfigDto {
         admin_api_key: cfg.admin_api_key,
         run_mode: cfg.run_mode,
         skip_checker: cfg.skip_checker,
+        skip_dataset_check: cfg.skip_dataset_check,
         judger_concurrency: cfg.judger_concurrency,
         checker_concurrency: cfg.checker_concurrency,
         db_pool_max_connections: cfg.db_pool_max_connections,
@@ -215,6 +216,7 @@ fn from_admin_eval_config_dto(payload: AdminEvalConfigDto) -> RawEvalConfig {
         admin_api_key: payload.admin_api_key,
         run_mode: payload.run_mode,
         skip_checker: payload.skip_checker,
+        skip_dataset_check: payload.skip_dataset_check,
         judger_concurrency: payload.judger_concurrency,
         checker_concurrency: payload.checker_concurrency,
         db_pool_max_connections: payload.db_pool_max_connections,
@@ -258,4 +260,3 @@ fn from_admin_eval_config_dto(payload: AdminEvalConfigDto) -> RawEvalConfig {
         },
     }
 }
-

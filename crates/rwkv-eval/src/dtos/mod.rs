@@ -365,6 +365,7 @@ pub struct AdminEvalConfigDto {
     pub admin_api_key: Option<String>,
     pub run_mode: Option<String>,
     pub skip_checker: Option<bool>,
+    pub skip_dataset_check: Option<bool>,
     pub judger_concurrency: Option<usize>,
     pub checker_concurrency: Option<usize>,
     pub db_pool_max_connections: Option<u32>,

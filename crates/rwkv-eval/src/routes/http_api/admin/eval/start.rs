@@ -11,7 +11,7 @@ use super::service::{admin_eval_status_response, parse_admin_eval_request};
     path = "/api/v1/admin/eval/start",
     request_body = AdminEvalConfigDto,
     responses(
-        (status = 200, description = "Started or reused the current admin evaluation process", body = AdminEvalStatusResponse),
+        (status = 200, description = "Started a new admin evaluation process. To recover historical task progress, submit the same config with run_mode=resume", body = AdminEvalStatusResponse),
         (status = 400, description = "Bad request", body = super::super::super::error::ErrorResponse),
         (status = 401, description = "Unauthorized", body = super::super::super::error::ErrorResponse),
         (status = 403, description = "Forbidden", body = super::super::super::error::ErrorResponse),

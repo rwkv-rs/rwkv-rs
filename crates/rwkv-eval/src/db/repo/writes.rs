@@ -243,6 +243,21 @@ pub async fn update_task_status(db: &Db, task_id: i32, status: TaskStatus) -> Re
     Ok(())
 }
 
+pub async fn update_task_config_path(
+    db: &Db,
+    task_id: i32,
+    config_path: Option<&str>,
+) -> Result<(), String> {
+    query("UPDATE task SET config_path = $1 WHERE task_id = $2")
+        .bind(config_path)
+        .bind(task_id)
+        .execute(&db.pool)
+        .await
+        .map_err(|err| format!("update task config_path failed: {err}"))?;
+
+    Ok(())
+}
+
 pub async fn recover_running_tasks(db: &Db) -> Result<StartupRecoveryStats, String> {
     let mut tx = db
         .pool

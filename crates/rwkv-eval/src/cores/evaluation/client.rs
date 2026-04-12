@@ -3,7 +3,7 @@ use rwkv_config::raw::eval::IntApiConfig;
 
 use crate::cores::{
     datasets::SamplingConfig,
-    inferers::{CompletionRequest, CompletionResponse},
+    inferers::{CompletionRequest, create_completion_streamed},
 };
 
 pub(crate) struct ClientWithConfig {
@@ -58,9 +58,7 @@ pub(crate) async fn check_client(
         None,
     );
 
-    let _: CompletionResponse = client
-        .completions()
-        .create_byot(&req)
+    create_completion_streamed(client, &req)
         .await
         .map_err(|error| format!("client `{model_name}` is unavailable: {error}"))?;
 

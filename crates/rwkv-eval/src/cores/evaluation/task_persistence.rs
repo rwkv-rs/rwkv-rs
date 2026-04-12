@@ -10,6 +10,7 @@ use crate::db::{
     find_tasks_by_identity,
     insert_task,
     list_attempt_records,
+    update_task_config_path,
     update_task_status,
 };
 use super::{
@@ -42,31 +43,8 @@ pub(crate) async fn prepare_task_execution(
             })
         }
         RunMode::Resume => {
-            if matches
-                .iter()
-                .any(|task| task.status == TaskStatus::Completed)
-            {
-                return Err(format!(
-                    "run_mode=resume refused because a matching completed task already exists: {}",
-                    render_task_lookup_list(&matches)
-                ));
-            }
-
-            let resumable = matches
-                .into_iter()
-                .filter(|task| matches!(task.status, TaskStatus::Running | TaskStatus::Failed))
-                .collect::<Vec<_>>();
-            if resumable.is_empty() {
-                return Err("run_mode=resume could not find a matching running/failed task".into());
-            }
-            if resumable.len() != 1 {
-                return Err(format!(
-                    "run_mode=resume is ambiguous because multiple matching running/failed tasks exist: {}",
-                    render_task_lookup_list(&resumable)
-                ));
-            }
-
-            let task_id = resumable[0].task_id;
+            let task_id = select_resume_task_id(&matches)?;
+            update_task_config_path(db, task_id, insert.config_path.as_deref()).await?;
             update_task_status(db, task_id, TaskStatus::Running).await?;
             delete_score_by_task_id(db, task_id).await?;
             let existing = list_attempt_records(db, task_id).await?;
@@ -102,6 +80,24 @@ pub(crate) async fn prepare_task_execution(
             })
         }
     }
+}
+
+pub(crate) fn select_resume_task_id(matches: &[TaskLookup]) -> Result<i32, String> {
+    if let Some(task) = matches
+        .iter()
+        .find(|task| matches!(task.status, TaskStatus::Running | TaskStatus::Failed))
+    {
+        return Ok(task.task_id);
+    }
+
+    if !matches.is_empty() {
+        return Err(format!(
+            "run_mode=resume refused because a matching completed task already exists: {}",
+            render_task_lookup_list(matches)
+        ));
+    }
+
+    Err("run_mode=resume could not find a matching running/failed task".into())
 }
 
 pub(crate) fn ensure_existing_results_match_plan(

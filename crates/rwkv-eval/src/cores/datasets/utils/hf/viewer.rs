@@ -1,12 +1,15 @@
 use std::{path::PathBuf, time::Duration};
 
+use once_cell::sync::Lazy;
 use serde::Deserialize;
 use sonic_rs::{Value, prelude::*};
-use tokio::time::sleep;
+use tokio::{sync::Semaphore, time::sleep};
 
 const PARQUET_ENDPOINT: &str = "https://datasets-server.huggingface.co/parquet";
 const ROWS_ENDPOINT: &str = "https://datasets-server.huggingface.co/rows";
 const VIEWER_RETRY_ATTEMPTS: usize = 3;
+const VIEWER_REQUEST_DELAY_MS: u64 = 200;
+static VIEWER_REQUEST_SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(1));
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ParquetFile {
@@ -72,10 +75,12 @@ pub async fn get_split_row_count(dataset: &str, config: &str, split: &str) -> us
 }
 
 async fn fetch_viewer_body(endpoint: &str, query: &[(&str, &str)], operation_name: &str) -> String {
+    let _permit = VIEWER_REQUEST_SEMAPHORE.acquire().await.unwrap();
     let client = reqwest::Client::new();
     let mut last_error = String::new();
 
     for attempt in 1..=VIEWER_RETRY_ATTEMPTS {
+        sleep(Duration::from_millis(VIEWER_REQUEST_DELAY_MS)).await;
         match client.get(endpoint).query(query).send().await {
             Ok(response) => {
                 let status = response.status();

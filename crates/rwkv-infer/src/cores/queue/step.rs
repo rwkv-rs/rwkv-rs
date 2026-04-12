@@ -21,7 +21,11 @@ pub(super) struct StepInputs {
 }
 
 impl Queue {
-    pub(super) fn build_step_inputs(&self, item_ids: &[usize]) -> StepInputs {
+    pub(super) fn build_step_inputs(
+        &self,
+        batch_status: BatchStatus,
+        item_ids: &[usize],
+    ) -> StepInputs {
         let mut batch_ids = Vec::with_capacity(item_ids.len());
         let mut contexts = Vec::with_capacity(item_ids.len());
         let mut context_masks = Vec::with_capacity(item_ids.len());
@@ -39,7 +43,7 @@ impl Queue {
                 .expect("batch_id should be assigned before forward");
             batch_ids.push(batch_id);
 
-            let (context, context_mask) = match self.batch_status {
+            let (context, context_mask) = match batch_status {
                 BatchStatus::PrefillWithoutOutput | BatchStatus::Prefill => {
                     let next_paragraph_id = match item.status {
                         QueueItemStatus::Waiting => 0,
@@ -72,7 +76,7 @@ impl Queue {
             context_masks.push(context_mask);
             sampling_configs.push(item.sampling_config);
             token_logprobs_configs.push(item.token_logprobs_config.clone());
-            if self.batch_status != BatchStatus::PrefillWithoutOutput {
+            if batch_status != BatchStatus::PrefillWithoutOutput {
                 match &item.guided_decoding_status {
                     GuidedDecodingStatus::Disabled => {}
                     GuidedDecodingStatus::Pending => {
@@ -112,8 +116,13 @@ impl Queue {
         }
     }
 
-    pub(super) fn apply_output_tokens(&mut self, item_ids: &[usize], new_tokens: Vec<TokenId>) {
-        let from_prefill = self.batch_status == BatchStatus::Prefill;
+    pub(super) fn apply_output_tokens(
+        &mut self,
+        batch_status: BatchStatus,
+        item_ids: &[usize],
+        new_tokens: Vec<TokenId>,
+    ) {
+        let from_prefill = batch_status == BatchStatus::Prefill;
         let token_by_batch_id: HashMap<usize, TokenId> = new_tokens
             .into_iter()
             .map(|token| (token.batch_index, token))
@@ -221,10 +230,10 @@ impl Queue {
         }
     }
 
-    pub(super) fn build_step_mode<'a>(
+    pub(super) fn build_step_mode(
         batch_status: BatchStatus,
-        step_inputs: &'a StepInputs,
-    ) -> StepMode<'a> {
+        step_inputs: &StepInputs,
+    ) -> StepMode<'_> {
         match batch_status {
             BatchStatus::PrefillWithoutOutput => StepMode::PrefillNoOutput,
             BatchStatus::Prefill | BatchStatus::Decode => StepMode::Sample {

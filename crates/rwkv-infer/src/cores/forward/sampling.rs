@@ -38,7 +38,7 @@ impl SamplingConfig {
     pub fn check(&mut self, vocab_size: i32) {
         self.temperature = self.temperature.clamp(0.001, 1000.0);
 
-        if !(0..=vocab_size).contains(&self.top_k) {
+        if self.top_k <= 0 || self.top_k > vocab_size {
             self.top_k = vocab_size;
         }
 

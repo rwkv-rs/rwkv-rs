@@ -45,7 +45,6 @@ pub struct Queue {
     guided_tokenizer_info: TokenizerInfo,
     guided_token_mask_state: GuidedTokenMaskBatchState,
     items: IndexMap<usize, QueueItem>,
-    batch_status: BatchStatus,
     detokenize_sender: mpsc::UnboundedSender<DetokenizeTask>,
     detokenize_receiver: mpsc::UnboundedReceiver<DetokenizeResult>,
     guided_decode_sender: mpsc::UnboundedSender<GuidedDecodeTask>,
@@ -142,7 +141,6 @@ impl Queue {
             guided_tokenizer_info,
             guided_token_mask_state,
             items: IndexMap::new(),
-            batch_status: BatchStatus::PrefillWithoutOutput,
             detokenize_sender,
             detokenize_receiver,
             guided_decode_sender,
@@ -173,7 +171,6 @@ impl Queue {
         item.num_paragraphs = item.context_tokens_for_step.len() / self.paragraph_len;
         self.prepare_item_for_push(item_id, &mut item)?;
         self.items.insert(item_id, item);
-        self.update_batch_status();
         Ok(())
     }
 
@@ -182,16 +179,17 @@ impl Queue {
             return None;
         }
 
+        let batch_status = self.infer_step_batch_status(item_ids)?;
         self.assign_batch_ids(item_ids);
         self.materialize_guided_prepared_states(item_ids);
-        let step_inputs = self.build_step_inputs(item_ids);
+        let step_inputs = self.build_step_inputs(batch_status, item_ids);
         let contexts: Vec<&[i32]> = step_inputs.contexts.iter().map(Vec::as_slice).collect();
         let context_masks: Vec<&[u8]> = step_inputs
             .context_masks
             .iter()
             .map(Vec::as_slice)
             .collect();
-        let step_mode = Self::build_step_mode(self.batch_status, &step_inputs);
+        let step_mode = Self::build_step_mode(batch_status, &step_inputs);
 
         self.model_forward
             .step(&step_inputs.batch_ids, &contexts, &context_masks, step_mode)
@@ -208,8 +206,6 @@ impl Queue {
                 self.guided_token_mask_state.reset(batch_id);
             }
         }
-
-        self.update_batch_status();
     }
 
     pub(crate) fn run_once(&mut self) -> usize {
@@ -220,7 +216,6 @@ impl Queue {
 
         self.drain_async_results();
         if self.items.is_empty() {
-            self.update_batch_status();
             return items_before;
         }
 
@@ -233,27 +228,34 @@ impl Queue {
             return items_before.saturating_sub(self.items.len());
         }
 
-        let item_ids = self.collect_step_item_ids();
-        if item_ids.is_empty() {
+        let Some((batch_status, item_ids)) = self.select_next_batch() else {
             if self.has_pending_async_work() {
                 thread::sleep(Duration::from_millis(1));
             }
-            self.update_batch_status();
             return items_before.saturating_sub(self.items.len());
-        }
-
-        let batch_status = self.batch_status;
+        };
         let started_at = Instant::now();
-        let step_result = self.step(&item_ids);
+        self.assign_batch_ids(&item_ids);
+        self.materialize_guided_prepared_states(&item_ids);
+        let step_inputs = self.build_step_inputs(batch_status, &item_ids);
+        let contexts: Vec<&[i32]> = step_inputs.contexts.iter().map(Vec::as_slice).collect();
+        let context_masks: Vec<&[u8]> = step_inputs
+            .context_masks
+            .iter()
+            .map(Vec::as_slice)
+            .collect();
+        let step_mode = Self::build_step_mode(batch_status, &step_inputs);
+        let step_result =
+            self.model_forward
+                .step(&step_inputs.batch_ids, &contexts, &context_masks, step_mode);
         self.record_perf_sample(batch_status, item_ids.len(), started_at.elapsed());
 
         match step_result {
             None => self.advance_prefill_items(&item_ids),
-            Some(new_tokens) => self.apply_output_tokens(&item_ids, new_tokens),
+            Some(new_tokens) => self.apply_output_tokens(batch_status, &item_ids, new_tokens),
         }
 
         self.drain_async_results();
-        self.update_batch_status();
         items_before.saturating_sub(self.items.len())
     }
 

@@ -1,27 +1,22 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::PathBuf;
 
 use async_openai::{Client, config::OpenAIConfig};
-use microsandbox::sandbox::Sandbox;
-use once_cell::sync::Lazy;
+use microsandbox::Sandbox;
 use serde::Deserialize;
+use tempfile::TempDir;
+use tokio::sync::oneshot;
+use uuid::Uuid;
 
 use crate::cores::{
     datasets::SamplingConfig,
-    inferers::{CompletionRequest, CompletionResponse},
+    inferers::{CompletionRequest, create_completion_streamed},
+    sandbox_queue::{SandboxQueue, SandboxQueueRequest, SandboxVerdict},
 };
-
-static SANDBOX_COUNTER: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(1));
 
 const DEFAULT_MEMORY_MB: u32 = 512;
 const DEFAULT_CPUS: u8 = 1;
-
-#[derive(Debug, Clone)]
-pub struct SandboxVerdict {
-    pub passed: bool,
-    pub fail_reason: String,
-    pub stdout: String,
-    pub stderr: String,
-}
+const SANDBOX_WORKDIR: &str = "/work";
+const SANDBOX_SCRIPT_NAME: &str = "judge.py";
 
 #[derive(Debug, Deserialize)]
 struct SandboxVerdictWire {
@@ -46,7 +41,9 @@ pub async fn get_completion(
         None,
         None,
     );
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
+    let resp = create_completion_streamed(model_client, &req)
+        .await
+        .unwrap();
     resp.choices[0].text.clone()
 }
 
@@ -56,39 +53,68 @@ import json
 print(json.dumps({"passed": True, "fail_reason": ""}))
 "#;
 
-    let verdict = run_python_verdict_script(probe_script)
+    let verdict = run_python_verdict_script_direct(probe_script)
         .await
-        .map_err(|err| {
-            format!("microsandbox unavailable: {err}. start it first with `msb server start --dev`")
-        })?;
+        .map_err(|err| format!("microsandbox unavailable: {err}"))?;
 
     if verdict.passed {
         Ok(())
     } else {
-        Err(format!(
-            "microsandbox probe failed: {}. start it first with `msb server start --dev`",
-            verdict.fail_reason
-        ))
+        Err(format!("microsandbox probe failed: {}", verdict.fail_reason))
     }
 }
 
-pub async fn run_python_verdict_script(script: &str) -> Result<SandboxVerdict, String> {
+pub async fn run_python_verdict_script(
+    script: &str,
+    sandbox_queue: &SandboxQueue,
+) -> Result<SandboxVerdict, String> {
+    let (result_tx, result_rx) = oneshot::channel();
+    sandbox_queue
+        .send(SandboxQueueRequest {
+            script: script.to_string(),
+            result_tx,
+        })
+        .await
+        .map_err(|_| "sandbox_queue closed before request was accepted".to_string())?;
+    result_rx
+        .await
+        .map_err(|_| "sandbox_queue closed before verdict was returned".to_string())?
+}
+
+pub(crate) async fn run_python_verdict_script_direct(
+    script: &str,
+) -> Result<SandboxVerdict, String> {
     let name = next_sandbox_name();
+    let workdir = TempDir::new().map_err(|err| format!("create temp workdir failed: {err}"))?;
+    let script_path = workdir.path().join(SANDBOX_SCRIPT_NAME);
+    tokio::fs::write(&script_path, script)
+        .await
+        .map_err(|err| {
+            format!(
+                "write temp judge script `{}` failed: {err}",
+                script_path.display()
+            )
+        })?;
     let sandbox = Sandbox::builder(name.clone())
         .image("python:3.12")
         .memory(DEFAULT_MEMORY_MB)
         .cpus(DEFAULT_CPUS)
+        .volume(SANDBOX_WORKDIR, |mount| mount.bind(workdir.path()))
         .create()
         .await
         .map_err(|err| format!("create sandbox `{name}` failed: {err}"))?;
 
-    let execution = sandbox.exec("python", ["-c", script]).await;
-    let stop_result = sandbox.stop().await;
-
-    if let Err(err) = stop_result {
+    let guest_script_path = guest_script_path();
+    let execution = sandbox
+        .exec_with("python", |exec| {
+            exec.args([guest_script_path.as_str()])
+                .env("PYTHONDONTWRITEBYTECODE", "1")
+        })
+        .await;
+    if let Err(err) = sandbox.stop_and_wait().await {
         eprintln!("failed to stop microsandbox `{name}`: {err}");
-    } else if let Err(err) = sandbox.wait().await {
-        eprintln!("failed to wait for microsandbox `{name}` shutdown: {err}");
+    } else if let Err(err) = sandbox.remove_persisted().await {
+        eprintln!("failed to remove persisted microsandbox `{name}`: {err}");
     }
 
     match execution {
@@ -128,8 +154,14 @@ pub async fn run_python_verdict_script(script: &str) -> Result<SandboxVerdict, S
 }
 
 fn next_sandbox_name() -> String {
-    let id = SANDBOX_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("rwkv-eval-coding-{id}")
+    format!("rwkv-eval-coding-{}", Uuid::new_v4().simple())
+}
+
+fn guest_script_path() -> String {
+    PathBuf::from(SANDBOX_WORKDIR)
+        .join(SANDBOX_SCRIPT_NAME)
+        .display()
+        .to_string()
 }
 
 fn parse_verdict_line(stdout: &str) -> Option<SandboxVerdictWire> {
@@ -138,4 +170,3 @@ fn parse_verdict_line(stdout: &str) -> Option<SandboxVerdictWire> {
         .rev()
         .find_map(|line| sonic_rs::from_str::<SandboxVerdictWire>(line.trim()).ok())
 }
-

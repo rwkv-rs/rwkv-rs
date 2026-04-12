@@ -41,7 +41,7 @@ static HUMAN_EVAL_PLUS_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[1.0],
+    avg_ks: &[32.0],
     pass_ks: &[1],
     with_llm_judger: false,
     create: |dataset_root| Box::new(HumanEvalPlus::new(dataset_root)),
@@ -52,19 +52,8 @@ pub struct HumanEvalPlus {
     test: Vec<HumanEvalPlusItem>,
 }
 
-pub struct HumanEvalPlusItem {
-    task_id: String,
-    prompt: String,
-    entry_point: String,
-    canonical_solution: String,
-    contract: String,
-    base_input: String,
-    plus_input: String,
-    atol: f64,
-}
-
 #[derive(Debug, Deserialize)]
-struct RawHumanEvalPlusItem {
+struct HumanEvalPlusItem {
     task_id: String,
     prompt: String,
     entry_point: String,
@@ -209,19 +198,7 @@ impl Benchmark for HumanEvalPlus {
             return true;
         }
 
-        self.test = read_gzip_jsonl_items::<RawHumanEvalPlusItem, _>(path)
-            .into_iter()
-            .map(|item| HumanEvalPlusItem {
-                task_id: item.task_id,
-                prompt: item.prompt,
-                entry_point: item.entry_point,
-                canonical_solution: item.canonical_solution,
-                contract: item.contract.unwrap_or_default(),
-                base_input: sonic_rs::to_string(&item.base_input).unwrap(),
-                plus_input: sonic_rs::to_string(&item.plus_input).unwrap(),
-                atol: item.atol.unwrap_or(0.0),
-            })
-            .collect();
+        self.test = read_gzip_jsonl_items::<HumanEvalPlusItem, _>(path);
 
         self.test.is_empty()
     }
@@ -267,6 +244,7 @@ impl Benchmark for HumanEvalPlus {
         model_client: &Client<OpenAIConfig>,
         _judger_model_name: Option<&str>,
         _judger_client: Option<&Client<OpenAIConfig>>,
+        sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
@@ -284,17 +262,20 @@ impl Benchmark for HumanEvalPlus {
         .await;
         let completion = extract_code(&generated.completion);
         let answer = format!("{}{}", item.prompt, completion);
-        let verdict = run_python_verdict_script(&get_judge_script(
-            &item.prompt,
-            &completion,
-            &item.entry_point,
-            &item.canonical_solution,
-            &item.contract,
-            &item.base_input,
-            &item.plus_input,
-            item.atol,
-            3,
-        ))
+        let verdict = run_python_verdict_script(
+            &get_judge_script(
+                &item.prompt,
+                &completion,
+                &item.entry_point,
+                &item.canonical_solution,
+                item.contract.as_deref().unwrap_or_default(),
+                &sonic_rs::to_string(&item.base_input).unwrap(),
+                &sonic_rs::to_string(&item.plus_input).unwrap(),
+                item.atol.unwrap_or(0.0),
+                3,
+            ),
+            sandbox_queue,
+        )
         .await
         .unwrap_or_else(|err| {
             panic!(

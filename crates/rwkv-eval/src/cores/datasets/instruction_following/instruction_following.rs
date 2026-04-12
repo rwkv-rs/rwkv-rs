@@ -45,7 +45,7 @@ static IFEVAL_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[4.0],
+    avg_ks: &[8.0],
     pass_ks: &[1],
     with_llm_judger: false,
     create: |dataset_root| Box::new(Ifeval::new(dataset_root)),
@@ -56,14 +56,8 @@ pub struct Ifeval {
     test: Vec<IfevalItem>,
 }
 
-pub struct IfevalItem {
-    key: usize,
-    prompt: String,
-    instructions: Vec<InstructionSpec>,
-}
-
 #[derive(Deserialize)]
-struct RawIfevalItem {
+pub struct IfevalItem {
     key: usize,
     prompt: String,
     instruction_id_list: Vec<String>,
@@ -77,6 +71,21 @@ impl Ifeval {
             test: Vec::new(),
         }
     }
+
+    fn instructions_for(item: &IfevalItem) -> Vec<InstructionSpec> {
+        assert_eq!(
+            item.instruction_id_list.len(),
+            item.kwargs.len(),
+            "ifeval row {} has mismatched instruction_id_list/kwargs lengths",
+            item.key
+        );
+
+        item.instruction_id_list
+            .iter()
+            .zip(item.kwargs.iter())
+            .map(|(id, args)| InstructionSpec::new(id.clone(), args.clone()))
+            .collect()
+    }
 }
 
 #[async_trait]
@@ -89,30 +98,7 @@ impl Benchmark for Ifeval {
             return true;
         }
 
-        self.test = read_jsonl_items::<RawIfevalItem, _>(&path)
-            .into_iter()
-            .map(|row| {
-                assert_eq!(
-                    row.instruction_id_list.len(),
-                    row.kwargs.len(),
-                    "ifeval row {} has mismatched instruction_id_list/kwargs lengths",
-                    row.key
-                );
-
-                let instructions = row
-                    .instruction_id_list
-                    .into_iter()
-                    .zip(row.kwargs)
-                    .map(|(id, args)| InstructionSpec::new(id, args))
-                    .collect();
-
-                IfevalItem {
-                    key: row.key,
-                    prompt: row.prompt,
-                    instructions,
-                }
-            })
-            .collect();
+        self.test = read_jsonl_items::<IfevalItem, _>(&path);
 
         self.test.is_empty()
     }
@@ -150,10 +136,11 @@ impl Benchmark for Ifeval {
 
     fn get_ref_answer(&self, index: usize) -> String {
         let item = &self.test[index];
+        let instructions = Self::instructions_for(item);
         format!(
             "key={}\n{}",
             item.key,
-            describe_instructions(&item.instructions)
+            describe_instructions(&instructions)
         )
     }
 
@@ -163,6 +150,7 @@ impl Benchmark for Ifeval {
         model_client: &Client<OpenAIConfig>,
         _judger_model_name: Option<&str>,
         _judger_client: Option<&Client<OpenAIConfig>>,
+        _sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
@@ -187,7 +175,7 @@ impl Benchmark for Ifeval {
             };
         }
 
-        let eval = evaluate_response(&self.test[index].instructions, &response);
+        let eval = evaluate_response(&Self::instructions_for(&self.test[index]), &response);
         let failed_checks = eval
             .checks
             .iter()

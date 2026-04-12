@@ -38,7 +38,7 @@ static MBPP_PLUS_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[1.0],
+    avg_ks: &[16.0],
     pass_ks: &[1],
     with_llm_judger: false,
     create: |dataset_root| Box::new(MbppPlus::new(dataset_root)),
@@ -49,18 +49,8 @@ pub struct MbppPlus {
     test: Vec<MbppPlusItem>,
 }
 
-pub struct MbppPlusItem {
-    task_id: String,
-    prompt: String,
-    entry_point: String,
-    canonical_solution: String,
-    base_input: String,
-    plus_input: String,
-    atol: f64,
-}
-
 #[derive(Debug, Deserialize)]
-struct RawMbppPlusItem {
+struct MbppPlusItem {
     task_id: String,
     prompt: String,
     entry_point: String,
@@ -70,7 +60,7 @@ struct RawMbppPlusItem {
     atol: Option<f64>,
 }
 
-fn read_mbpp_plus_items<P: AsRef<Path>>(path: P) -> Vec<RawMbppPlusItem> {
+fn read_mbpp_plus_items<P: AsRef<Path>>(path: P) -> Vec<MbppPlusItem> {
     use std::{
         fs::File,
         io::{BufRead, BufReader},
@@ -112,18 +102,7 @@ impl Benchmark for MbppPlus {
             return true;
         }
 
-        self.test = read_mbpp_plus_items(path)
-            .into_iter()
-            .map(|item| MbppPlusItem {
-                task_id: item.task_id,
-                prompt: item.prompt,
-                entry_point: item.entry_point,
-                canonical_solution: item.canonical_solution,
-                base_input: sonic_rs::to_string(&item.base_input).unwrap(),
-                plus_input: sonic_rs::to_string(&item.plus_input).unwrap(),
-                atol: item.atol.unwrap_or(0.0),
-            })
-            .collect();
+        self.test = read_mbpp_plus_items(path);
 
         self.test.is_empty()
     }
@@ -165,6 +144,7 @@ impl Benchmark for MbppPlus {
         model_client: &Client<OpenAIConfig>,
         _judger_model_name: Option<&str>,
         _judger_client: Option<&Client<OpenAIConfig>>,
+        sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
@@ -181,16 +161,19 @@ impl Benchmark for MbppPlus {
         )
         .await;
         let answer = extract_code(&generated.completion);
-        let verdict = run_python_verdict_script(&get_judge_script(
-            &item.task_id,
-            &answer,
-            &item.entry_point,
-            &item.canonical_solution,
-            &item.base_input,
-            &item.plus_input,
-            item.atol,
-            3,
-        ))
+        let verdict = run_python_verdict_script(
+            &get_judge_script(
+                &item.task_id,
+                &answer,
+                &item.entry_point,
+                &item.canonical_solution,
+                &sonic_rs::to_string(&item.base_input).unwrap(),
+                &sonic_rs::to_string(&item.plus_input).unwrap(),
+                item.atol.unwrap_or(0.0),
+                3,
+            ),
+            sandbox_queue,
+        )
         .await
         .unwrap_or_else(|err| {
             panic!(

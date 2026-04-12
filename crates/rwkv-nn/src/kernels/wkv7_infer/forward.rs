@@ -20,6 +20,7 @@ where
         batch_ids: IntTensor<Self>,
         initial_state: FloatTensor<Self>,
         context_mask: FloatTensor<Self>,
+        elapsed_t: IntTensor<Self>,
     ) -> Wkv7InferForwardOutput<FloatTensor<Self>> {
         wkv7_infer_forward_impl::<R, F, I, BT>(
             weight_decay,
@@ -31,6 +32,7 @@ where
             batch_ids,
             initial_state,
             context_mask,
+            elapsed_t,
         )
     }
 }
@@ -60,6 +62,7 @@ mod fusion_impl {
             batch_ids: IntTensor<Self>,
             initial_state: FloatTensor<Self>,
             context_mask: FloatTensor<Self>,
+            elapsed_t: IntTensor<Self>,
         ) -> Wkv7InferForwardOutput<FloatTensor<Self>> {
             let client = weight_decay.client.clone();
             let batch_size = weight_decay.shape[0];
@@ -92,6 +95,7 @@ mod fusion_impl {
                             batch_ids,
                             initial_state,
                             context_mask,
+                            elapsed_t,
                         ],
                         [output_out, final_state_out],
                     ) = self.desc.as_fixed();
@@ -105,6 +109,7 @@ mod fusion_impl {
                     let batch_ids_tensor = handles.get_int_tensor::<B1>(batch_ids);
                     let initial_state_tensor = handles.get_float_tensor::<B1>(initial_state);
                     let context_mask_tensor = handles.get_float_tensor::<B1>(context_mask);
+                    let elapsed_t_tensor = handles.get_int_tensor::<B1>(elapsed_t);
 
                     let output = B1::wkv7_infer_forward(
                         weight_decay_tensor,
@@ -116,6 +121,7 @@ mod fusion_impl {
                         batch_ids_tensor,
                         initial_state_tensor,
                         context_mask_tensor,
+                        elapsed_t_tensor,
                     );
 
                     handles.register_float_tensor::<B1>(&output_out.id, output.output);
@@ -133,6 +139,7 @@ mod fusion_impl {
             streams.tensor(&batch_ids);
             streams.tensor(&initial_state);
             streams.tensor(&context_mask);
+            streams.tensor(&elapsed_t);
 
             let output_desc = [
                 TensorIr::uninit(
@@ -159,6 +166,7 @@ mod fusion_impl {
                     batch_ids.into_ir(),
                     initial_state.into_ir(),
                     context_mask.into_ir(),
+                    elapsed_t.into_ir(),
                 ],
                 &output_desc,
             );

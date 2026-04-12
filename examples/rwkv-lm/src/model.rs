@@ -147,6 +147,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
         let multi_causal_cells_input = MultiCausalCellsIO {
             embedded_context: embedded_context_normalized,
             batch_ids,
+            elapsed_t: None,
             context_mask: None,
             embedded_token_shift_for_time_mix,
             state,
@@ -184,6 +185,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
         &self,
         contexts: Tensor<B, 2, Int>,
         batch_ids: Tensor<B, 1, Int>,
+        elapsed_t: Tensor<B, 1, Int>,
         context_masks: Option<Tensor<B, 2>>,
         embedded_token_shift_for_time_mix: &mut Vec<Tensor<B, 2>>,
         state: &mut Vec<Tensor<B, 4>>,
@@ -213,7 +215,12 @@ impl<B: Backend> AutoRegressiveModel<B> {
 
         let contexts = contexts.to_device(device);
         let batch_ids = batch_ids.to_device(device);
+        let elapsed_t = elapsed_t.to_device(device);
         let context_masks = context_masks.map(|m| m.to_device(device));
+        let full_batch_size = state
+            .first()
+            .expect("state must have num_cells elements")
+            .dims()[0];
 
         let [batch_size, context_length] = contexts.dims();
         assert!(context_length > 0, "tokens must be non-empty");
@@ -221,6 +228,17 @@ impl<B: Backend> AutoRegressiveModel<B> {
             batch_ids.dims(),
             [batch_size],
             "batch_ids shape mismatch with contexts"
+        );
+        debug_assert!(
+            state
+                .iter()
+                .all(|cell_state| cell_state.dims()[0] == full_batch_size),
+            "all infer state buffers must share the same full-batch slot dimension"
+        );
+        debug_assert_eq!(
+            elapsed_t.dims(),
+            [full_batch_size],
+            "elapsed_t shape must match the full-batch state dimension"
         );
 
         if let Some(mask) = context_masks.as_ref() {
@@ -244,6 +262,7 @@ impl<B: Backend> AutoRegressiveModel<B> {
         let multi_causal_cells_input = MultiCausalCellsIO {
             embedded_context,
             batch_ids,
+            elapsed_t: Some(elapsed_t),
             context_mask: context_masks.clone(),
             embedded_token_shift_for_time_mix: Some(take(embedded_token_shift_for_time_mix)),
             state: Some(take(state)),

@@ -27,6 +27,7 @@ pub trait Wkv7Kernel<B: Backend> {
         input: Wkv7ForwardInput<B>,
         state: Option<Tensor<B, 4>>,
         batch_ids: Tensor<B, 1, Int>,
+        elapsed_t: Option<Tensor<B, 1, Int>>,
         chunk_len: usize,
         context_mask: Option<Tensor<B, 2>>,
     ) -> KernelOutput<B>;
@@ -39,6 +40,7 @@ impl<B: Wkv7PretrainBackend> Wkv7Kernel<B> for KernelPretrain {
         input: Wkv7ForwardInput<B>,
         state: Option<Tensor<B, 4>>,
         _batch_ids: Tensor<B, 1, Int>,
+        _elapsed_t: Option<Tensor<B, 1, Int>>,
         chunk_len: usize,
         _context_mask: Option<Tensor<B, 2>>,
     ) -> KernelOutput<B> {
@@ -57,6 +59,7 @@ impl<B: Wkv7StatePassBackend> Wkv7Kernel<B> for KernelStatePass {
         input: Wkv7ForwardInput<B>,
         state: Option<Tensor<B, 4>>,
         _batch_ids: Tensor<B, 1, Int>,
+        _elapsed_t: Option<Tensor<B, 1, Int>>,
         chunk_len: usize,
         _context_mask: Option<Tensor<B, 2>>,
     ) -> KernelOutput<B> {
@@ -85,6 +88,7 @@ impl<B: Wkv7StateTuneBackend> Wkv7Kernel<B> for KernelStateTune {
         input: Wkv7ForwardInput<B>,
         state: Option<Tensor<B, 4>>,
         _batch_ids: Tensor<B, 1, Int>,
+        _elapsed_t: Option<Tensor<B, 1, Int>>,
         chunk_len: usize,
         _context_mask: Option<Tensor<B, 2>>,
     ) -> KernelOutput<B> {
@@ -117,10 +121,12 @@ impl<B: Wkv7InferBackend> Wkv7Kernel<B> for KernelInfer {
         input: Wkv7ForwardInput<B>,
         state: Option<Tensor<B, 4>>,
         batch_ids: Tensor<B, 1, Int>,
+        elapsed_t: Option<Tensor<B, 1, Int>>,
         _chunk_len: usize,
         context_mask: Option<Tensor<B, 2>>,
     ) -> KernelOutput<B> {
         let initial_state = state.expect("initial_state required");
+        let elapsed_t = elapsed_t.expect("elapsed_t required");
         let [active_batch_size, context_length, _num_heads, _head_size] = input.weight_decay.dims();
         let device = input.weight_decay.device();
         let context_mask = context_mask
@@ -136,6 +142,7 @@ impl<B: Wkv7InferBackend> Wkv7Kernel<B> for KernelInfer {
             batch_ids,
             initial_state,
             context_mask,
+            elapsed_t,
         );
 
         KernelOutput {

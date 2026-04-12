@@ -18,7 +18,7 @@ use tokio::sync::{Semaphore, mpsc};
 use crate::{
     BenchError,
     Result,
-    metrics::{AggregateMetrics, RequestMetrics, StageBreakdownMs, aggregate_metrics},
+    metrics::{AggregateMetrics, RequestMetrics, aggregate_metrics},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -392,25 +392,6 @@ fn has_finish_reason(value: &Value) -> bool {
         .is_some()
 }
 
-fn parse_timings_ms(value: &Value) -> StageBreakdownMs {
-    let timings = value.get("timings_ms").cloned().unwrap_or_default();
-    StageBreakdownMs {
-        validate_ms: read_from(&timings, "validate_ms"),
-        tokenize_ms: read_from(&timings, "tokenize_ms"),
-        queue_wait_ms: read_from(&timings, "queue_wait_ms"),
-        schedule_wait_ms: read_from(&timings, "schedule_wait_ms"),
-        prefill_first_ms: read_from(&timings, "prefill_first_ms"),
-        first_emit_ms: read_from(&timings, "first_emit_ms"),
-        prefill_total_ms: read_from(&timings, "prefill_total_ms"),
-        decode_total_ms: read_from(&timings, "decode_total_ms"),
-        request_total_ms: read_from(&timings, "request_total_ms"),
-    }
-}
-
-fn read_from(value: &Value, key: &str) -> Option<f64> {
-    value.get(key).and_then(|value| value.as_f64())
-}
-
 fn count_text_units(text: &str) -> usize {
     text.split_whitespace().count()
 }
@@ -429,7 +410,6 @@ fn parse_sse_line(
     last_token_s: &mut Option<f64>,
     itl_s: &mut Vec<f64>,
     output_tokens: &mut usize,
-    stage_ms: &mut StageBreakdownMs,
     saw_terminal: &mut bool,
 ) -> SseLineOutcome {
     let trimmed = line.trim();
@@ -457,7 +437,6 @@ fn parse_sse_line(
     let text = extract_chunk_text_from_value(&value);
     if text.is_empty() {
         if has_finish_reason(&value) {
-            *stage_ms = parse_timings_ms(&value);
             *saw_terminal = true;
             return SseLineOutcome {
                 terminal: true,
@@ -483,7 +462,6 @@ fn parse_sse_line(
 
     let terminal = has_finish_reason(&value);
     if terminal {
-        *stage_ms = parse_timings_ms(&value);
         *saw_terminal = true;
     }
 
@@ -549,7 +527,6 @@ async fn run_single_request(
         itl_s: Vec::new(),
         tpot_s: None,
         e2el_s: 0.0,
-        stage_ms: StageBreakdownMs::default(),
     };
 
     let response = match response {
@@ -619,7 +596,6 @@ async fn run_single_request(
                     &mut last_token_s,
                     &mut metrics.itl_s,
                     &mut metrics.output_tokens,
-                    &mut metrics.stage_ms,
                     &mut saw_terminal,
                 );
                 if outcome.terminal {
@@ -646,7 +622,6 @@ async fn run_single_request(
                     &mut last_token_s,
                     &mut metrics.itl_s,
                     &mut metrics.output_tokens,
-                    &mut metrics.stage_ms,
                     &mut saw_terminal,
                 );
                 if outcome.terminal {
@@ -683,9 +658,7 @@ async fn run_single_request(
     let body = response.text().await;
     match body {
         Ok(raw) => {
-            let parsed = from_str::<Value>(&raw);
-            if let Ok(value) = parsed {
-                metrics.stage_ms = parse_timings_ms(&value);
+            if let Ok(value) = from_str::<Value>(&raw) {
                 let text = extract_chunk_text_from_value(&value);
                 metrics.output_tokens = text.split_whitespace().count();
             }
@@ -755,7 +728,6 @@ pub async fn run_serve_benchmark(cfg: ServeConfig) -> Result<ServeRunResult> {
                     itl_s: Vec::new(),
                     tpot_s: None,
                     e2el_s: 0.0,
-                    stage_ms: StageBreakdownMs::default(),
                 },
             };
             (request_id, metrics)
@@ -917,4 +889,3 @@ pub fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     std::fs::write(path, to_string_pretty(value)?)?;
     Ok(())
 }
-

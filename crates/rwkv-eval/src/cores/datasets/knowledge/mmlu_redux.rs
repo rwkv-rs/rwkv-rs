@@ -180,6 +180,7 @@ impl Benchmark for MmluRedux {
         model_client: &Client<OpenAIConfig>,
         _judger_model_name: Option<&str>,
         _judger_client: Option<&Client<OpenAIConfig>>,
+        _sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,

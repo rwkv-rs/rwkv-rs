@@ -37,8 +37,8 @@ static HMMT_FEB25_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.997,
     },
     n_shots: &[0],
-    avg_ks: &[8.0],
-    pass_ks: &[8],
+    avg_ks: &[64.0],
+    pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(HmmtFeb25::new(dataset_root)),
 };
@@ -49,9 +49,9 @@ pub struct HmmtFeb25 {
 }
 
 pub struct HmmtFeb25Item {
-    question: String,
+    problem: String,
     answer: String,
-    subject: String,
+    problem_type: Option<Vec<String>>,
 }
 
 impl HmmtFeb25 {
@@ -77,11 +77,9 @@ impl Benchmark for HmmtFeb25 {
         }
 
         let parse_item = |row: &Row| HmmtFeb25Item {
-            question: get_string(row, "problem"),
+            problem: get_string(row, "problem"),
             answer: get_string(row, "answer"),
-            subject: get_optional_string_list(row, "problem_type")
-                .and_then(|values| values.into_iter().next())
-                .unwrap_or_else(|| "math".to_string()),
+            problem_type: get_optional_string_list(row, "problem_type"),
         };
         for path in parquet_paths {
             self.test.extend(read_parquet_items(path, parse_item));
@@ -114,7 +112,7 @@ impl Benchmark for HmmtFeb25 {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode)
+        get_expect_context(&item.problem, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
@@ -127,6 +125,7 @@ impl Benchmark for HmmtFeb25 {
         model_client: &Client<OpenAIConfig>,
         judger_model_name: Option<&str>,
         judger_client: Option<&Client<OpenAIConfig>>,
+        _sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,

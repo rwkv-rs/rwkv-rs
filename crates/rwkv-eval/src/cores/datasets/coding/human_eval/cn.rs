@@ -41,7 +41,7 @@ static HUMAN_EVAL_CN_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[1.0],
+    avg_ks: &[32.0],
     pass_ks: &[1],
     with_llm_judger: false,
     create: |dataset_root| Box::new(HumanEvalCn::new(dataset_root)),
@@ -52,16 +52,8 @@ pub struct HumanEvalCn {
     test: Vec<HumanEvalCnItem>,
 }
 
-pub struct HumanEvalCnItem {
-    task_id: String,
-    prompt: String,
-    entry_point: String,
-    canonical_solution: String,
-    test: String,
-}
-
 #[derive(Debug, Deserialize)]
-struct RawHumanEvalCnItem {
+struct HumanEvalCnItem {
     task_id: String,
     prompt: String,
     canonical_solution: String,
@@ -79,7 +71,7 @@ impl HumanEvalCn {
     }
 }
 
-fn extract_entry_point(raw: &RawHumanEvalCnItem) -> String {
+fn extract_entry_point(raw: &HumanEvalCnItem) -> String {
     if let Some(entry_point) = raw
         .entry_point
         .as_deref()
@@ -117,19 +109,7 @@ impl Benchmark for HumanEvalCn {
             return true;
         }
 
-        self.test = read_jsonl_items::<RawHumanEvalCnItem, _>(path)
-            .into_iter()
-            .map(|item| {
-                let entry_point = extract_entry_point(&item);
-                HumanEvalCnItem {
-                    task_id: item.task_id,
-                    prompt: item.prompt,
-                    entry_point,
-                    canonical_solution: item.canonical_solution,
-                    test: item.test,
-                }
-            })
-            .collect();
+        self.test = read_jsonl_items::<HumanEvalCnItem, _>(path);
 
         self.test.is_empty()
     }
@@ -144,7 +124,7 @@ impl Benchmark for HumanEvalCn {
             "human_eval_cn",
             &[UrlDownloadFile {
                 relative_path: PathBuf::from("humaneval.jsonl"),
-                url: "https://hf-mirror.com/datasets/zai-org/humaneval-x/resolve/main/data/python/data/humaneval.jsonl"
+                url: "https://huggingface.co/datasets/zai-org/humaneval-x/resolve/main/data/python/data/humaneval.jsonl"
                     .to_string(),
             }],
             1,
@@ -175,12 +155,14 @@ impl Benchmark for HumanEvalCn {
         model_client: &Client<OpenAIConfig>,
         _judger_model_name: Option<&str>,
         _judger_client: Option<&Client<OpenAIConfig>>,
+        sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
     ) -> Record {
         let item = &self.test[index];
         let expected_context = self.get_expected_context(index, cot_mode, n_shot);
+        let entry_point = extract_entry_point(item);
         let generated = get_code_completion_with_cot_mode(
             model_client,
             model_name,
@@ -192,15 +174,17 @@ impl Benchmark for HumanEvalCn {
         .await;
         let completion = extract_code(&generated.completion);
         let answer = format!("{}{}", item.prompt, completion);
-        let verdict =
-            run_python_verdict_script(&get_judge_script(&answer, &item.test, &item.entry_point, 3))
-                .await
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "human_eval_cn sandbox execution failed: {err}; task={}",
-                        item.task_id
-                    )
-                });
+        let verdict = run_python_verdict_script(
+            &get_judge_script(&answer, &item.test, &entry_point, 3),
+            sandbox_queue,
+        )
+        .await
+        .unwrap_or_else(|err| {
+            panic!(
+                "human_eval_cn sandbox execution failed: {err}; task={}",
+                item.task_id
+            )
+        });
 
         let ref_answer = self.get_ref_answer(index);
         Record {

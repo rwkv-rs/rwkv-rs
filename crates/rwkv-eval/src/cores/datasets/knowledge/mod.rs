@@ -10,7 +10,7 @@ use crate::cores::{
         get_prompt_for_final_answer,
         render_context,
     },
-    inferers::{CompletionRequest, CompletionResponse},
+    inferers::{CompletionRequest, CompletionResponse, create_completion_streamed},
 };
 
 pub mod ceval;
@@ -222,7 +222,9 @@ async fn get_final_answer(
         Some(choice_token_texts.clone()),
     );
 
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
+    let resp: CompletionResponse = create_completion_streamed(model_client, &req)
+        .await
+        .unwrap();
 
     let choice_logprobs = resp.choices[0]
         .logprobs

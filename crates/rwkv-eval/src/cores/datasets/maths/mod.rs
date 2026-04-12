@@ -14,7 +14,7 @@ use crate::cores::{
         get_completions_of_cot,
         render_context,
     },
-    inferers::{CompletionRequest, CompletionResponse},
+    inferers::{CompletionRequest, CompletionResponse, create_completion_streamed},
 };
 
 pub mod aime24;
@@ -120,18 +120,16 @@ pub fn json_value_as_text(value: &Value) -> Option<String> {
     }
 }
 
-pub fn get_expect_context(subject: &str, question: &str, cot_mode: CoTMode) -> String {
+pub fn get_expect_context(question: &str, cot_mode: CoTMode) -> String {
     if cot_mode != CoTMode::CoT {
         panic!("maths only supports CoT mode, got {cot_mode:?}");
     }
 
     let user_part = format!(
         concat!(
-            "You are a very talented expert in {subject}.\n",
-            "Solve the problem and output the final answer in \\boxed{{}}.\n",
             "Problem: {question}",
+            "Solve the problem and output the final answer in \\boxed{{}}.\n",
         ),
-        subject = subject,
         question = question,
     );
     let assistant_part = concat!(
@@ -211,14 +209,20 @@ async fn get_final_answer(
     let req = CompletionRequest::new(
         model_name.to_string(),
         prompt_for_final_answer.into(),
-        vec![],
+        vec![
+            "}\\).".to_string(), // 实际匹配 `}\).`
+            "}\\)".to_string(),  // 实际匹配 `}\)`
+            "}\\\\".to_string(), // 实际匹配 `}\`
+        ],
         128,
         sampling_config,
         None,
         None,
     );
 
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
+    let resp: CompletionResponse = create_completion_streamed(model_client, &req)
+        .await
+        .unwrap();
     resp.choices[0].text.clone()
 }
 

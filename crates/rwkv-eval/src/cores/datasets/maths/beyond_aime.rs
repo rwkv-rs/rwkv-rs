@@ -37,8 +37,8 @@ static BEYOND_AIME_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.997,
     },
     n_shots: &[0],
-    avg_ks: &[16.0],
-    pass_ks: &[8],
+    avg_ks: &[64.0],
+    pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(BeyondAime::new(dataset_root)),
 };
@@ -49,9 +49,8 @@ pub struct BeyondAime {
 }
 
 pub struct BeyondAimeItem {
-    question: String,
-    answer: String,
-    subject: String,
+    problem: String,
+    answer: i64,
 }
 
 impl BeyondAime {
@@ -77,9 +76,8 @@ impl Benchmark for BeyondAime {
         }
 
         let parse_item = |row: &Row| BeyondAimeItem {
-            question: get_string(row, "problem"),
-            answer: get_i64(row, "answer").to_string(),
-            subject: "math".to_string(),
+            problem: get_string(row, "problem"),
+            answer: get_i64(row, "answer"),
         };
         for path in parquet_paths {
             self.test.extend(read_parquet_items(path, parse_item));
@@ -112,11 +110,11 @@ impl Benchmark for BeyondAime {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode)
+        get_expect_context(&item.problem, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
-        self.test[index].answer.clone()
+        self.test[index].answer.to_string()
     }
 
     async fn answer_and_judge(
@@ -125,6 +123,7 @@ impl Benchmark for BeyondAime {
         model_client: &Client<OpenAIConfig>,
         judger_model_name: Option<&str>,
         judger_client: Option<&Client<OpenAIConfig>>,
+        _sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,

@@ -33,7 +33,7 @@ static SVAMP_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[1.0],
+    avg_ks: &[4.0],
     pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Svamp::new(dataset_root)),
@@ -132,7 +132,7 @@ impl Benchmark for Svamp {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode)
+        get_expect_context(&item.question, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
@@ -145,6 +145,7 @@ impl Benchmark for Svamp {
         model_client: &Client<OpenAIConfig>,
         judger_model_name: Option<&str>,
         judger_client: Option<&Client<OpenAIConfig>>,
+        _sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,

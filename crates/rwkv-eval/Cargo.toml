@@ -22,6 +22,7 @@ axum = { workspace = true }
 tower-http = { workspace = true }
 utoipa = { workspace = true }
 sqlx = { workspace = true }
+futures = { workspace = true }
 rwkv-config = { path = "../rwkv-config" }
 async-openai = { workspace = true }
 linkme = { workspace = true }
@@ -30,6 +31,8 @@ regex = { workspace = true }
 langdetect-rs = { workspace = true }
 flate2 = { workspace = true }
 microsandbox = { workspace = true }
+tempfile = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 fs4 = "0.13"

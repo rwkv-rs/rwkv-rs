@@ -158,6 +158,7 @@ impl<B: Backend> TimeMixer<B> {
         let TimeMixerIO {
             embedded_context,
             batch_ids,
+            elapsed_t,
             context_mask,
             value_from_first_cell,
             embedded_token_shift,
@@ -185,6 +186,7 @@ impl<B: Backend> TimeMixer<B> {
             wkv7_forward_input.clone(),
             state,
             batch_ids.clone(),
+            elapsed_t.clone(),
             16,
             context_mask.clone(),
         );
@@ -202,6 +204,7 @@ impl<B: Backend> TimeMixer<B> {
         TimeMixerIO {
             embedded_context: apply_context_mask(output_embedded_context, context_mask.clone()),
             batch_ids,
+            elapsed_t,
             context_mask: context_mask.clone(),
             value_from_first_cell: apply_context_mask(
                 weight_prepare_output.value_from_first_cell,
@@ -217,6 +220,7 @@ impl<B: Backend> TimeMixer<B> {
 pub struct TimeMixerIO<B: Backend> {
     pub embedded_context: Tensor<B, 3>,
     pub batch_ids: Tensor<B, 1, Int>,
+    pub elapsed_t: Option<Tensor<B, 1, Int>>,
     pub context_mask: Option<Tensor<B, 2>>,
     pub value_from_first_cell: Tensor<B, 3>,
     pub embedded_token_shift: Option<Tensor<B, 2>>,

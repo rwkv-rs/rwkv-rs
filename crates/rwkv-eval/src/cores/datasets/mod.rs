@@ -68,7 +68,10 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use once_cell::sync::Lazy;
 
-use crate::cores::inferers::{CompletionRequest, CompletionResponse};
+use crate::cores::{
+    inferers::{CompletionRequest, CompletionResponse, create_completion_streamed},
+    sandbox_queue::SandboxQueue,
+};
 
 pub struct BenchmarkInfo {
     pub name: BenchmarkName,
@@ -138,6 +141,7 @@ pub trait Benchmark: Send + Sync {
         model_client: &Client<OpenAIConfig>,
         judger_model_name: Option<&str>,
         judger_client: Option<&Client<OpenAIConfig>>,
+        sandbox_queue: &SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
@@ -199,7 +203,7 @@ pub async fn get_completions_of_cot(
         None,
     );
 
-    let resp: CompletionResponse = model_client.completions().create_byot(&req).await.unwrap();
+    let resp: CompletionResponse = create_completion_streamed(model_client, &req).await.unwrap();
 
     resp.choices[0].text.clone()
 }

@@ -20,16 +20,14 @@ pub async fn find_tasks_by_identity(
         r#"
         SELECT task_id, status
         FROM task
-        WHERE config_path IS NOT DISTINCT FROM $1
-          AND evaluator = $2
-          AND git_hash = $3
-          AND model_id = $4
-          AND benchmark_id = $5
-          AND sampling_config = $6::jsonb
+        WHERE evaluator = $1
+          AND git_hash = $2
+          AND model_id = $3
+          AND benchmark_id = $4
+          AND sampling_config = $5::jsonb
         ORDER BY task_id
         "#,
     )
-    .bind(&identity.config_path)
     .bind(&identity.evaluator)
     .bind(&identity.git_hash)
     .bind(identity.model_id)
@@ -38,6 +36,61 @@ pub async fn find_tasks_by_identity(
     .fetch_all(&db.pool)
     .await
     .map_err(|err| format!("find task by identity failed: {err}"))?;
+
+    rows.into_iter()
+        .map(|row| {
+            let status = row
+                .try_get::<String, _>("status")
+                .map_err(|err| format!("decode task status failed: {err}"))?;
+            Ok(TaskLookup {
+                task_id: row
+                    .try_get("task_id")
+                    .map_err(|err| format!("decode task id failed: {err}"))?,
+                status: TaskStatus::parse(&status)?,
+            })
+        })
+        .collect()
+}
+
+pub async fn find_tasks_by_resume_params(
+    db: &Db,
+    evaluator: &str,
+    git_hash: &str,
+    model_name: &str,
+    arch_version: &str,
+    data_version: &str,
+    num_params: &str,
+    benchmark_name: &str,
+    sampling_config_json: &str,
+) -> Result<Vec<TaskLookup>, String> {
+    let rows = query(
+        r#"
+        SELECT t.task_id, t.status
+        FROM task t
+        JOIN model m ON m.model_id = t.model_id
+        JOIN benchmark b ON b.benchmark_id = t.benchmark_id
+        WHERE t.evaluator = $1
+          AND t.git_hash = $2
+          AND m.model_name = $3
+          AND m.arch_version = $4
+          AND m.data_version = $5
+          AND m.num_params = $6
+          AND b.benchmark_name = $7
+          AND t.sampling_config = $8::jsonb
+        ORDER BY t.task_id DESC
+        "#,
+    )
+    .bind(evaluator)
+    .bind(git_hash)
+    .bind(model_name)
+    .bind(arch_version)
+    .bind(data_version)
+    .bind(num_params)
+    .bind(benchmark_name)
+    .bind(sampling_config_json)
+    .fetch_all(&db.pool)
+    .await
+    .map_err(|err| format!("find tasks by resume params failed: {err}"))?;
 
     rows.into_iter()
         .map(|row| {

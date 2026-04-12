@@ -41,7 +41,7 @@ static HUMAN_EVAL_FIX_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[1.0],
+    avg_ks: &[32.0],
     pass_ks: &[1],
     with_llm_judger: false,
     create: |dataset_root| Box::new(HumanEvalFix::new(dataset_root)),
@@ -55,6 +55,7 @@ pub struct HumanEvalFix {
 pub struct HumanEvalFixItem {
     task_id: String,
     prompt: String,
+    buggy_solution: String,
     entry_point: String,
     canonical_solution: String,
     test: String,
@@ -67,6 +68,26 @@ impl HumanEvalFix {
             test: Vec::new(),
         }
     }
+}
+
+fn build_fix_prompt(item: &HumanEvalFixItem) -> String {
+    let mut parts = Vec::new();
+
+    if !item.prompt.trim_end().is_empty() {
+        parts.push(item.prompt.trim_end().to_string());
+    }
+    if !item.buggy_solution.trim_end().is_empty() {
+        parts.push("# Buggy implementation:".to_string());
+        parts.push(item.buggy_solution.trim_end().to_string());
+    }
+    if !item.entry_point.trim().is_empty() {
+        parts.push(format!(
+            "# Fix the function `{}` so it passes all tests.",
+            item.entry_point.trim()
+        ));
+    }
+
+    parts.join("\n")
 }
 
 #[async_trait]
@@ -83,29 +104,11 @@ impl Benchmark for HumanEvalFix {
         }
 
         let parse_item = |row: &Row| {
-            let prompt = get_string(row, "prompt");
-            let buggy_solution = get_string(row, "buggy_solution");
-            let entry_point = get_string(row, "entry_point");
-            let mut parts = Vec::new();
-
-            if !prompt.trim_end().is_empty() {
-                parts.push(prompt.trim_end().to_string());
-            }
-            if !buggy_solution.trim_end().is_empty() {
-                parts.push("# Buggy implementation:".to_string());
-                parts.push(buggy_solution.trim_end().to_string());
-            }
-            if !entry_point.trim().is_empty() {
-                parts.push(format!(
-                    "# Fix the function `{}` so it passes all tests.",
-                    entry_point.trim()
-                ));
-            }
-
             HumanEvalFixItem {
                 task_id: get_string(row, "task_id"),
-                prompt: parts.join("\n"),
-                entry_point,
+                prompt: get_string(row, "prompt"),
+                buggy_solution: get_string(row, "buggy_solution"),
+                entry_point: get_string(row, "entry_point"),
                 canonical_solution: get_string(row, "canonical_solution"),
                 test: get_string(row, "test"),
             }
@@ -143,7 +146,8 @@ impl Benchmark for HumanEvalFix {
             panic!("human_eval_fix only supports NoCoT, got {cot_mode:?}");
         }
 
-        get_expected_context(&self.test[index].prompt, None, cot_mode)
+        let prompt = build_fix_prompt(&self.test[index]);
+        get_expected_context(&prompt, None, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
@@ -156,6 +160,7 @@ impl Benchmark for HumanEvalFix {
         model_client: &Client<OpenAIConfig>,
         _judger_model_name: Option<&str>,
         _judger_client: Option<&Client<OpenAIConfig>>,
+        sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,
@@ -172,15 +177,17 @@ impl Benchmark for HumanEvalFix {
         )
         .await;
         let answer = extract_code(&generated.completion);
-        let verdict =
-            run_python_verdict_script(&get_judge_script(&answer, &item.test, &item.entry_point, 3))
-                .await
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "human_eval_fix sandbox execution failed: {err}; task={}",
-                        item.task_id
-                    )
-                });
+        let verdict = run_python_verdict_script(
+            &get_judge_script(&answer, &item.test, &item.entry_point, 3),
+            sandbox_queue,
+        )
+        .await
+        .unwrap_or_else(|err| {
+            panic!(
+                "human_eval_fix sandbox execution failed: {err}; task={}",
+                item.task_id
+            )
+        });
 
         let ref_answer = self.get_ref_answer(index);
         Record {

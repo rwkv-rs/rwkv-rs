@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use sonic_rs::{Object as Map, Value, prelude::*};
+use serde::Deserialize;
 
 use crate::cores::datasets::{
     ALL_BENCHMARKS,
@@ -36,7 +36,7 @@ static MATH_500_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.99,
     },
     n_shots: &[0],
-    avg_ks: &[4.0],
+    avg_ks: &[8.0],
     pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Math500::new(dataset_root)),
@@ -47,10 +47,14 @@ pub struct Math500 {
     test: Vec<Math500Item>,
 }
 
+#[derive(Debug, Deserialize)]
 pub struct Math500Item {
-    question: String,
+    problem: String,
+    solution: String,
     answer: String,
     subject: String,
+    level: u8,
+    unique_id: String,
 }
 
 impl Math500 {
@@ -72,29 +76,7 @@ impl Benchmark for Math500 {
             return true;
         }
 
-        let take = |row: &Map, keys: &[&str]| {
-            keys.iter().find_map(|key| {
-                row.get(&key)
-                    .and_then(crate::cores::datasets::maths::json_value_as_text)
-            })
-        };
-
-        self.test = read_jsonl_items::<Value, _>(&path)
-            .into_iter()
-            .filter_map(|row| {
-                let row = row.as_object()?;
-                let question = take(row, &["problem", "question"])?;
-                let answer = take(row, &["expected_answer", "answer"]).unwrap_or_default();
-                let subject = take(row, &["subject", "category", "domain", "topic", "level"])
-                    .unwrap_or_else(|| "math".to_string());
-                Some((question, answer, subject))
-            })
-            .map(|(question, answer, subject)| Math500Item {
-                question,
-                answer,
-                subject,
-            })
-            .collect();
+        self.test = read_jsonl_items::<Math500Item, _>(&path);
 
         self.test.is_empty()
     }
@@ -125,7 +107,7 @@ impl Benchmark for Math500 {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode)
+        get_expect_context(&item.problem, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
@@ -138,6 +120,7 @@ impl Benchmark for Math500 {
         model_client: &Client<OpenAIConfig>,
         judger_model_name: Option<&str>,
         judger_client: Option<&Client<OpenAIConfig>>,
+        _sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use sonic_rs::{Object as Map, Value, prelude::*};
+use serde::Deserialize;
 
 use crate::cores::datasets::{
     ALL_BENCHMARKS,
@@ -37,7 +37,7 @@ static COLLEGE_MATH_INFO: BenchmarkInfo = BenchmarkInfo {
     },
     n_shots: &[0],
     avg_ks: &[8.0],
-    pass_ks: &[8],
+    pass_ks: &[1],
     with_llm_judger: true,
     create: |dataset_root| Box::new(CollegeMath::new(dataset_root)),
 };
@@ -47,10 +47,14 @@ pub struct CollegeMath {
     test: Vec<CollegeMathItem>,
 }
 
+#[derive(Debug, Deserialize)]
 pub struct CollegeMathItem {
+    data_source: String,
+    question_number: String,
     question: String,
     answer: String,
-    subject: String,
+    license: String,
+    data_topic: String,
 }
 
 impl CollegeMath {
@@ -72,29 +76,7 @@ impl Benchmark for CollegeMath {
             return true;
         }
 
-        let take = |row: &Map, keys: &[&str]| {
-            keys.iter().find_map(|key| {
-                row.get(&key)
-                    .and_then(crate::cores::datasets::maths::json_value_as_text)
-            })
-        };
-
-        self.test = read_jsonl_items::<Value, _>(&path)
-            .into_iter()
-            .filter_map(|row| {
-                let row = row.as_object()?;
-                let question = take(row, &["problem", "question"])?;
-                let answer = take(row, &["expected_answer", "answer"]).unwrap_or_default();
-                let subject = take(row, &["subject", "category", "domain", "topic", "source"])
-                    .unwrap_or_else(|| "math".to_string());
-                Some((question, answer, subject))
-            })
-            .map(|(question, answer, subject)| CollegeMathItem {
-                question,
-                answer,
-                subject,
-            })
-            .collect();
+        self.test = read_jsonl_items::<CollegeMathItem, _>(&path);
 
         self.test.is_empty()
     }
@@ -123,7 +105,7 @@ impl Benchmark for CollegeMath {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode)
+        get_expect_context(&item.question, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
@@ -136,6 +118,7 @@ impl Benchmark for CollegeMath {
         model_client: &Client<OpenAIConfig>,
         judger_model_name: Option<&str>,
         judger_client: Option<&Client<OpenAIConfig>>,
+        _sandbox_queue: &crate::cores::sandbox_queue::SandboxQueue,
         cot_mode: CoTMode,
         n_shot: u8,
         index: usize,

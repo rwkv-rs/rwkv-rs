@@ -14,6 +14,7 @@ pub struct CompletionsReq {
     pub top_k: Option<i32>,
     pub top_p: Option<f32>,
     pub presence_penalty: Option<f32>,
+    #[serde(alias = "frequency_penalty")]
     pub repetition_penalty: Option<f32>,
     pub penalty_decay: Option<f32>,
     pub stop: Option<StopField>,
@@ -35,6 +36,12 @@ pub struct Choice {
     pub text: String,
     pub index: u32,
     pub finish_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_stop_suffix: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_stop_suffix_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated_tokens: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logprobs: Option<Logprobs>,
 }

@@ -18,17 +18,22 @@ use std::{
     sync::Arc,
 };
 
-use rwkv_config::validated::eval::{EVAL_CFG, FinalEvalConfigBuilder};
-use tokio::sync::Semaphore;
+use rwkv_config::validated::eval::FinalEvalConfig;
+use tokio::sync::{Semaphore, mpsc};
 
 use crate::{
-    cores::datasets::{Benchmark, maths::set_llm_judger_semaphore},
+    cores::{
+        datasets::{Benchmark, maths::set_llm_judger_semaphore},
+        evaluators::coding::run_python_verdict_script_direct,
+        sandbox_queue::SandboxQueue,
+    },
     db::{
         BenchmarkInsert,
         Db,
         ModelInsert,
         TaskInsert,
         TaskStatus,
+        find_tasks_by_resume_params,
         upsert_benchmark,
         upsert_model,
     },
@@ -51,28 +56,54 @@ use self::{
     runtime::{CheckerRuntime, TaskExecutionState},
     sampling::build_avg_k_execution_plan,
     scheduler::{ModelRuntime, TaskRunState, run_scheduler},
-    task_persistence::{ensure_existing_results_match_plan, prepare_task_execution},
+    task_persistence::{
+        ensure_existing_results_match_plan,
+        prepare_task_execution,
+        select_resume_task_id,
+    },
 };
 
 const EVALUATOR_NAME: &str = "rwkv-lm-eval";
+const SANDBOX_QUEUE_CAPACITY: usize = 64;
 
-pub async fn run_evaluation(
-    eval_cfg_builder: FinalEvalConfigBuilder,
-    datasets_path: PathBuf,
-    config_path: PathBuf,
-    logs_path: PathBuf,
-) -> crate::services::ServiceResult<()> {
-    let runtime_control = EvalRuntimeControl::from_env()
-        .unwrap_or_else(|err| panic!("failed to initialize runtime control: {err}"));
+pub struct EvaluationRunRequest {
+    pub config: Arc<FinalEvalConfig>,
+    pub datasets_path: PathBuf,
+    pub config_path: PathBuf,
+    pub logs_path: PathBuf,
+    pub runtime_control: Option<EvalRuntimeControl>,
+}
+
+pub struct PreparedEvaluationRun {
+    task_runs: Vec<TaskRunState>,
+    model_runtimes: BTreeMap<String, ModelRuntime>,
+    db: Option<Db>,
+    checker_concurrency: usize,
+    runtime_control: Option<EvalRuntimeControl>,
+}
+
+pub async fn run_evaluation(request: EvaluationRunRequest) -> crate::services::ServiceResult<()> {
+    let prepared = prepare_evaluation(request).await?;
+    execute_prepared_evaluation(prepared).await
+}
+
+pub async fn prepare_evaluation(
+    request: EvaluationRunRequest,
+) -> crate::services::ServiceResult<PreparedEvaluationRun> {
+    let EvaluationRunRequest {
+        config,
+        datasets_path,
+        config_path,
+        logs_path,
+        runtime_control,
+    } = request;
     if let Some(control) = runtime_control.as_ref() {
         control
             .write_status(ObservedStatus::Starting, None)
             .unwrap_or_else(|err| panic!("failed to write runtime status: {err}"));
     }
 
-    eval_cfg_builder.build();
-
-    let eval_cfg = EVAL_CFG.get().unwrap();
+    let eval_cfg = config.as_ref();
     let options = build_evaluating_options(eval_cfg);
     let experiment_name = eval_cfg.experiment_name.clone();
     let experiment_desc = eval_cfg.experiment_desc.clone();
@@ -88,7 +119,7 @@ pub async fn run_evaluation(
         panic!("run_mode=resume requires database persistence");
     }
 
-    let target_models = collect_models();
+    let target_models = collect_models(eval_cfg);
     assert!(
         !target_models.is_empty(),
         "no target model matched model_arch_versions/model_data_versions/model_num_params"
@@ -125,6 +156,14 @@ pub async fn run_evaluation(
         &llm_judger_cfg.base_url,
         &llm_judger_cfg.api_key,
     ));
+    let (sandbox_queue, mut sandbox_queue_rx) =
+        mpsc::channel::<crate::cores::sandbox_queue::SandboxQueueRequest>(SANDBOX_QUEUE_CAPACITY);
+    tokio::spawn(async move {
+        while let Some(request) = sandbox_queue_rx.recv().await {
+            let verdict = run_python_verdict_script_direct(&request.script).await;
+            let _ = request.result_tx.send(verdict);
+        }
+    });
 
     if let Some(control) = runtime_control.as_ref() {
         control
@@ -135,8 +174,10 @@ pub async fn run_evaluation(
     println!("experiment: {experiment_name}");
     println!("run mode: {}", options.run_mode.as_str());
     println!("skip checker: {}", options.skip_checker);
+    println!("skip dataset check: {}", options.skip_dataset_check);
     println!("judger concurrency: {}", options.judger_concurrency);
     println!("checker concurrency: {}", options.checker_concurrency);
+    println!("sandbox_queue: serial");
     println!(
         "db pool max connections: {}",
         options.db_pool_max_connections
@@ -192,7 +233,7 @@ pub async fn run_evaluation(
 
     let model_runtimes = build_model_runtimes(&clients_with_cfg);
 
-    let benchmark_infos = collect_benchmarks();
+    let benchmark_infos = collect_benchmarks(eval_cfg);
     assert!(!benchmark_infos.is_empty(), "no benchmark selected");
     ensure_microsandbox_for_coding_benchmarks(&benchmark_infos).await;
 
@@ -205,23 +246,124 @@ pub async fn run_evaluation(
         &model_ids,
         &db,
         &options,
+        eval_cfg.skip_dataset_check,
         &experiment_name,
         &experiment_desc,
         &git_hash,
         &llm_judger_cfg.model,
         &llm_judger_client,
         checker_runtime,
+        &sandbox_queue,
     )
     .await;
+
+    Ok(PreparedEvaluationRun {
+        task_runs,
+        model_runtimes,
+        db,
+        checker_concurrency: options.checker_concurrency,
+        runtime_control,
+    })
+}
+
+pub async fn execute_prepared_evaluation(
+    prepared: PreparedEvaluationRun,
+) -> crate::services::ServiceResult<()> {
+    let PreparedEvaluationRun {
+        task_runs,
+        model_runtimes,
+        db,
+        checker_concurrency,
+        runtime_control,
+    } = prepared;
 
     run_scheduler(
         task_runs,
         model_runtimes,
         db,
-        options.checker_concurrency,
-        runtime_control.clone(),
+        checker_concurrency,
+        runtime_control,
     )
     .await;
+
+    Ok(())
+}
+
+pub async fn validate_resume_request(
+    db: &Db,
+    eval_cfg: &FinalEvalConfig,
+    datasets_path: &Path,
+) -> Result<(), String> {
+    let options = build_evaluating_options(eval_cfg);
+    if options.run_mode != RunMode::Resume {
+        return Ok(());
+    }
+
+    let target_models = collect_models(eval_cfg);
+    assert!(
+        !target_models.is_empty(),
+        "no target model matched model_arch_versions/model_data_versions/model_num_params"
+    );
+
+    let benchmark_infos = collect_benchmarks(eval_cfg);
+    assert!(!benchmark_infos.is_empty(), "no benchmark selected");
+
+    for &benchmark_info in &benchmark_infos {
+        validate_benchmark_info(benchmark_info);
+        let mut benchmark_box = (benchmark_info.create)(datasets_path.to_path_buf());
+        prepare_benchmark(
+            benchmark_info,
+            benchmark_box.as_mut(),
+            eval_cfg.skip_dataset_check,
+        )
+        .await;
+        let benchmark_len = benchmark_box.len();
+        let max_pass_k = benchmark_info
+            .pass_ks
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or_else(|| panic!("benchmark `{}` has empty pass_ks", benchmark_info.name.0));
+        let judger_model_name = benchmark_info
+            .with_llm_judger
+            .then_some(eval_cfg.llm_judger.model.as_str());
+        let checker_model_name =
+            (!options.skip_checker).then_some(eval_cfg.llm_checker.model.as_str());
+
+        for target_model in &target_models {
+            for &cot_mode in benchmark_info.cot_mode {
+                for &n_shot in benchmark_info.n_shots {
+                    for &avg_k in benchmark_info.avg_ks {
+                        let avg_k_plan =
+                            build_avg_k_execution_plan(benchmark_info.name.0, benchmark_len, avg_k);
+                        let sampling_config_json = build_task_sampling_config_json(
+                            benchmark_info,
+                            cot_mode,
+                            n_shot,
+                            &avg_k_plan,
+                            avg_k,
+                            max_pass_k,
+                            judger_model_name,
+                            checker_model_name,
+                        );
+                        let matches = find_tasks_by_resume_params(
+                            db,
+                            EVALUATOR_NAME,
+                            &eval_cfg.git_hash,
+                            &target_model.model,
+                            &target_model.model_arch_version,
+                            &target_model.model_data_version,
+                            &target_model.model_num_params,
+                            benchmark_info.name.0,
+                            &sampling_config_json,
+                        )
+                        .await?;
+                        select_resume_task_id(&matches)?;
+                    }
+                }
+            }
+        }
+    }
 
     Ok(())
 }
@@ -313,12 +455,14 @@ async fn build_task_runs(
     model_ids: &BTreeMap<String, i32>,
     db: &Option<Db>,
     options: &options::EvaluatingOptions,
+    skip_dataset_check: bool,
     experiment_name: &str,
     experiment_desc: &str,
     git_hash: &str,
     llm_judger_model_name: &str,
     llm_judger_client: &Arc<async_openai::Client<async_openai::config::OpenAIConfig>>,
     checker_runtime: Option<Arc<CheckerRuntime>>,
+    sandbox_queue: &SandboxQueue,
 ) -> Vec<TaskRunState> {
     let mut task_runs = Vec::new();
 
@@ -327,7 +471,7 @@ async fn build_task_runs(
 
         println!("prepare benchmark: {}", benchmark_info.name.0);
         let mut benchmark_box = (benchmark_info.create)(datasets_path.to_path_buf());
-        prepare_benchmark(benchmark_info, benchmark_box.as_mut()).await;
+        prepare_benchmark(benchmark_info, benchmark_box.as_mut(), skip_dataset_check).await;
         let benchmark: Arc<dyn Benchmark> = Arc::from(benchmark_box);
 
         let benchmark_id = if let Some(db) = db.as_ref() {
@@ -413,7 +557,6 @@ async fn build_task_runs(
                                 options.run_mode,
                                 options.skip_checker,
                                 crate::db::TaskIdentity {
-                                    config_path: Some(config_path.display().to_string()),
                                     evaluator: EVALUATOR_NAME.to_string(),
                                     git_hash: git_hash.to_string(),
                                     model_id,
@@ -479,6 +622,7 @@ async fn build_task_runs(
                             judger_model_name: judger_model_name.clone(),
                             judger_client: judger_client.clone(),
                             checker_runtime: checker_runtime.clone(),
+                            sandbox_queue: sandbox_queue.clone(),
                             target_model: Arc::clone(target_model),
                             model_key: model_key.clone(),
                             avg_k_plan,
