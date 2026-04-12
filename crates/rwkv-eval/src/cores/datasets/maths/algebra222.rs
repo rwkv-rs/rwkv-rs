@@ -121,7 +121,7 @@ impl Benchmark for Algebra222 {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode)
+        get_expect_context(&item.question, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {

@@ -49,9 +49,8 @@ pub struct BeyondAime {
 }
 
 pub struct BeyondAimeItem {
-    question: String,
-    answer: String,
-    subject: String,
+    problem: String,
+    answer: i64,
 }
 
 impl BeyondAime {
@@ -77,9 +76,8 @@ impl Benchmark for BeyondAime {
         }
 
         let parse_item = |row: &Row| BeyondAimeItem {
-            question: get_string(row, "problem"),
-            answer: get_i64(row, "answer").to_string(),
-            subject: "math".to_string(),
+            problem: get_string(row, "problem"),
+            answer: get_i64(row, "answer"),
         };
         for path in parquet_paths {
             self.test.extend(read_parquet_items(path, parse_item));
@@ -112,11 +110,11 @@ impl Benchmark for BeyondAime {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode)
+        get_expect_context(&item.problem, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
-        self.test[index].answer.clone()
+        self.test[index].answer.to_string()
     }
 
     async fn answer_and_judge(

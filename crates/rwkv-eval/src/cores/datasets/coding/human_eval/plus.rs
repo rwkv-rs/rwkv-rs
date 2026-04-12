@@ -52,19 +52,8 @@ pub struct HumanEvalPlus {
     test: Vec<HumanEvalPlusItem>,
 }
 
-pub struct HumanEvalPlusItem {
-    task_id: String,
-    prompt: String,
-    entry_point: String,
-    canonical_solution: String,
-    contract: String,
-    base_input: String,
-    plus_input: String,
-    atol: f64,
-}
-
 #[derive(Debug, Deserialize)]
-struct RawHumanEvalPlusItem {
+struct HumanEvalPlusItem {
     task_id: String,
     prompt: String,
     entry_point: String,
@@ -209,19 +198,7 @@ impl Benchmark for HumanEvalPlus {
             return true;
         }
 
-        self.test = read_gzip_jsonl_items::<RawHumanEvalPlusItem, _>(path)
-            .into_iter()
-            .map(|item| HumanEvalPlusItem {
-                task_id: item.task_id,
-                prompt: item.prompt,
-                entry_point: item.entry_point,
-                canonical_solution: item.canonical_solution,
-                contract: item.contract.unwrap_or_default(),
-                base_input: sonic_rs::to_string(&item.base_input).unwrap(),
-                plus_input: sonic_rs::to_string(&item.plus_input).unwrap(),
-                atol: item.atol.unwrap_or(0.0),
-            })
-            .collect();
+        self.test = read_gzip_jsonl_items::<HumanEvalPlusItem, _>(path);
 
         self.test.is_empty()
     }
@@ -291,10 +268,10 @@ impl Benchmark for HumanEvalPlus {
                 &completion,
                 &item.entry_point,
                 &item.canonical_solution,
-                &item.contract,
-                &item.base_input,
-                &item.plus_input,
-                item.atol,
+                item.contract.as_deref().unwrap_or_default(),
+                &sonic_rs::to_string(&item.base_input).unwrap(),
+                &sonic_rs::to_string(&item.plus_input).unwrap(),
+                item.atol.unwrap_or(0.0),
                 3,
             ),
             sandbox_queue,

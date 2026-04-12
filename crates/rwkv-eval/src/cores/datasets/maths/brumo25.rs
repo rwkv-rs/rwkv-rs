@@ -49,9 +49,9 @@ pub struct Brumo25 {
 }
 
 pub struct Brumo25Item {
-    question: String,
+    problem: String,
     answer: String,
-    subject: String,
+    _problem_type: Option<Vec<String>>,
 }
 
 impl Brumo25 {
@@ -77,11 +77,9 @@ impl Benchmark for Brumo25 {
         }
 
         let parse_item = |row: &Row| Brumo25Item {
-            question: get_string(row, "problem"),
+            problem: get_string(row, "problem"),
             answer: get_string(row, "answer"),
-            subject: get_optional_string_list(row, "problem_type")
-                .and_then(|values| values.into_iter().next())
-                .unwrap_or_else(|| "math".to_string()),
+            problem_type: get_optional_string_list(row, "problem_type"),
         };
         for path in parquet_paths {
             self.test.extend(read_parquet_items(path, parse_item));
@@ -114,7 +112,7 @@ impl Benchmark for Brumo25 {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode)
+        get_expect_context(&item.problem, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {

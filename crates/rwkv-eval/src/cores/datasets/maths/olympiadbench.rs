@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use sonic_rs::{Object as Map, Value, prelude::*};
+use serde::Deserialize;
+use sonic_rs::Value;
 
 use crate::cores::datasets::{
     ALL_BENCHMARKS,
@@ -47,10 +48,18 @@ pub struct OlympiadBench {
     test: Vec<OlympiadBenchItem>,
 }
 
+#[derive(Debug, Deserialize)]
 pub struct OlympiadBenchItem {
+    id: u64,
+    subfield: String,
+    context: Option<String>,
     question: String,
-    answer: String,
-    subject: String,
+    solution: Value,
+    final_answer: Vec<String>,
+    is_multiple_answer: bool,
+    unit: Option<String>,
+    answer_type: String,
+    error: Option<String>,
 }
 
 impl OlympiadBench {
@@ -72,37 +81,7 @@ impl Benchmark for OlympiadBench {
             return true;
         }
 
-        let take = |row: &Map, keys: &[&str]| {
-            keys.iter().find_map(|key| {
-                row.get(&key)
-                    .and_then(crate::cores::datasets::maths::json_value_as_text)
-            })
-        };
-
-        self.test = read_jsonl_items::<Value, _>(&path)
-            .into_iter()
-            .filter_map(|row| {
-                let row = row.as_object()?;
-                let question = take(row, &["problem", "question"])?;
-                let answer = take(row, &["expected_answer", "answer"])
-                    .or_else(|| {
-                        row.get(&"final_answer")
-                            .and_then(Value::as_array)
-                            .and_then(|answers| answers.first())
-                            .and_then(crate::cores::datasets::maths::json_value_as_text)
-                            .map(|value| value.trim_matches('$').to_string())
-                    })
-                    .unwrap_or_default();
-                let subject = take(row, &["subject", "category", "domain", "topic", "source"])
-                    .unwrap_or_else(|| "math".to_string());
-                Some((question, answer, subject))
-            })
-            .map(|(question, answer, subject)| OlympiadBenchItem {
-                question,
-                answer,
-                subject,
-            })
-            .collect();
+        self.test = read_jsonl_items::<OlympiadBenchItem, _>(&path);
 
         self.test.is_empty()
     }
@@ -131,11 +110,20 @@ impl Benchmark for OlympiadBench {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode)
+        get_expect_context(&item.question, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
-        self.test[index].answer.clone()
+        self.test[index]
+            .final_answer
+            .first()
+            .cloned()
+            .unwrap_or_else(|| {
+                panic!(
+                    "olympiadbench row missing final_answer at index={index}; id={}",
+                    self.test[index].id
+                )
+            })
     }
 
     async fn answer_and_judge(

@@ -120,18 +120,16 @@ pub fn json_value_as_text(value: &Value) -> Option<String> {
     }
 }
 
-pub fn get_expect_context(subject: &str, question: &str, cot_mode: CoTMode) -> String {
+pub fn get_expect_context(question: &str, cot_mode: CoTMode) -> String {
     if cot_mode != CoTMode::CoT {
         panic!("maths only supports CoT mode, got {cot_mode:?}");
     }
 
     let user_part = format!(
         concat!(
-            "You are a very talented expert in {subject}.\n",
-            "Solve the problem and output the final answer in \\boxed{{}}.\n",
             "Problem: {question}",
+            "Solve the problem and output the final answer in \\boxed{{}}.\n",
         ),
-        subject = subject,
         question = question,
     );
     let assistant_part = concat!(

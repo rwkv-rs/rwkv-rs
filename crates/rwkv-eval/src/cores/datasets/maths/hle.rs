@@ -49,9 +49,11 @@ pub struct Hle {
 }
 
 pub struct HleItem {
+    image: Option<String>,
     question: String,
     answer: String,
-    subject: String,
+    category: Option<String>,
+    raw_subject: Option<String>,
 }
 
 impl Hle {
@@ -78,11 +80,11 @@ impl Benchmark for Hle {
             let has_image =
                 get_optional_string(row, "image").is_some_and(|value| !value.trim().is_empty());
             (!has_image).then(|| HleItem {
+                image: get_optional_string(row, "image"),
                 question: get_string(row, "question"),
                 answer: get_string(row, "answer"),
-                subject: get_optional_string(row, "category")
-                    .or_else(|| get_optional_string(row, "raw_subject"))
-                    .unwrap_or_else(|| "math".to_string()),
+                category: get_optional_string(row, "category"),
+                raw_subject: get_optional_string(row, "raw_subject"),
             })
         };
         for path in parquet_paths {
@@ -117,7 +119,7 @@ impl Benchmark for Hle {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.subject, &item.question, cot_mode)
+        get_expect_context(&item.question, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {

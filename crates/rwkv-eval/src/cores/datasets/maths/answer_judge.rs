@@ -49,9 +49,11 @@ pub struct AnswerJudge {
 }
 
 pub struct AnswerJudgeItem {
+    item_name: String,
     question: String,
-    answer: String,
-    subject: String,
+    gt_answer: String,
+    gen_answer: String,
+    mean_annotation_score: f64,
 }
 
 impl AnswerJudge {
@@ -121,32 +123,16 @@ impl Benchmark for AnswerJudge {
 
         let parse_item = |row: &Row| {
             let item_name = get_string(row, "item_name");
-            let question = get_string(row, "question");
-            let reference_answer = get_string(row, "gt_answer");
-            let predicted_answer = get_string(row, "gen_answer");
-            let score = mean_annotation_score(row).unwrap_or_else(|| {
+            let mean_annotation_score = mean_annotation_score(row).unwrap_or_else(|| {
                 panic!("judges-verdict missing valid annotations for item {item_name}")
             });
-            let expected = if score > 0.5 {
-                "Judgement: Yes"
-            } else {
-                "Judgement: No"
-            };
 
             AnswerJudgeItem {
-                question: format!(
-                    concat!(
-                        "Question: {question}\n",
-                        "Reference Answer: {reference_answer}\n",
-                        "Student Answer: {predicted_answer}\n",
-                        "Judge whether the student answer is correct.",
-                    ),
-                    question = question,
-                    reference_answer = reference_answer,
-                    predicted_answer = predicted_answer,
-                ),
-                answer: expected.to_string(),
-                subject: "judgement".to_string(),
+                item_name,
+                question: get_string(row, "question"),
+                gt_answer: get_string(row, "gt_answer"),
+                gen_answer: get_string(row, "gen_answer"),
+                mean_annotation_score,
             }
         };
         for path in parquet_paths {
@@ -179,12 +165,27 @@ impl Benchmark for AnswerJudge {
 
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
+        let prompt = format!(
+            concat!(
+                "Question: {question}\n",
+                "Reference Answer: {reference_answer}\n",
+                "Student Answer: {predicted_answer}\n",
+                "Judge whether the student answer is correct.",
+            ),
+            question = item.question,
+            reference_answer = item.gt_answer,
+            predicted_answer = item.gen_answer,
+        );
 
-        get_expect_context(&item.subject, &item.question, cot_mode)
+        get_expect_context(&prompt, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
-        self.test[index].answer.clone()
+        if self.test[index].mean_annotation_score > 0.5 {
+            "Judgement: Yes".to_string()
+        } else {
+            "Judgement: No".to_string()
+        }
     }
 
     async fn answer_and_judge(

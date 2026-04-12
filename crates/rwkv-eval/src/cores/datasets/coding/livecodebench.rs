@@ -51,17 +51,8 @@ pub struct LiveCodeBench {
     test: Vec<LiveCodeBenchItem>,
 }
 
-pub struct LiveCodeBenchItem {
-    task_id: String,
-    prompt: String,
-    starter_code: String,
-    public_test_cases: String,
-    private_test_cases: String,
-    metadata: String,
-}
-
 #[derive(Debug, Deserialize)]
-struct RawLiveCodeBenchItem {
+struct LiveCodeBenchItem {
     question_title: String,
     question_content: String,
     question_id: String,
@@ -76,6 +67,14 @@ impl LiveCodeBench {
         Self {
             dataset_root: dataset_root.as_ref().to_path_buf(),
             test: Vec::new(),
+        }
+    }
+
+    fn prompt_for(item: &LiveCodeBenchItem) -> &str {
+        if item.question_content.trim().is_empty() {
+            item.question_title.as_str()
+        } else {
+            item.question_content.as_str()
         }
     }
 }
@@ -102,26 +101,8 @@ impl Benchmark for LiveCodeBench {
         }
 
         for file_name in file_names {
-            self.test.extend(
-                read_jsonl_items::<RawLiveCodeBenchItem, _>(root.join(file_name))
-                    .into_iter()
-                    .map(|item| {
-                        let prompt = if item.question_content.trim().is_empty() {
-                            item.question_title
-                        } else {
-                            item.question_content
-                        };
-
-                        LiveCodeBenchItem {
-                            task_id: item.question_id,
-                            prompt,
-                            starter_code: item.starter_code,
-                            public_test_cases: item.public_test_cases,
-                            private_test_cases: item.private_test_cases,
-                            metadata: item.metadata,
-                        }
-                    }),
-            );
+            self.test
+                .extend(read_jsonl_items::<LiveCodeBenchItem, _>(root.join(file_name)));
         }
 
         self.test.is_empty()
@@ -166,7 +147,7 @@ impl Benchmark for LiveCodeBench {
 
         let item = &self.test[index];
 
-        let prompt = &item.prompt.trim();
+        let prompt = Self::prompt_for(item).trim();
         let starter_code = &item.starter_code.trim_end();
         let has_starter_code = !starter_code.trim().is_empty();
         let user_part = if has_starter_code {
@@ -271,7 +252,7 @@ impl Benchmark for LiveCodeBench {
         .unwrap_or_else(|err| {
             panic!(
                 "livecodebench sandbox execution failed: {err}; task={}",
-                item.task_id
+                item.question_id
             )
         });
 
