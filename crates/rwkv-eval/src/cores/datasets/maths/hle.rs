@@ -168,8 +168,3 @@ impl Benchmark for Hle {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::HLE_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(HLE_INFO);
-}

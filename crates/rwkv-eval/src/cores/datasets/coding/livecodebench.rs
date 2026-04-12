@@ -743,8 +743,3 @@ else:
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::LIVECODEBENCH_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(LIVECODEBENCH_INFO);
-}

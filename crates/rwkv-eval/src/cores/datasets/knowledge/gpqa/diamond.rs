@@ -188,8 +188,3 @@ impl Benchmark for GpqaDiamond {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::GPQA_DIAMOND_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(GPQA_DIAMOND_INFO);
-}

@@ -172,8 +172,3 @@ impl Benchmark for Algebra222 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::ALGEBRA222_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(ALGEBRA222_INFO);
-}

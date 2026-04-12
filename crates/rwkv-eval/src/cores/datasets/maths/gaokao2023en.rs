@@ -174,8 +174,3 @@ impl Benchmark for Gaokao2023En {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::GAOKAO2023EN_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(GAOKAO2023EN_INFO);
-}

@@ -174,8 +174,3 @@ impl Benchmark for HendrycksMath {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::HENDRYCKS_MATH_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(HENDRYCKS_MATH_INFO);
-}

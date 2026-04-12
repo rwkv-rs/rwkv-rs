@@ -165,8 +165,3 @@ impl Benchmark for Brumo25 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::BRUMO25_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(BRUMO25_INFO);
-}

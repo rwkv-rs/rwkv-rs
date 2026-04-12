@@ -13,6 +13,7 @@ edit-url-template = "https://github.com/rwkv-rs/rwkv-rs/edit/main/rwkv-rs-book/{
 
 [preprocessor.gettext]
 after = ["links"]
+optional = true
 
 [build]
 extra-watch-dirs = ["po"]

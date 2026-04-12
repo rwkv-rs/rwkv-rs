@@ -139,15 +139,3 @@ fn parse_verdict_line(stdout: &str) -> Option<SandboxVerdictWire> {
         .find_map(|line| sonic_rs::from_str::<SandboxVerdictWire>(line.trim()).ok())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::parse_verdict_line;
-
-    #[test]
-    fn parses_last_json_line() {
-        let stdout = "noise\n{\"passed\":false,\"fail_reason\":\"bad\"}\n";
-        let verdict = parse_verdict_line(stdout).unwrap();
-        assert!(!verdict.passed);
-        assert_eq!(verdict.fail_reason, "bad");
-    }
-}

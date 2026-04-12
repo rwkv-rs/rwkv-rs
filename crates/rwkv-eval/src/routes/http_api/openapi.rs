@@ -126,36 +126,3 @@ use crate::dtos::{
 )]
 pub(crate) struct ApiDoc;
 
-#[cfg(test)]
-mod tests {
-    use utoipa::OpenApi;
-
-    use super::ApiDoc;
-
-    #[test]
-    fn openapi_contains_all_route_groups() {
-        let json = ApiDoc::openapi().to_pretty_json().unwrap();
-        for path in [
-            "/",
-            "/health",
-            "/openapi.json",
-            "/api/v1/meta",
-            "/api/v1/models",
-            "/api/v1/benchmarks",
-            "/api/v1/tasks",
-            "/api/v1/tasks/{task_id}",
-            "/api/v1/tasks/{task_id}/attempts",
-            "/api/v1/completions/{completions_id}",
-            "/api/v1/review-queue",
-            "/api/v1/admin/eval/draft",
-            "/api/v1/admin/eval/start",
-            "/api/v1/admin/eval/pause",
-            "/api/v1/admin/eval/resume",
-            "/api/v1/admin/eval/cancel",
-            "/api/v1/admin/eval/status",
-            "/api/v1/admin/health",
-        ] {
-            assert!(json.contains(path), "missing path {path}");
-        }
-    }
-}

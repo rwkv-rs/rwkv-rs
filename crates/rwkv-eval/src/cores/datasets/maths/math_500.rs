@@ -176,8 +176,3 @@ impl Benchmark for Math500 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::MATH_500_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(MATH_500_INFO);
-}

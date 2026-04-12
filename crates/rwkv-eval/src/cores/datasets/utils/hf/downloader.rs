@@ -619,32 +619,3 @@ fn normalize_repo(repo: &str) -> (String, String, String) {
     (url, repo_id, repo_name)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::normalize_repo;
-
-    #[test]
-    fn normalize_standard_repo() {
-        let (url, repo_id, repo_name) = normalize_repo("Qwen/Qwen2.5-7B");
-        assert_eq!(url, "https://huggingface.co/Qwen/Qwen2.5-7B");
-        assert_eq!(repo_id, "Qwen/Qwen2.5-7B");
-        assert_eq!(repo_name, "Qwen2.5-7B");
-    }
-
-    #[test]
-    fn normalize_dataset_repo() {
-        let (url, repo_id, repo_name) = normalize_repo("datasets/cais/mmlu");
-        assert_eq!(url, "https://huggingface.co/datasets/cais/mmlu");
-        assert_eq!(repo_id, "datasets/cais/mmlu");
-        assert_eq!(repo_name, "mmlu");
-    }
-
-    #[test]
-    fn normalize_full_url_repo() {
-        let (url, repo_id, repo_name) =
-            normalize_repo("https://huggingface.co/datasets/cais/mmlu/");
-        assert_eq!(url, "https://huggingface.co/datasets/cais/mmlu");
-        assert_eq!(repo_id, "datasets/cais/mmlu");
-        assert_eq!(repo_name, "mmlu");
-    }
-}

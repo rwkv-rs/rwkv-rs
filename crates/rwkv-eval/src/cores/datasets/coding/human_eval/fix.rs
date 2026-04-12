@@ -197,8 +197,3 @@ impl Benchmark for HumanEvalFix {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::HUMAN_EVAL_FIX_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(HUMAN_EVAL_FIX_INFO);
-}

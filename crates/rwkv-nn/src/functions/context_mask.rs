@@ -2,8 +2,8 @@ use burn::{Tensor, prelude::Backend};
 
 /// Apply `context_mask` to `embedded_context`, forcing masked timesteps to be strict zeros.
 ///
-/// - `embedded_context`: [batch_size, context_length, embedded_dim]
-/// - `context_mask`: [batch_size, context_length] with values 0/1
+/// - `embedded_context`: `[batch_size, context_length, embedded_dim]`
+/// - `context_mask`: `[batch_size, context_length]` with values `0/1`
 pub fn apply_context_mask<B: Backend>(
     embedded_context: Tensor<B, 3>,
     context_mask: Option<Tensor<B, 2>>,
@@ -26,8 +26,8 @@ pub fn apply_context_mask<B: Backend>(
 
 /// Count valid tokens per batch lane.
 ///
-/// - input: [batch_size, context_length] with values 0/1
-/// - output: [batch_size]
+/// - input: `[batch_size, context_length]` with values `0/1`
+/// - output: `[batch_size]`
 pub fn num_tokens_valid<B: Backend>(context_mask: Tensor<B, 2>) -> Tensor<B, 1> {
     context_mask.sum_dim(1).squeeze_dim(1)
 }

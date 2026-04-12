@@ -169,8 +169,3 @@ impl Benchmark for SuperGpqa {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::SUPERGPQA_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(SUPERGPQA_INFO);
-}

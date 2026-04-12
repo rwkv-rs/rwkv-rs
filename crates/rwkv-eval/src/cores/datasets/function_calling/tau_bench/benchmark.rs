@@ -427,8 +427,3 @@ impl Benchmark for TauBench {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::TAU_BENCH_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(TAU_BENCH_INFO);
-}

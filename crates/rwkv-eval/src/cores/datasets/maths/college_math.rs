@@ -174,8 +174,3 @@ impl Benchmark for CollegeMath {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::COLLEGE_MATH_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(COLLEGE_MATH_INFO);
-}

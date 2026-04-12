@@ -1,0 +1,33 @@
+name: Quality Gates
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  docs-and-quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install mdBook
+        uses: taiki-e/install-action@mdbook
+
+      - name: Check workspace
+        run: cargo check --workspace
+
+      - name: Build rustdoc
+        run: cargo doc --workspace --no-deps
+
+      - name: Build book
+        run: mdbook build rwkv-rs-book

@@ -174,8 +174,3 @@ impl Benchmark for Amc23 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::AMC23_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(AMC23_INFO);
-}

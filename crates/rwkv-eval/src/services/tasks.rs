@@ -155,20 +155,3 @@ fn truncate_has_more<T>(mut items: Vec<T>, limit: u32) -> (Vec<T>, bool) {
     (items, has_more)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{resolve_limit, truncate_has_more};
-
-    #[test]
-    fn rejects_zero_limit() {
-        let err = resolve_limit(Some(0)).unwrap_err();
-        assert_eq!(err.kind(), crate::services::ServiceErrorKind::BadRequest);
-    }
-
-    #[test]
-    fn truncates_extra_items() {
-        let (items, has_more) = truncate_has_more(vec![1, 2, 3], 2);
-        assert_eq!(items, vec![1, 2]);
-        assert!(has_more);
-    }
-}

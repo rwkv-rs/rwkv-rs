@@ -1,3 +1,7 @@
+#![warn(missing_docs)]
+#![warn(rustdoc::broken_intra_doc_links)]
+#![warn(rustdoc::invalid_html_tags)]
+
 //! # RWKV 派生宏库
 //!
 //! 这个库提供了两个主要的过程宏，用于简化 RWKV 项目中常见模式的代码生成：
@@ -320,8 +324,8 @@ fn extract_line_ref_type(ty: &Type) -> LineRefType {
 /// - `skip_raw`: 标记字段不从原始配置加载
 ///
 /// ### 类型处理规则
-/// - 非 Option<T> 字段在 Builder 中变为 Option<T>，build 时必须提供值
-/// - Option<T> 字段在 Builder 中保持 Option<T>，build 时可为 None
+/// - 非 `Option<T>` 字段在 Builder 中变为 `Option<T>`，build 时必须提供值
+/// - `Option<T>` 字段在 Builder 中保持 `Option<T>`，build 时可为 `None`
 ///
 /// ### 使用限制
 /// - 只能用于命名结构体（struct with named fields）

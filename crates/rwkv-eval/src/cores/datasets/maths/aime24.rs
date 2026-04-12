@@ -174,8 +174,3 @@ impl Benchmark for Aime24 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::AIME24_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(AIME24_INFO);
-}

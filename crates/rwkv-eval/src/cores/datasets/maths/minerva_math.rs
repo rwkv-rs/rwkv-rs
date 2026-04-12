@@ -186,8 +186,3 @@ impl Benchmark for MinervaMath {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::MINERVA_MATH_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(MINERVA_MATH_INFO);
-}

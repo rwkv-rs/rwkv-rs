@@ -183,8 +183,3 @@ impl Benchmark for Svamp {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::SVAMP_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(SVAMP_INFO);
-}

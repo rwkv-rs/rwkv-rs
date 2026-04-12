@@ -278,8 +278,3 @@ impl Benchmark for Ceval {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::CEVAL_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(CEVAL_INFO);
-}

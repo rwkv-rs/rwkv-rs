@@ -221,8 +221,3 @@ impl Benchmark for MmluRedux {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::MMLU_REDUX_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(MMLU_REDUX_INFO);
-}

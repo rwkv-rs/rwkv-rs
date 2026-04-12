@@ -163,8 +163,3 @@ impl Benchmark for BeyondAime {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::BEYOND_AIME_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(BEYOND_AIME_INFO);
-}

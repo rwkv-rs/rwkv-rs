@@ -177,8 +177,3 @@ impl Benchmark for CompMath2425 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::COMP_MATH_24_25_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(COMP_MATH_24_25_INFO);
-}

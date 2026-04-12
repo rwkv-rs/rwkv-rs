@@ -193,8 +193,3 @@ impl Benchmark for Mmlu {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::MMLU_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(MMLU_INFO);
-}

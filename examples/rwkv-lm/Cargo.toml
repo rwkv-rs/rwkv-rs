@@ -15,7 +15,7 @@ bench = false
 
 [[bench]]
 name = "rwkv-lm-infer-bench"
-path = "benches/rwkv-lm-infer-bench.rs"
+path = "benches/inferring.rs"
 harness = false
 required-features = ["inferring"]
 

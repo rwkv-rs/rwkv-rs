@@ -1,0 +1,76 @@
+name: Benchmarks
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  criterion-benchmarks:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Clear previous Criterion results
+        run: rm -rf target/criterion target/benchmark-results
+
+      - name: Run rwkv-nn Criterion benches
+        run: |
+          set -euo pipefail
+          mkdir -p target/benchmark-results
+          : > target/benchmark-results/rwkv-nn.txt
+          for bench in \
+            rapid_sample_forward \
+            wkv7_infer_forward \
+            wkv7_pretrain_forward \
+            wkv7_pretrain_backward \
+            wkv7_statepass_forward \
+            wkv7_statepass_backward \
+            wkv7_statetune_forward \
+            wkv7_statetune_backward
+          do
+            cargo bench -q -p rwkv-nn --features cuda --bench "$bench" -- --output-format bencher \
+              | tee -a target/benchmark-results/rwkv-nn.txt
+          done
+
+      - name: Publish benchmark history
+        if: github.event_name == 'push'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: rwkv-nn Criterion
+          tool: cargo
+          output-file-path: target/benchmark-results/rwkv-nn.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          save-data-file: true
+          benchmark-data-dir-path: dev/criterion
+          gh-pages-branch: gh-pages
+          summary-always: true
+          comment-on-alert: true
+          fail-on-alert: true
+
+      - name: Compare benchmark history on pull request
+        if: github.event_name == 'pull_request'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: rwkv-nn Criterion
+          tool: cargo
+          output-file-path: target/benchmark-results/rwkv-nn.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: false
+          save-data-file: false
+          benchmark-data-dir-path: dev/criterion
+          gh-pages-branch: gh-pages
+          summary-always: true
+          comment-on-alert: true
+          fail-on-alert: true

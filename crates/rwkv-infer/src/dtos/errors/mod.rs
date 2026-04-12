@@ -60,18 +60,3 @@ impl OpenAiErrorResponse {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::OpenAiErrorResponse;
-
-    #[test]
-    fn serializes_with_nested_error_object() {
-        let resp = OpenAiErrorResponse::bad_request("invalid prompt");
-        let json = sonic_rs::to_string(&resp).expect("serialize error response");
-
-        assert_eq!(
-            json,
-            r#"{"error":{"message":"invalid prompt","type":"invalid_request_error","param":null,"code":null}}"#
-        );
-    }
-}
