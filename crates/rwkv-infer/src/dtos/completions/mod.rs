@@ -56,6 +56,12 @@ pub struct Choice {
     pub index: u32,
     pub finish_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_stop_suffix: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_stop_suffix_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated_tokens: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub logprobs: Option<Logprobs>,
 }
 

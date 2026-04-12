@@ -40,6 +40,9 @@ impl CompletionRun {
                 text: delta.text.clone(),
                 index: 0,
                 finish_reason: None,
+                matched_stop_suffix: None,
+                matched_stop_suffix_index: None,
+                generated_tokens: None,
                 logprobs: self
                     .include_logprobs
                     .then(|| build_completion_logprobs(&delta.tokens, text_offset)),
@@ -76,6 +79,9 @@ impl CompletionRun {
                 text,
                 index: 0,
                 finish_reason: Some(finish_meta.reason.as_openai_str().to_string()),
+                matched_stop_suffix: finish_meta.matched_stop_suffix.clone(),
+                matched_stop_suffix_index: finish_meta.matched_stop_suffix_index,
+                generated_tokens: Some(finish_meta.generated_tokens),
                 logprobs: self
                     .include_logprobs
                     .then(|| build_completion_logprobs(&tokens, 0)),
@@ -93,6 +99,9 @@ impl CompletionRun {
                 text: String::new(),
                 index: 0,
                 finish_reason: Some(finish_meta.reason.as_openai_str().to_string()),
+                matched_stop_suffix: finish_meta.matched_stop_suffix.clone(),
+                matched_stop_suffix_index: finish_meta.matched_stop_suffix_index,
+                generated_tokens: Some(finish_meta.generated_tokens),
                 logprobs: None,
             }],
         }
