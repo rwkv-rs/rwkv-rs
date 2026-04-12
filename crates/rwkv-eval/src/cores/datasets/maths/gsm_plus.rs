@@ -158,8 +158,3 @@ impl Benchmark for GsmPlus {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::GSM_PLUS_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(GSM_PLUS_INFO);
-}

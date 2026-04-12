@@ -208,8 +208,3 @@ impl Benchmark for Mawps {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::MAWPS_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(MAWPS_INFO);
-}

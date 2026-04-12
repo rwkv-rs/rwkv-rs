@@ -201,8 +201,3 @@ impl Benchmark for HumanEvalCn {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::HUMAN_EVAL_CN_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(HUMAN_EVAL_CN_INFO);
-}

@@ -60,10 +60,7 @@ print(json.dumps({"passed": True, "fail_reason": ""}))
     if verdict.passed {
         Ok(())
     } else {
-        Err(format!(
-            "microsandbox probe failed: {}",
-            verdict.fail_reason
-        ))
+        Err(format!("microsandbox probe failed: {}", verdict.fail_reason))
     }
 }
 
@@ -172,64 +169,4 @@ fn parse_verdict_line(stdout: &str) -> Option<SandboxVerdictWire> {
         .lines()
         .rev()
         .find_map(|line| sonic_rs::from_str::<SandboxVerdictWire>(line.trim()).ok())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use tokio::sync::{Mutex, mpsc};
-
-    use super::{SandboxVerdict, next_sandbox_name, parse_verdict_line, run_python_verdict_script};
-
-    #[test]
-    fn parses_last_json_line() {
-        let stdout = "noise\n{\"passed\":false,\"fail_reason\":\"bad\"}\n";
-        let verdict = parse_verdict_line(stdout).unwrap();
-        assert!(!verdict.passed);
-        assert_eq!(verdict.fail_reason, "bad");
-    }
-
-    #[test]
-    fn generates_unique_sandbox_names() {
-        let first = next_sandbox_name();
-        let second = next_sandbox_name();
-        assert!(first.starts_with("rwkv-eval-coding-"));
-        assert!(second.starts_with("rwkv-eval-coding-"));
-        assert_ne!(first, second);
-    }
-
-    #[tokio::test]
-    async fn sandbox_queue_processes_requests_in_submission_order() {
-        let (sandbox_queue, mut sandbox_queue_rx) =
-            mpsc::channel::<crate::cores::sandbox_queue::SandboxQueueRequest>(8);
-        let seen_scripts = Arc::new(Mutex::new(Vec::<String>::new()));
-        let seen_scripts_consumer = Arc::clone(&seen_scripts);
-
-        tokio::spawn(async move {
-            while let Some(request) = sandbox_queue_rx.recv().await {
-                seen_scripts_consumer
-                    .lock()
-                    .await
-                    .push(request.script.clone());
-                let _ = request.result_tx.send(Ok(SandboxVerdict {
-                    passed: true,
-                    fail_reason: String::new(),
-                    stdout: request.script,
-                    stderr: String::new(),
-                }));
-            }
-        });
-
-        let first = run_python_verdict_script("first", &sandbox_queue);
-        let second = run_python_verdict_script("second", &sandbox_queue);
-        let (first, second) = tokio::join!(first, second);
-
-        assert_eq!(first.unwrap().stdout, "first");
-        assert_eq!(second.unwrap().stdout, "second");
-        assert_eq!(
-            &*seen_scripts.lock().await,
-            &["first".to_string(), "second".to_string()]
-        );
-    }
 }

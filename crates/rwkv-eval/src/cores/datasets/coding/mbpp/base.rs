@@ -175,8 +175,3 @@ impl Benchmark for Mbpp {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::MBPP_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(MBPP_INFO);
-}

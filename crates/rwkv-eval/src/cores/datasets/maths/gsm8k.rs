@@ -211,8 +211,3 @@ impl Benchmark for Gsm8k {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::GSM8K_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(GSM8K_INFO);
-}

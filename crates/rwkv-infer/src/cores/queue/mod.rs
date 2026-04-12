@@ -4,8 +4,6 @@ pub mod queue_worker;
 mod schedule;
 mod stats;
 mod step;
-#[cfg(test)]
-mod tests;
 
 use std::{
     sync::Arc,

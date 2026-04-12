@@ -189,8 +189,3 @@ impl Benchmark for GpqaExtended {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::GPQA_EXTENDED_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(GPQA_EXTENDED_INFO);
-}

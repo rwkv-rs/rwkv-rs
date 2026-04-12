@@ -1,3 +1,7 @@
+#![warn(missing_docs)]
+#![warn(rustdoc::broken_intra_doc_links)]
+#![warn(rustdoc::invalid_html_tags)]
+
 pub mod raw;
 pub mod validated;
 
@@ -10,7 +14,7 @@ use std::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub mod config_builder_helpers {
-    /// 辅助trait：智能转换 T 或 Option<T> 到 Option<T>
+    /// 辅助 trait: 智能转换 `T` 或 `Option<T>` 到 `Option<T>`
     pub trait IntoBuilderOption<T> {
         fn into_builder_option(self) -> Option<T>;
     }

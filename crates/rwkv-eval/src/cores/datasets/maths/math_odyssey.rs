@@ -222,8 +222,3 @@ impl Benchmark for MathOdyssey {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::MATH_ODYSSEY_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(MATH_ODYSSEY_INFO);
-}

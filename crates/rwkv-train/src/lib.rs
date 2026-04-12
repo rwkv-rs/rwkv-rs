@@ -1,3 +1,9 @@
+#![warn(missing_docs)]
+#![warn(rustdoc::broken_intra_doc_links)]
+#![warn(rustdoc::invalid_html_tags)]
+
+//! `rwkv-train` 暴露训练期使用的数据, 优化与日志组件.
+
 #[macro_use]
 extern crate derive_new;
 

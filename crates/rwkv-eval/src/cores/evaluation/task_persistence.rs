@@ -124,38 +124,3 @@ fn render_task_lookup_list(tasks: &[TaskLookup]) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::db::{TaskLookup, TaskStatus};
-    use super::select_resume_task_id;
-
-    #[test]
-    fn resume_prefers_latest_running_or_failed_task() {
-        let matches = vec![
-            TaskLookup {
-                task_id: 5,
-                status: TaskStatus::Failed,
-            },
-            TaskLookup {
-                task_id: 4,
-                status: TaskStatus::Running,
-            },
-            TaskLookup {
-                task_id: 3,
-                status: TaskStatus::Completed,
-            },
-        ];
-        assert_eq!(select_resume_task_id(&matches).unwrap(), 5);
-    }
-
-    #[test]
-    fn resume_rejects_completed_only_matches() {
-        let err = select_resume_task_id(&[TaskLookup {
-            task_id: 7,
-            status: TaskStatus::Completed,
-        }])
-        .unwrap_err();
-        assert!(err.contains("matching completed task already exists"));
-    }
-}

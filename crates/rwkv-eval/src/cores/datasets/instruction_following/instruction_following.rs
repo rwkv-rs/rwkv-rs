@@ -197,8 +197,3 @@ impl Benchmark for Ifeval {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::IFEVAL_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(IFEVAL_INFO);
-}

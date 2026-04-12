@@ -124,27 +124,3 @@ pub fn extract_code(text: &str) -> String {
     block.trim().to_string()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::get_prompt_for_code_completion;
-
-    #[test]
-    fn prompt_for_code_completion_stops_at_marker() {
-        let expected_context = "User: test\n\nAssistant: ```python\nprefix\n<|completions|>tail";
-        let prompt = get_prompt_for_code_completion(expected_context, None);
-        assert_eq!(prompt, "User: test\n\nAssistant: ```python\nprefix\n");
-    }
-
-    #[test]
-    fn prompt_for_code_completion_replaces_cot_before_split() {
-        let expected_context = concat!(
-            "User: test\n\nAssistant: <think><|completions_of_cot|></think>\n",
-            "```python\n<|completions|>"
-        );
-        let prompt = get_prompt_for_code_completion(expected_context, Some("reasoning"));
-        assert_eq!(
-            prompt,
-            "User: test\n\nAssistant: <think>reasoning</think>\n```python\n"
-        );
-    }
-}

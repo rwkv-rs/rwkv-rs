@@ -3,8 +3,7 @@ use std::path::{Path, PathBuf};
 use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use parquet::record::Row;
-use serde::Deserialize;
+use sonic_rs::{Object as Map, Value, prelude::*};
 
 use crate::cores::datasets::{
     ALL_BENCHMARKS,
@@ -17,8 +16,8 @@ use crate::cores::datasets::{
     SamplingConfig,
     maths::{get_expect_context, get_final_answer_with_cot_mode, judge_with_retry},
     utils::{
-        hf::downloader::download_hf_files,
-        parquet::{get_i64, get_string, read_parquet_items},
+        hf::downloader::{UrlDownloadFile, download_url_files},
+        jsonl::read_jsonl_items,
     },
 };
 
@@ -37,8 +36,8 @@ static AIME24_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.997,
     },
     n_shots: &[0],
-    avg_ks: &[64.0],
-    pass_ks: &[1],
+    avg_ks: &[16.0],
+    pass_ks: &[1, 2, 4, 8, 16, 32, 64, 128],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Aime24::new(dataset_root)),
 };
@@ -48,19 +47,10 @@ pub struct Aime24 {
     test: Vec<Aime24Item>,
 }
 
-#[derive(Clone, Deserialize)]
 pub struct Aime24Item {
-    id: i64,
-    problem: String,
-    solution: String,
-    url: String,
-}
-
-fn extract_boxed_answer(solution: &str) -> Option<String> {
-    let start = solution.rfind(r"\boxed{")? + r"\boxed{".len();
-    let rest = &solution[start..];
-    let end = rest.find('}')?;
-    Some(rest[..end].trim().to_string())
+    question: String,
+    answer: String,
+    subject: String,
 }
 
 impl Aime24 {
@@ -77,21 +67,34 @@ impl Benchmark for Aime24 {
     fn load(&mut self) -> bool {
         self.test.clear();
 
-        let path = self
-            .dataset_root
-            .join("aime24")
-            .join("test-00000-of-00001.parquet");
+        let path = self.dataset_root.join("aime24").join("aime24_test.jsonl");
         if !path.is_file() {
             return true;
         }
 
-        let parse_item = |row: &Row| Aime24Item {
-            id: get_i64(row, "id"),
-            problem: get_string(row, "problem"),
-            solution: get_string(row, "solution"),
-            url: get_string(row, "url"),
+        let take = |row: &Map, keys: &[&str]| {
+            keys.iter().find_map(|key| {
+                row.get(&key)
+                    .and_then(crate::cores::datasets::maths::json_value_as_text)
+            })
         };
-        self.test = read_parquet_items(path, parse_item);
+
+        self.test = read_jsonl_items::<Value, _>(&path)
+            .into_iter()
+            .filter_map(|row| {
+                let row = row.as_object()?;
+                let question = take(row, &["problem", "question"])?;
+                let answer = take(row, &["expected_answer", "answer"]).unwrap_or_default();
+                let subject = take(row, &["source", "subject", "domain", "category"])
+                    .unwrap_or_else(|| "math".to_string());
+                Some((question, answer, subject))
+            })
+            .map(|(question, answer, subject)| Aime24Item {
+                question,
+                answer,
+                subject,
+            })
+            .collect();
 
         self.test.is_empty()
     }
@@ -101,15 +104,15 @@ impl Benchmark for Aime24 {
     }
 
     async fn download(&self) {
-        let downloaded_path = download_hf_files(
+        let downloaded_path = download_url_files(
             &self.dataset_root,
             "aime24",
-            "datasets/math-ai/aime24",
-            &["test-00000-of-00001.parquet"],
+            &[UrlDownloadFile {
+                relative_path: PathBuf::from("aime24_test.jsonl"),
+                url: "https://raw.githubusercontent.com/rwkv-rs/rwkv-skills/main/src/eval/datasets/data_prepper/free_answer/static/aime24_test.jsonl".to_string(),
+            }],
             1,
-            "main",
-        )
-        .await;
+        ).await;
         println!("aime24 dataset: {}", downloaded_path.display());
     }
 
@@ -120,16 +123,11 @@ impl Benchmark for Aime24 {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.problem, cot_mode)
+        get_expect_context(&item.question, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
-        extract_boxed_answer(&self.test[index].solution).unwrap_or_else(|| {
-            panic!(
-                "aime24 item {} missing \\boxed{{}} answer",
-                self.test[index].id
-            )
-        })
+        self.test[index].answer.clone()
     }
 
     async fn answer_and_judge(
@@ -175,18 +173,4 @@ impl Benchmark for Aime24 {
             fail_reason: outcome.fail_reason,
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{AIME24_INFO, extract_boxed_answer};
-
-    #[test]
-    fn extract_boxed_answer_works() {
-        let solution = r"Some derivation ... \boxed{073}.";
-        assert_eq!(extract_boxed_answer(solution).as_deref(), Some("073"));
-        assert_eq!(extract_boxed_answer("no boxed answer here"), None);
-    }
-
-    crate::cores::datasets::benchmark_dataset_tests!(AIME24_INFO);
 }

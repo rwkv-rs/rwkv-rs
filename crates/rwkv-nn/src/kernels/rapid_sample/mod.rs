@@ -31,7 +31,7 @@ use burn::{
     },
 };
 
-/// Unified rapid-sample output.
+/// Output of a `rapid_sample` invocation.
 #[derive(Clone, Debug)]
 pub struct RapidSampleOutput<FT, IT> {
     /// Sampled token ids, shape `[batch_size]`.
@@ -44,14 +44,19 @@ pub struct RapidSampleOutput<FT, IT> {
     pub penalties: Option<FT>,
 }
 
+/// `rapid_sample` output expressed with standard tensor wrappers.
 pub type RapidSampleOutputTensor<B> = RapidSampleOutput<Tensor<B, 2>, Tensor<B, 1, Int>>;
+/// `rapid_sample` output expressed with backend primitives.
 pub type RapidSampleOutputPrimitive<B> = RapidSampleOutput<FloatTensor<B>, IntTensor<B>>;
 
+/// Backend hook for device-side rapid sampling.
 #[allow(clippy::too_many_arguments)]
 pub trait RapidSampleBackend: Backend {
-    /// Per-batch rapid sample.
+    /// Executes one rapid-sampling step for each active batch lane and updates RNG / penalty
+    /// state in place.
     ///
-    /// All sampling parameters are per-batch tensors (pre-normalized by caller).
+    /// Callers are expected to pass pre-normalized sampling parameters so the kernel path does
+    /// not repeat cheap host-side setup on every decode step.
     ///
     /// # Shapes
     /// - `logits`: `[batch_size, vocab_size]`
@@ -85,6 +90,11 @@ pub trait RapidSampleBackend: Backend {
     feature = "trace",
     tracing::instrument(name = "rwkv.infer.executor.rapid_sample", skip_all)
 )]
+/// Invokes device-side rapid sampling and converts backend primitives back into regular tensors.
+///
+/// # Panics
+/// Panics if the backend implementation detects that tensor shapes or state mappings violate the
+/// backend contract.
 pub fn rapid_sample<B: RapidSampleBackend>(
     logits: Tensor<B, 2>,
     batch_ids: Tensor<B, 1, Int>,

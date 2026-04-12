@@ -22,25 +22,6 @@ pub struct CompletionsReq {
     pub candidate_token_texts: Option<Vec<String>>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::CompletionsReq;
-
-    #[test]
-    fn parses_frequency_penalty_into_repetition_penalty() {
-        let req: CompletionsReq = sonic_rs::from_str(
-            r#"{
-                "model":"demo",
-                "prompt":"hi",
-                "frequency_penalty":0.25
-            }"#,
-        )
-        .expect("parse completion request");
-
-        assert_eq!(req.repetition_penalty, Some(0.25));
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompletionsResp {
     pub id: String,

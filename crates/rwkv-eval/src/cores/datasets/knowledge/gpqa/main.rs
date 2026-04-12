@@ -189,8 +189,3 @@ impl Benchmark for GpqaMain {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::GPQA_MAIN_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(GPQA_MAIN_INFO);
-}

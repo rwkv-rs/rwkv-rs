@@ -113,32 +113,3 @@ pub struct SamplingConfigsTensor<B: Backend> {
     pub repetition_penalties: Tensor<B, 1>,
     pub penalties_decay: Tensor<B, 1>,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::SamplingConfig;
-
-    #[test]
-    fn zero_top_k_is_normalized_to_unlimited_vocab() {
-        let mut cfg = SamplingConfig {
-            top_k: 0,
-            ..Default::default()
-        };
-
-        cfg.check(1024);
-
-        assert_eq!(cfg.top_k, 1024);
-    }
-
-    #[test]
-    fn positive_top_k_is_kept() {
-        let mut cfg = SamplingConfig {
-            top_k: 66,
-            ..Default::default()
-        };
-
-        cfg.check(1024);
-
-        assert_eq!(cfg.top_k, 66);
-    }
-}

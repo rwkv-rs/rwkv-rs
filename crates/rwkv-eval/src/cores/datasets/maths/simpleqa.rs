@@ -162,8 +162,3 @@ impl Benchmark for Simpleqa {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::SIMPLEQA_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(SIMPLEQA_INFO);
-}

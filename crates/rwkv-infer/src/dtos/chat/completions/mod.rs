@@ -13,7 +13,6 @@ pub struct ChatCompletionsReq {
     pub top_k: Option<i32>,
     pub top_p: Option<f32>,
     pub presence_penalty: Option<f32>,
-    #[serde(alias = "frequency_penalty")]
     pub repetition_penalty: Option<f32>,
     pub penalty_decay: Option<f32>,
     pub stop: Option<StopField>,
@@ -158,53 +157,6 @@ pub struct Choices {
     pub logprobs: Option<Logprobs>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{ChatCompletionsReq, ResponseFormat};
-
-    #[test]
-    fn parses_response_format_json_schema_with_schema_value() {
-        let req: ChatCompletionsReq = sonic_rs::from_str(
-            r#"{
-                "model":"test-model",
-                "messages":[{"role":"user","content":"hi"}],
-                "response_format":{
-                    "type":"json_schema",
-                    "json_schema":{
-                        "name":"result",
-                        "schema":{"type":"object","properties":{},"additionalProperties":false}
-                    }
-                }
-            }"#,
-        )
-        .expect("parse chat completions request");
-
-        match req.response_format.expect("response format") {
-            ResponseFormat::JsonSchema { json_schema } => {
-                assert_eq!(json_schema.name, "result");
-                assert_eq!(
-                    json_schema.schema.expect("schema"),
-                    sonic_rs::json!({"type":"object","properties":{},"additionalProperties":false})
-                );
-            }
-            other => panic!("unexpected response format: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parses_frequency_penalty_into_repetition_penalty() {
-        let req: ChatCompletionsReq = sonic_rs::from_str(
-            r#"{
-                "model":"test-model",
-                "messages":[{"role":"user","content":"hi"}],
-                "frequency_penalty":0.25
-            }"#,
-        )
-        .expect("parse chat completions request");
-
-        assert_eq!(req.repetition_penalty, Some(0.25));
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Logprobs {

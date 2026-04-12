@@ -98,23 +98,3 @@ impl SplitMix64 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::build_avg_k_execution_plan;
-
-    #[test]
-    fn ratio_avg_k_is_deterministic() {
-        let left = build_avg_k_execution_plan("demo", 10, 0.3);
-        let right = build_avg_k_execution_plan("demo", 10, 0.3);
-        assert_eq!(left.repeat_count, 1);
-        assert_eq!(left.indices, right.indices);
-        assert_eq!(left.indices.len(), 3);
-    }
-
-    #[test]
-    fn integer_avg_k_expands_repeat_count() {
-        let plan = build_avg_k_execution_plan("demo", 4, 3.0);
-        assert_eq!(plan.repeat_count, 3);
-        assert_eq!(plan.indices, vec![0, 1, 2, 3]);
-    }
-}

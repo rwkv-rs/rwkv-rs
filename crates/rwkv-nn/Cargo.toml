@@ -38,7 +38,7 @@ rwkv-config = { path = "../rwkv-config" }
 rwkv-data = { path = "../rwkv-data" }
 
 [dev-dependencies]
-divan = { workspace = true }
+criterion = { workspace = true }
 
 [[bench]]
 name = "wkv7_pretrain_forward"

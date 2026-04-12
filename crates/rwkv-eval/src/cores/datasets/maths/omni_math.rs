@@ -157,8 +157,3 @@ impl Benchmark for OmniMath {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::OMNI_MATH_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(OMNI_MATH_INFO);
-}

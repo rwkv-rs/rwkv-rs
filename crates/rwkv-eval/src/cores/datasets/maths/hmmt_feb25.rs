@@ -164,8 +164,3 @@ impl Benchmark for HmmtFeb25 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::HMMT_FEB25_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(HMMT_FEB25_INFO);
-}

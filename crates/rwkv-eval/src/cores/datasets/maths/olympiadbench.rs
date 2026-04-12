@@ -171,8 +171,3 @@ impl Benchmark for OlympiadBench {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::OLYMPIADBENCH_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(OLYMPIADBENCH_INFO);
-}

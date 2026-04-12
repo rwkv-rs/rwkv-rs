@@ -1,3 +1,5 @@
+//! Kernel 入口统一暴露 `rwkv-nn` 中需要特殊后端优化的算子.
+
 pub mod addcmul;
 pub(crate) mod backend;
 pub mod guided_token_mask;

@@ -1,0 +1,87 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    types:
+      - labeled
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: benchmarks-szx-pro6000x4
+  cancel-in-progress: false
+
+jobs:
+  criterion-benchmarks:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'run-benchmarks')
+    runs-on: [self-hosted, linux, x64, szx-pro6000x4]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Clear previous Criterion results
+        run: rm -rf target/criterion target/benchmark-results
+
+      - name: Run rwkv-nn Criterion benches
+        run: |
+          set -euo pipefail
+          mkdir -p target/benchmark-results
+          : > target/benchmark-results/rwkv-nn.txt
+          for bench in \
+            rapid_sample_forward \
+            wkv7_infer_forward \
+            wkv7_pretrain_forward \
+            wkv7_pretrain_backward \
+            wkv7_statepass_forward \
+            wkv7_statepass_backward \
+            wkv7_statetune_forward \
+            wkv7_statetune_backward
+          do
+            cargo bench -q -p rwkv-nn --features cuda --bench "$bench" -- --output-format bencher \
+              | tee -a target/benchmark-results/rwkv-nn.txt
+          done
+
+      - name: Publish benchmark history
+        if: github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: rwkv-nn Criterion
+          tool: cargo
+          output-file-path: target/benchmark-results/rwkv-nn.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          save-data-file: true
+          benchmark-data-dir-path: dev/criterion
+          gh-pages-branch: gh-pages
+          summary-always: true
+          comment-on-alert: true
+          fail-on-alert: true
+
+      - name: Compare benchmark history on labeled pull request
+        if: github.event_name == 'pull_request'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: rwkv-nn Criterion
+          tool: cargo
+          output-file-path: target/benchmark-results/rwkv-nn.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: false
+          save-data-file: false
+          benchmark-data-dir-path: dev/criterion
+          gh-pages-branch: gh-pages
+          summary-always: true
+          comment-on-alert: true
+          fail-on-alert: true

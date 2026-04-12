@@ -1,4 +1,11 @@
+#![warn(missing_docs)]
+#![warn(rustdoc::broken_intra_doc_links)]
+#![warn(rustdoc::invalid_html_tags)]
+
 //! RWKV benchmark and profiling library.
+//!
+//! The crate groups benchmark runners, profiling helpers, metrics collection, and tracing hooks
+//! used by performance work in this workspace.
 
 pub mod error;
 pub mod metrics;

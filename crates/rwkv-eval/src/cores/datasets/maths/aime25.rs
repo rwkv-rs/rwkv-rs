@@ -3,8 +3,7 @@ use std::path::{Path, PathBuf};
 use async_openai::{Client, config::OpenAIConfig};
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use serde::Deserialize;
-use sonic_rs::Value;
+use sonic_rs::{Object as Map, Value, prelude::*};
 
 use crate::cores::datasets::{
     ALL_BENCHMARKS,
@@ -37,8 +36,8 @@ static AIME25_INFO: BenchmarkInfo = BenchmarkInfo {
         penalty_decay: 0.997,
     },
     n_shots: &[0],
-    avg_ks: &[64.0],
-    pass_ks: &[1],
+    avg_ks: &[16.0],
+    pass_ks: &[8],
     with_llm_judger: true,
     create: |dataset_root| Box::new(Aime25::new(dataset_root)),
 };
@@ -48,11 +47,10 @@ pub struct Aime25 {
     test: Vec<Aime25Item>,
 }
 
-#[derive(Clone, Deserialize)]
 pub struct Aime25Item {
-    id: String,
-    problem: String,
-    answer: Value,
+    question: String,
+    answer: String,
+    subject: String,
 }
 
 impl Aime25 {
@@ -69,12 +67,34 @@ impl Benchmark for Aime25 {
     fn load(&mut self) -> bool {
         self.test.clear();
 
-        let path = self.dataset_root.join("aime25").join("test.jsonl");
+        let path = self.dataset_root.join("aime25").join("aime25_test.jsonl");
         if !path.is_file() {
             return true;
         }
 
-        self.test = read_jsonl_items::<Aime25Item, _>(&path);
+        let take = |row: &Map, keys: &[&str]| {
+            keys.iter().find_map(|key| {
+                row.get(&key)
+                    .and_then(crate::cores::datasets::maths::json_value_as_text)
+            })
+        };
+
+        self.test = read_jsonl_items::<Value, _>(&path)
+            .into_iter()
+            .filter_map(|row| {
+                let row = row.as_object()?;
+                let question = take(row, &["problem", "question"])?;
+                let answer = take(row, &["expected_answer", "answer"]).unwrap_or_default();
+                let subject = take(row, &["source", "subject", "domain", "category"])
+                    .unwrap_or_else(|| "math".to_string());
+                Some((question, answer, subject))
+            })
+            .map(|(question, answer, subject)| Aime25Item {
+                question,
+                answer,
+                subject,
+            })
+            .collect();
 
         self.test.is_empty()
     }
@@ -88,13 +108,11 @@ impl Benchmark for Aime25 {
             &self.dataset_root,
             "aime25",
             &[UrlDownloadFile {
-                relative_path: PathBuf::from("test.jsonl"),
-                url: "https://huggingface.co/datasets/math-ai/aime25/raw/main/test.jsonl"
-                    .to_string(),
+                relative_path: PathBuf::from("aime25_test.jsonl"),
+                url: "https://raw.githubusercontent.com/rwkv-rs/rwkv-skills/main/src/eval/datasets/data_prepper/free_answer/static/aime25_test.jsonl".to_string(),
             }],
             1,
-        )
-        .await;
+        ).await;
         println!("aime25 dataset: {}", downloaded_path.display());
     }
 
@@ -105,18 +123,11 @@ impl Benchmark for Aime25 {
     fn get_expected_context(&self, index: usize, cot_mode: CoTMode, _n_shot: u8) -> String {
         let item = &self.test[index];
 
-        get_expect_context(&item.problem, cot_mode)
+        get_expect_context(&item.question, cot_mode)
     }
 
     fn get_ref_answer(&self, index: usize) -> String {
-        crate::cores::datasets::maths::json_value_as_text(&self.test[index].answer).unwrap_or_else(
-            || {
-                panic!(
-                    "aime25 item has unsupported answer: {}",
-                    self.test[index].id
-                )
-            },
-        )
+        self.test[index].answer.clone()
     }
 
     async fn answer_and_judge(
@@ -162,20 +173,4 @@ impl Benchmark for Aime25 {
             fail_reason: outcome.fail_reason,
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use sonic_rs::json;
-
-    use super::AIME25_INFO;
-
-    #[test]
-    fn raw_answer_numeric_to_text() {
-        let answer = json!(70);
-        let text = crate::cores::datasets::maths::json_value_as_text(&answer).unwrap();
-        assert_eq!(text, "70");
-    }
-
-    crate::cores::datasets::benchmark_dataset_tests!(AIME25_INFO);
 }

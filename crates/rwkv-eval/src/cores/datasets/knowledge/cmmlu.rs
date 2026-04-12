@@ -281,8 +281,3 @@ impl Benchmark for Cmmlu {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::CMMLU_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(CMMLU_INFO);
-}

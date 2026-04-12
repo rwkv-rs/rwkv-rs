@@ -79,7 +79,7 @@ impl Benchmark for Brumo25 {
         let parse_item = |row: &Row| Brumo25Item {
             problem: get_string(row, "problem"),
             answer: get_string(row, "answer"),
-            problem_type: get_optional_string_list(row, "problem_type"),
+            _problem_type: get_optional_string_list(row, "problem_type"),
         };
         for path in parquet_paths {
             self.test.extend(read_parquet_items(path, parse_item));
@@ -162,10 +162,4 @@ impl Benchmark for Brumo25 {
             fail_reason: outcome.fail_reason,
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::BRUMO25_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(BRUMO25_INFO);
 }

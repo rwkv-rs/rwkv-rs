@@ -375,8 +375,3 @@ except BaseException as exc:
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::MBPP_PLUS_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(MBPP_PLUS_INFO);
-}

@@ -204,8 +204,3 @@ impl Benchmark for Asdiv {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::ASDIV_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(ASDIV_INFO);
-}

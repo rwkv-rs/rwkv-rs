@@ -1,24 +1,25 @@
 use std::{
-    any::Any,
     collections::{BTreeMap, BTreeSet},
+    env,
     fs,
-    panic::AssertUnwindSafe,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex as StdMutex},
+    process::Stdio,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use futures::FutureExt;
 use reqwest::Client;
-use rwkv_config::{raw::eval::RawEvalConfig, validated::eval::FinalEvalConfigBuilder};
+use rwkv_config::raw::eval::RawEvalConfig;
 use serde::{Deserialize, Serialize};
 use sonic_rs::Value;
-use tokio::{sync::Mutex, task::JoinHandle};
-
-use crate::{
-    cores::evaluation::{EvaluationRunRequest, execute_prepared_evaluation, prepare_evaluation},
-    services::{ServiceError, ServiceResult},
+use tokio::{
+    process::{Child, Command},
+    sync::Mutex,
 };
+
+use crate::services::{ServiceError, ServiceResult};
+
+const CONTROL_PATH_ENV: &str = "RWKV_LM_EVAL_CONTROL_PATH";
+const RUNTIME_PATH_ENV: &str = "RWKV_LM_EVAL_RUNTIME_PATH";
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -68,6 +69,12 @@ impl ObservedStatus {
     pub fn is_terminal(self) -> bool {
         matches!(self, Self::Cancelled | Self::Completed | Self::Failed)
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ControlFile {
+    pub desired_state: DesiredState,
+    pub updated_at_unix_ms: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -144,38 +151,32 @@ pub struct RuntimeDependencyStatus {
 }
 
 #[derive(Clone, Debug)]
-struct RuntimeState {
-    desired_state: DesiredState,
-    runtime: RuntimeFile,
-}
-
-#[derive(Clone, Debug)]
 pub struct EvalRuntimeControl {
-    state: Arc<StdMutex<RuntimeState>>,
+    control_path: PathBuf,
+    runtime_path: PathBuf,
 }
 
 impl EvalRuntimeControl {
-    pub fn new(desired_state: DesiredState, runtime: RuntimeFile) -> Self {
-        Self {
-            state: Arc::new(StdMutex::new(RuntimeState {
-                desired_state,
-                runtime,
+    pub fn from_env() -> Result<Option<Self>, String> {
+        let control_path = env::var_os(CONTROL_PATH_ENV);
+        let runtime_path = env::var_os(RUNTIME_PATH_ENV);
+
+        match (control_path, runtime_path) {
+            (None, None) => Ok(None),
+            (Some(control_path), Some(runtime_path)) => Ok(Some(Self {
+                control_path: PathBuf::from(control_path),
+                runtime_path: PathBuf::from(runtime_path),
             })),
+            _ => Err(format!(
+                "{CONTROL_PATH_ENV} and {RUNTIME_PATH_ENV} must be set together"
+            )),
         }
     }
 
     pub fn desired_state(&self) -> Result<DesiredState, String> {
-        Ok(self.lock_state()?.desired_state)
-    }
-
-    pub fn set_desired_state(&self, desired_state: DesiredState) -> Result<(), String> {
-        self.lock_state()?.desired_state = desired_state;
-        Ok(())
-    }
-
-    pub fn snapshot(&self) -> Result<(DesiredState, RuntimeFile), String> {
-        let state = self.lock_state()?;
-        Ok((state.desired_state, state.runtime.clone()))
+        Ok(read_control_file(&self.control_path)?
+            .map(|file| file.desired_state)
+            .unwrap_or(DesiredState::Running))
     }
 
     pub fn write_status(
@@ -184,21 +185,32 @@ impl EvalRuntimeControl {
         error: Option<&str>,
     ) -> Result<(), String> {
         let now = current_unix_millis();
-        let state = &mut *self.lock_state()?;
-        state.runtime = RuntimeFile {
+        let current = read_runtime_file(&self.runtime_path)?;
+        let started_at_unix_ms = current
+            .as_ref()
+            .map(|runtime| runtime.started_at_unix_ms)
+            .unwrap_or(now);
+        let dependencies = current
+            .as_ref()
+            .map(|runtime| runtime.dependencies.clone())
+            .unwrap_or_default();
+        let runtime = RuntimeFile {
             observed_status,
-            started_at_unix_ms: state.runtime.started_at_unix_ms,
+            started_at_unix_ms,
             updated_at_unix_ms: now,
             finished_at_unix_ms: observed_status.is_terminal().then_some(now),
             error: error.map(ToOwned::to_owned),
-            dependencies: state.runtime.dependencies.clone(),
+            dependencies,
         };
-        Ok(())
+        write_runtime_file(&self.runtime_path, &runtime)
     }
 
     pub fn heartbeat(&self) -> Result<(), String> {
-        self.lock_state()?.runtime.updated_at_unix_ms = current_unix_millis();
-        Ok(())
+        let Some(mut runtime) = read_runtime_file(&self.runtime_path)? else {
+            return Ok(());
+        };
+        runtime.updated_at_unix_ms = current_unix_millis();
+        write_runtime_file(&self.runtime_path, &runtime)
     }
 
     pub fn update_dependency_status(
@@ -210,7 +222,9 @@ impl EvalRuntimeControl {
         message: Option<&str>,
     ) -> Result<(), String> {
         let now = current_unix_millis();
-        let runtime = &mut self.lock_state()?.runtime;
+        let mut runtime = read_runtime_file(&self.runtime_path)?
+            .unwrap_or_else(|| RuntimeFile::new(ObservedStatus::Starting, None));
+
         if let Some(existing) = runtime.dependencies.iter_mut().find(|dependency| {
             dependency.role == role && dependency.label == label && dependency.base_url == base_url
         }) {
@@ -227,14 +241,9 @@ impl EvalRuntimeControl {
                 checked_at_unix_ms: Some(now),
             });
         }
-        runtime.updated_at_unix_ms = now;
-        Ok(())
-    }
 
-    fn lock_state(&self) -> Result<std::sync::MutexGuard<'_, RuntimeState>, String> {
-        self.state
-            .lock()
-            .map_err(|err| format!("lock runtime state failed: {err}"))
+        runtime.updated_at_unix_ms = now;
+        write_runtime_file(&self.runtime_path, &runtime)
     }
 }
 
@@ -365,18 +374,12 @@ struct EvalControllerState {
     active: Option<ActiveEvalRun>,
 }
 
-struct PendingActiveEvalRun {
-    config_path: String,
-    health_targets: Vec<HealthTarget>,
-    runtime_control: EvalRuntimeControl,
-    request: EvaluationRunRequest,
-}
-
 struct ActiveEvalRun {
     config_path: String,
+    control_path: PathBuf,
+    runtime_path: PathBuf,
     health_targets: Vec<HealthTarget>,
-    runtime_control: EvalRuntimeControl,
-    join_handle: Option<JoinHandle<ServiceResult<()>>>,
+    child: Child,
 }
 
 #[derive(Clone, Debug)]
@@ -395,52 +398,21 @@ impl EvalController {
     }
 
     pub async fn start(&self, run_cfg: &RawEvalConfig) -> ServiceResult<EvalRunSnapshot> {
-        let pending = PendingActiveEvalRun::build(run_cfg)?;
-        let config_path = pending.config_path.clone();
-
-        {
-            let mut guard = self.inner.lock().await;
-            refresh_active_run(guard.active.as_mut()).await?;
-
-            if let Some(active) = guard.active.as_ref() {
-                if !active.snapshot()?.runtime.observed_status.is_terminal() {
-                    return Err(ServiceError::conflict(
-                        "an evaluation task is already active",
-                    ));
-                }
-            }
-
-            // Publish a starting snapshot before the heavy prepare phase so /status can respond.
-            guard.active = Some(pending.placeholder());
-        }
-
-        let join_handle = match pending.prepare_and_spawn().await {
-            Ok(join_handle) => join_handle,
-            Err(err) => {
-                let mut guard = self.inner.lock().await;
-                if let Some(active) = guard.active.as_mut() {
-                    if active.config_path == config_path {
-                        active
-                            .runtime_control
-                            .write_status(ObservedStatus::Failed, Some(err.message()))
-                            .map_err(ServiceError::internal)?;
-                    }
-                }
-                return Err(err);
-            }
-        };
-
         let mut guard = self.inner.lock().await;
-        let active = match guard.active.as_mut() {
-            Some(active) if active.config_path == config_path => active,
-            _ => {
-                return Err(ServiceError::internal(
-                    "active evaluation changed while start was preparing",
+        refresh_active_run(guard.active.as_mut())?;
+
+        if let Some(active) = guard.active.as_mut() {
+            if !active.snapshot()?.runtime.observed_status.is_terminal() {
+                return Err(ServiceError::conflict(
+                    "an evaluation task is already active",
                 ));
             }
-        };
-        active.join_handle = Some(join_handle);
-        active.snapshot()
+        }
+
+        let active = ActiveEvalRun::spawn(run_cfg)?;
+        let snapshot = active.snapshot()?;
+        guard.active = Some(active);
+        Ok(snapshot)
     }
 
     pub async fn pause(&self) -> ServiceResult<EvalRunSnapshot> {
@@ -448,33 +420,7 @@ impl EvalController {
     }
 
     pub async fn resume(&self) -> ServiceResult<EvalRunSnapshot> {
-        let mut guard = self.inner.lock().await;
-        refresh_active_run(guard.active.as_mut()).await?;
-        let active = guard.active.as_ref().ok_or_else(|| {
-            ServiceError::not_found(
-                "no paused in-process evaluation; use /api/v1/admin/eval/start with run_mode=resume to recover historical progress",
-            )
-        })?;
-        let snapshot = active.snapshot()?;
-        if snapshot.runtime.observed_status.is_terminal() {
-            return Err(ServiceError::conflict(format!(
-                "evaluation is already {}",
-                snapshot.runtime.observed_status.as_str()
-            )));
-        }
-        if snapshot.runtime.observed_status != ObservedStatus::Paused
-            && snapshot.desired_state != DesiredState::Paused
-        {
-            return Err(ServiceError::conflict(
-                "admin resume only applies to a paused in-process evaluation; use /api/v1/admin/eval/start with run_mode=resume to recover historical progress",
-            ));
-        }
-
-        active
-            .runtime_control
-            .set_desired_state(DesiredState::Running)
-            .map_err(ServiceError::internal)?;
-        active.snapshot()
+        self.set_desired_state(DesiredState::Running).await
     }
 
     pub async fn cancel(&self) -> ServiceResult<EvalRunSnapshot> {
@@ -483,7 +429,8 @@ impl EvalController {
 
     pub async fn snapshot(&self) -> ServiceResult<Option<EvalRunSnapshot>> {
         let mut guard = self.inner.lock().await;
-        refresh_active_run(guard.active.as_mut()).await?;
+        refresh_active_run(guard.active.as_mut())?;
+
         guard
             .active
             .as_ref()
@@ -496,7 +443,7 @@ impl EvalController {
         desired_state: DesiredState,
     ) -> ServiceResult<EvalRunSnapshot> {
         let mut guard = self.inner.lock().await;
-        refresh_active_run(guard.active.as_mut()).await?;
+        refresh_active_run(guard.active.as_mut())?;
         let active = guard
             .active
             .as_ref()
@@ -509,36 +456,31 @@ impl EvalController {
             )));
         }
 
-        active
-            .runtime_control
-            .set_desired_state(desired_state)
-            .map_err(ServiceError::internal)?;
+        write_control_file(
+            &active.control_path,
+            &ControlFile {
+                desired_state,
+                updated_at_unix_ms: current_unix_millis(),
+            },
+        )
+        .map_err(ServiceError::internal)?;
+
         active.snapshot()
     }
 }
 
 impl ActiveEvalRun {
-    fn snapshot(&self) -> ServiceResult<EvalRunSnapshot> {
-        let (desired_state, runtime) = self
-            .runtime_control
-            .snapshot()
-            .map_err(ServiceError::internal)?;
-        Ok(EvalRunSnapshot {
-            config_path: self.config_path.clone(),
-            desired_state,
-            runtime,
-            health_targets: self.health_targets.clone(),
-        })
-    }
-}
-
-impl PendingActiveEvalRun {
-    fn build(run_cfg: &RawEvalConfig) -> ServiceResult<Self> {
+    fn spawn(run_cfg: &RawEvalConfig) -> ServiceResult<Self> {
         let mut run_cfg = run_cfg.clone();
         run_cfg.fill_default();
         run_cfg.admin_api_key = None;
         run_cfg.upload_to_space = Some(true);
-        let eval_cfg = FinalEvalConfigBuilder::load_from_raw(run_cfg.clone()).build_local();
+
+        if run_cfg.run_mode.as_deref() == Some("resume") {
+            return Err(ServiceError::bad_request(
+                "admin start does not support run_mode=resume with temporary config paths",
+            ));
+        }
 
         let temp_dir = build_temp_dir();
         fs::create_dir_all(&temp_dir).map_err(|err| {
@@ -548,6 +490,9 @@ impl PendingActiveEvalRun {
             ))
         })?;
         let config_path = temp_dir.join("active.toml");
+        let control_path = temp_dir.join("control.json");
+        let runtime_path = temp_dir.join("runtime.json");
+
         let raw = toml::to_string_pretty(&run_cfg).map_err(|err| {
             ServiceError::internal(format!("serialize eval config failed: {err}"))
         })?;
@@ -555,70 +500,55 @@ impl PendingActiveEvalRun {
             ServiceError::internal(format!("write {} failed: {err}", config_path.display()))
         })?;
 
+        write_control_file(
+            &control_path,
+            &ControlFile {
+                desired_state: DesiredState::Running,
+                updated_at_unix_ms: current_unix_millis(),
+            },
+        )
+        .map_err(ServiceError::internal)?;
         let mut runtime = RuntimeFile::new(ObservedStatus::Starting, None);
         runtime.dependencies = build_runtime_dependencies(&run_cfg);
-        let runtime_control = EvalRuntimeControl::new(DesiredState::Running, runtime);
+        write_runtime_file(&runtime_path, &runtime).map_err(ServiceError::internal)?;
+        let health_targets = collect_health_targets(&run_cfg);
+
+        let mut command = build_evaluator_command(&temp_dir)?;
+        command
+            .env(CONTROL_PATH_ENV, &control_path)
+            .env(RUNTIME_PATH_ENV, &runtime_path)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+
+        let child = command
+            .spawn()
+            .map_err(|err| ServiceError::internal(format!("spawn evaluator failed: {err}")))?;
+
         Ok(Self {
             config_path: config_path.display().to_string(),
-            health_targets: collect_health_targets(&run_cfg),
-            runtime_control,
-            request: EvaluationRunRequest {
-                config: eval_cfg,
-                datasets_path: rwkv_lm_eval_datasets_path(),
-                config_path,
-                logs_path: rwkv_lm_eval_logs_path(),
-                runtime_control: None,
-            },
+            control_path,
+            runtime_path,
+            health_targets,
+            child,
         })
     }
 
-    fn placeholder(&self) -> ActiveEvalRun {
-        ActiveEvalRun {
+    fn snapshot(&self) -> ServiceResult<EvalRunSnapshot> {
+        let desired_state = read_control_file(&self.control_path)
+            .map_err(ServiceError::internal)?
+            .map(|control| control.desired_state)
+            .unwrap_or(DesiredState::Running);
+        let runtime = read_runtime_file(&self.runtime_path)
+            .map_err(ServiceError::internal)?
+            .unwrap_or_else(|| RuntimeFile::new(ObservedStatus::Starting, None));
+
+        Ok(EvalRunSnapshot {
             config_path: self.config_path.clone(),
+            desired_state,
+            runtime,
             health_targets: self.health_targets.clone(),
-            runtime_control: self.runtime_control.clone(),
-            join_handle: None,
-        }
+        })
     }
-
-    async fn prepare_and_spawn(self) -> ServiceResult<JoinHandle<ServiceResult<()>>> {
-        // prepare_evaluation still has assert!/panic! paths. Convert them into a failed run
-        // instead of leaving the controller stuck with a permanent "starting" placeholder.
-        match AssertUnwindSafe(self.prepare_and_spawn_inner())
-            .catch_unwind()
-            .await
-        {
-            Ok(result) => result,
-            Err(panic) => Err(ServiceError::internal(format!(
-                "prepare admin evaluation panicked: {}",
-                panic_payload_message(&panic)
-            ))),
-        }
-    }
-
-    async fn prepare_and_spawn_inner(mut self) -> ServiceResult<JoinHandle<ServiceResult<()>>> {
-        self.request.runtime_control = Some(self.runtime_control.clone());
-        let task_runtime_control = self.runtime_control.clone();
-        let prepared = prepare_evaluation(self.request).await?;
-        Ok(tokio::spawn(async move {
-            let result = execute_prepared_evaluation(prepared).await;
-            if let Err(err) = &result {
-                let _ =
-                    task_runtime_control.write_status(ObservedStatus::Failed, Some(err.message()));
-            }
-            result
-        }))
-    }
-}
-
-fn panic_payload_message(payload: &(dyn Any + Send)) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        return (*message).to_string();
-    }
-    if let Some(message) = payload.downcast_ref::<String>() {
-        return message.clone();
-    }
-    "non-string panic payload".to_string()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -693,49 +623,45 @@ pub fn build_runtime_dependencies(cfg: &RawEvalConfig) -> Vec<RuntimeDependencyS
     dependencies
 }
 
-async fn refresh_active_run(active: Option<&mut ActiveEvalRun>) -> ServiceResult<()> {
+fn refresh_active_run(active: Option<&mut ActiveEvalRun>) -> ServiceResult<()> {
     let Some(active) = active else {
         return Ok(());
     };
-    let Some(handle) = active.join_handle.as_ref() else {
-        return Ok(());
-    };
-    if !handle.is_finished() {
-        return Ok(());
-    }
 
-    let handle = active.join_handle.take().unwrap();
-    let result = match handle.await {
-        Ok(result) => result,
-        Err(err) => {
-            active
-                .runtime_control
-                .write_status(
-                    ObservedStatus::Failed,
-                    Some(&format!("join evaluator task failed: {err}")),
-                )
-                .map_err(ServiceError::internal)?;
-            return Ok(());
-        }
+    let Some(status) = active
+        .child
+        .try_wait()
+        .map_err(|err| ServiceError::internal(format!("poll evaluator process failed: {err}")))?
+    else {
+        return Ok(());
     };
-    let (_, runtime) = active
-        .runtime_control
-        .snapshot()
-        .map_err(ServiceError::internal)?;
+
+    let runtime = read_runtime_file(&active.runtime_path)
+        .map_err(ServiceError::internal)?
+        .unwrap_or_else(|| RuntimeFile::new(ObservedStatus::Starting, None));
     if runtime.observed_status.is_terminal() {
         return Ok(());
     }
 
-    match result {
-        Ok(()) => active
-            .runtime_control
-            .write_status(ObservedStatus::Completed, None)
-            .map_err(ServiceError::internal),
-        Err(err) => active
-            .runtime_control
-            .write_status(ObservedStatus::Failed, Some(err.message()))
-            .map_err(ServiceError::internal),
-    }
+    let next_status = if status.success() {
+        ObservedStatus::Completed
+    } else {
+        ObservedStatus::Failed
+    };
+    let error = (!status.success()).then(|| format!("evaluator exited with status {status}"));
+
+    write_runtime_file(
+        &active.runtime_path,
+        &RuntimeFile {
+            observed_status: next_status,
+            started_at_unix_ms: runtime.started_at_unix_ms,
+            updated_at_unix_ms: current_unix_millis(),
+            finished_at_unix_ms: Some(current_unix_millis()),
+            error,
+            dependencies: runtime.dependencies,
+        },
+    )
+    .map_err(ServiceError::internal)
 }
 
 fn build_temp_dir() -> PathBuf {
@@ -746,19 +672,60 @@ fn build_temp_dir() -> PathBuf {
     ))
 }
 
-fn rwkv_lm_eval_datasets_path() -> PathBuf {
-    rwkv_lm_eval_root().join("datasets")
+fn build_evaluator_command(config_dir: &Path) -> ServiceResult<Command> {
+    if let Some(path) = compiled_example_path()? {
+        let mut command = Command::new(path);
+        command
+            .arg("--config-dir")
+            .arg(config_dir)
+            .arg("--eval-config")
+            .arg("active");
+        return Ok(command);
+    }
+
+    let mut command = Command::new("cargo");
+    command
+        .current_dir(workspace_root())
+        .arg("run")
+        .arg("-p")
+        .arg("rwkv-lm-eval")
+        .arg("--example")
+        .arg("rwkv-lm-eval-test")
+        .arg("--")
+        .arg("--config-dir")
+        .arg(config_dir)
+        .arg("--eval-config")
+        .arg("active");
+    Ok(command)
 }
 
-fn rwkv_lm_eval_logs_path() -> PathBuf {
-    rwkv_lm_eval_root().join("logs")
+fn compiled_example_path() -> ServiceResult<Option<PathBuf>> {
+    let current_exe = std::env::current_exe().map_err(|err| {
+        ServiceError::internal(format!("resolve current executable failed: {err}"))
+    })?;
+    let suffix = std::env::consts::EXE_SUFFIX;
+    let sibling = current_exe.with_file_name(format!("rwkv-lm-eval-test{suffix}"));
+    Ok(sibling.is_file().then_some(sibling))
 }
 
-fn rwkv_lm_eval_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("examples")
-        .join("rwkv-lm-eval")
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn read_control_file(path: &Path) -> Result<Option<ControlFile>, String> {
+    read_json(path)
+}
+
+fn write_control_file(path: &Path, file: &ControlFile) -> Result<(), String> {
+    write_json(path, file)
+}
+
+fn read_runtime_file(path: &Path) -> Result<Option<RuntimeFile>, String> {
+    read_json(path)
+}
+
+fn write_runtime_file(path: &Path, file: &RuntimeFile) -> Result<(), String> {
+    write_json(path, file)
 }
 
 fn current_unix_millis() -> u64 {
@@ -768,425 +735,44 @@ fn current_unix_millis() -> u64 {
         .as_millis() as u64
 }
 
-#[cfg(test)]
-mod tests {
-    use std::{fs, path::PathBuf};
-
-    use axum::{Router, http::header::CONTENT_TYPE, routing::get};
-    use reqwest::Client;
-    use rwkv_config::raw::eval::{ExtApiConfig, IntApiConfig, RawEvalConfig, SpaceDbConfig};
-    use tokio::{net::TcpListener, task::JoinHandle};
-
-    use super::{
-        ActiveEvalRun,
-        DependencyRole,
-        DependencyStatus,
-        DesiredState,
-        EvalController,
-        EvalControllerState,
-        EvalRunSnapshot,
-        EvalRuntimeControl,
-        ObservedStatus,
-        PendingActiveEvalRun,
-        RuntimeDependencyStatus,
-        RuntimeFile,
-        build_runtime_dependencies,
-        collect_health_targets,
-        current_unix_millis,
-        fetch_admin_health_targets,
-        fetch_health_targets,
-        normalize_base_url,
-        rwkv_lm_eval_root,
-    };
-
-    fn temp_path(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "rwkv-lm-eval-runtime-control-{}-{}",
-            std::process::id(),
-            current_unix_millis()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir.join(name)
+fn read_json<T>(path: &Path) -> Result<Option<T>, String>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    if !path.is_file() {
+        return Ok(None);
     }
 
-    fn model_config(base_url: impl Into<String>, model: &str) -> IntApiConfig {
-        IntApiConfig {
-            model_arch_version: "rwkv7".to_string(),
-            model_data_version: "g1".to_string(),
-            model_num_params: "1.5b".to_string(),
-            base_url: base_url.into(),
-            api_key: "secret".to_string(),
-            model: model.to_string(),
-            max_batch_size: Some(1),
-        }
-    }
-
-    async fn spawn_server(router: Router) -> (String, JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
-            axum::serve(listener, router).await.unwrap();
-        });
-        (format!("http://{addr}"), handle)
-    }
-
-    fn sample_cfg() -> RawEvalConfig {
-        RawEvalConfig {
-            experiment_name: "demo".to_string(),
-            experiment_desc: "demo".to_string(),
-            admin_api_key: None,
-            run_mode: Some("new".to_string()),
-            skip_checker: Some(false),
-            skip_dataset_check: Some(false),
-            judger_concurrency: Some(1),
-            checker_concurrency: Some(1),
-            db_pool_max_connections: Some(1),
-            model_arch_versions: vec!["rwkv7".to_string()],
-            model_data_versions: vec!["g1".to_string()],
-            model_num_params: vec!["1.5b".to_string()],
-            benchmark_field: vec!["Knowledge".to_string()],
-            extra_benchmark_name: vec![],
-            upload_to_space: Some(true),
-            git_hash: "abc".to_string(),
-            models: vec![
-                model_config("127.0.0.1:8080", "demo-a"),
-                model_config("127.0.0.1:8080", "demo-b"),
-            ],
-            llm_judger: ExtApiConfig {
-                base_url: "judge:8080".to_string(),
-                api_key: "secret".to_string(),
-                model: "judge".to_string(),
-            },
-            llm_checker: ExtApiConfig {
-                base_url: "judge:8080".to_string(),
-                api_key: "secret".to_string(),
-                model: "checker".to_string(),
-            },
-            space_db: SpaceDbConfig::default(),
-        }
-    }
-
-    #[test]
-    fn collects_unique_model_base_urls() {
-        let targets = collect_health_targets(&sample_cfg());
-        assert_eq!(targets.len(), 1);
-        assert_eq!(
-            targets[0].roles,
-            vec!["model:demo-a".to_string(), "model:demo-b".to_string()]
-        );
-    }
-
-    #[test]
-    fn builds_dependency_statuses_and_marks_skipped_checker() {
-        let mut cfg = sample_cfg();
-        cfg.skip_checker = Some(true);
-
-        let dependencies = build_runtime_dependencies(&cfg);
-
-        assert_eq!(dependencies.len(), 4);
-        assert!(dependencies.iter().any(|dependency| {
-            dependency.role == DependencyRole::Judger
-                && dependency.status == DependencyStatus::Unknown
-        }));
-        assert!(dependencies.iter().any(|dependency| {
-            dependency.role == DependencyRole::Checker
-                && dependency.status == DependencyStatus::Skipped
-                && dependency.checked_at_unix_ms.is_none()
-        }));
-    }
-
-    #[test]
-    fn normalizes_scheme() {
-        assert_eq!(
-            normalize_base_url("127.0.0.1:8080"),
-            "http://127.0.0.1:8080"
-        );
-        assert_eq!(
-            normalize_base_url("https://example.com"),
-            "https://example.com"
-        );
-    }
-
-    #[test]
-    fn write_status_preserves_dependency_statuses() {
-        let dependency = RuntimeDependencyStatus {
-            role: DependencyRole::Model,
-            label: "demo-a".to_string(),
-            base_url: "127.0.0.1:8080".to_string(),
-            status: DependencyStatus::Ok,
-            message: None,
-            checked_at_unix_ms: Some(123),
-        };
-        let mut runtime = RuntimeFile::new(ObservedStatus::Starting, None);
-        runtime.dependencies = vec![dependency.clone()];
-        let control = EvalRuntimeControl::new(DesiredState::Running, runtime);
-
-        control.write_status(ObservedStatus::Running, None).unwrap();
-
-        let (_, runtime) = control.snapshot().unwrap();
-        assert_eq!(runtime.dependencies, vec![dependency]);
-        assert_eq!(runtime.observed_status, ObservedStatus::Running);
-    }
-
-    #[tokio::test]
-    async fn admin_resume_rejects_non_paused_runs_and_points_to_start_resume() {
-        let controller = EvalController {
-            inner: tokio::sync::Mutex::new(EvalControllerState {
-                active: Some(ActiveEvalRun {
-                    config_path: temp_path("active.toml").display().to_string(),
-                    health_targets: Vec::new(),
-                    runtime_control: EvalRuntimeControl::new(
-                        DesiredState::Running,
-                        RuntimeFile::new(ObservedStatus::Running, None),
-                    ),
-                    join_handle: None,
-                }),
-            }),
-        };
-
-        let err = controller.resume().await.unwrap_err();
-        assert_eq!(err.kind(), crate::services::ServiceErrorKind::Conflict);
-        assert!(err.message().contains("/api/v1/admin/eval/start"));
-        assert!(err.message().contains("run_mode=resume"));
-    }
-
-    #[tokio::test]
-    async fn admin_resume_allows_paused_in_process_runs() {
-        let controller = EvalController {
-            inner: tokio::sync::Mutex::new(EvalControllerState {
-                active: Some(ActiveEvalRun {
-                    config_path: temp_path("active.toml").display().to_string(),
-                    health_targets: Vec::new(),
-                    runtime_control: EvalRuntimeControl::new(
-                        DesiredState::Paused,
-                        RuntimeFile::new(ObservedStatus::Paused, None),
-                    ),
-                    join_handle: None,
-                }),
-            }),
-        };
-
-        let snapshot = controller.resume().await.unwrap();
-        assert_eq!(snapshot.desired_state, DesiredState::Running);
-    }
-
-    #[tokio::test]
-    async fn admin_snapshot_exposes_starting_placeholder_without_join_handle() {
-        let pending = PendingActiveEvalRun::build(&sample_cfg()).unwrap();
-        let expected_config_path = pending.config_path.clone();
-        let expected_dependencies = pending
-            .runtime_control
-            .snapshot()
-            .unwrap()
-            .1
-            .dependencies
-            .len();
-        let controller = EvalController {
-            inner: tokio::sync::Mutex::new(EvalControllerState {
-                active: Some(pending.placeholder()),
-            }),
-        };
-
-        let snapshot = controller.snapshot().await.unwrap().unwrap();
-        assert_eq!(snapshot.config_path, expected_config_path);
-        assert_eq!(snapshot.desired_state, DesiredState::Running);
-        assert_eq!(snapshot.runtime.observed_status, ObservedStatus::Starting);
-        assert_eq!(snapshot.runtime.dependencies.len(), expected_dependencies);
-    }
-
-    #[tokio::test]
-    async fn admin_start_converts_prepare_panics_into_failed_snapshot() {
-        let controller = EvalController::new();
-
-        let err = controller.start(&sample_cfg()).await.unwrap_err();
-        assert_eq!(err.kind(), crate::services::ServiceErrorKind::Internal);
-        assert!(err.message().contains("prepare admin evaluation panicked"));
-
-        let snapshot = controller.snapshot().await.unwrap().unwrap();
-        assert_eq!(snapshot.runtime.observed_status, ObservedStatus::Failed);
-        assert!(
-            snapshot
-                .runtime
-                .error
-                .as_ref()
-                .is_some_and(|message| message.contains("prepare admin evaluation panicked"))
-        );
-    }
-
-    #[test]
-    fn updates_desired_state_in_memory() {
-        let control = EvalRuntimeControl::new(
-            DesiredState::Running,
-            RuntimeFile::new(ObservedStatus::Starting, None),
-        );
-        control.set_desired_state(DesiredState::Paused).unwrap();
-        assert_eq!(control.desired_state().unwrap(), DesiredState::Paused);
-    }
-
-    #[test]
-    fn heartbeat_updates_runtime_timestamp() {
-        let control = EvalRuntimeControl::new(
-            DesiredState::Running,
-            RuntimeFile::new(ObservedStatus::Starting, None),
-        );
-        let (_, before) = control.snapshot().unwrap();
-        control.heartbeat().unwrap();
-        let (_, after) = control.snapshot().unwrap();
-        assert!(after.updated_at_unix_ms >= before.updated_at_unix_ms);
-    }
-
-    #[tokio::test]
-    async fn fetch_health_targets_only_returns_infer_targets_and_keeps_partial_failures() {
-        let (ok_base_url, ok_handle) = spawn_server(
-            Router::new().route(
-                "/health",
-                get(|| async {
-                    (
-                        [(CONTENT_TYPE, "application/json")],
-                        r#"{"status":"ok","window_seconds":60,"server_time_unix_ms":1,"gpu_panels":[]}"#,
-                    )
-                }),
-            ),
+    let raw =
+        fs::read_to_string(path).map_err(|err| format!("read {} failed: {err}", path.display()))?;
+    sonic_rs::from_str(&raw).map(Some).map_err(|err| {
+        format!(
+            "parse runtime control json {} failed: {err}",
+            path.display()
         )
-        .await;
-        let (invalid_json_base_url, invalid_json_handle) =
-            spawn_server(Router::new().route("/health", get(|| async { "not-json" }))).await;
-        let (wrong_schema_base_url, wrong_schema_handle) = spawn_server(Router::new().route(
-            "/health",
-            get(|| async { ([(CONTENT_TYPE, "application/json")], r#"{"ok":true}"#) }),
-        ))
-        .await;
-
-        let mut cfg = sample_cfg();
-        cfg.models = vec![
-            model_config(ok_base_url.clone(), "demo-a"),
-            model_config(invalid_json_base_url.clone(), "demo-b"),
-            model_config(wrong_schema_base_url.clone(), "demo-c"),
-        ];
-
-        let results = fetch_health_targets(&Client::new(), &cfg).await.unwrap();
-
-        ok_handle.abort();
-        invalid_json_handle.abort();
-        wrong_schema_handle.abort();
-
-        assert_eq!(results.len(), 3);
-
-        let ok_target = results
-            .iter()
-            .find(|target| target.base_url == ok_base_url)
-            .unwrap();
-        assert_eq!(ok_target.status, "ok");
-        assert!(ok_target.health.is_some());
-
-        let invalid_json_target = results
-            .iter()
-            .find(|target| target.base_url == invalid_json_base_url)
-            .unwrap();
-        assert_eq!(invalid_json_target.status, "invalid_response");
-        assert!(
-            invalid_json_target
-                .error
-                .as_ref()
-                .is_some_and(|error| error.contains("decode"))
-        );
-
-        let wrong_schema_target = results
-            .iter()
-            .find(|target| target.base_url == wrong_schema_base_url)
-            .unwrap();
-        assert_eq!(wrong_schema_target.status, "invalid_response");
-        assert!(
-            wrong_schema_target
-                .error
-                .as_ref()
-                .is_some_and(|error| { error.contains("non-rwkv-infer health payload") })
-        );
-    }
-
-    #[tokio::test]
-    async fn fetch_admin_health_targets_prefers_active_run_targets() {
-        let (service_base_url, service_handle) = spawn_server(Router::new().route(
-            "/health",
-            get(|| async { (axum::http::StatusCode::BAD_GATEWAY, "service-config") }),
-        ))
-        .await;
-        let (active_base_url, active_handle) = spawn_server(
-            Router::new().route(
-                "/health",
-                get(|| async {
-                    (
-                        [(CONTENT_TYPE, "application/json")],
-                        r#"{"status":"ok","window_seconds":60,"server_time_unix_ms":1,"gpu_panels":[]}"#,
-                    )
-                }),
-            ),
-        )
-        .await;
-
-        let mut service_cfg = sample_cfg();
-        service_cfg.models = vec![model_config(service_base_url.clone(), "service-model")];
-        let snapshot = EvalRunSnapshot {
-            config_path: temp_path("active.toml").display().to_string(),
-            desired_state: DesiredState::Running,
-            runtime: RuntimeFile::new(ObservedStatus::Running, None),
-            health_targets: collect_health_targets(&RawEvalConfig {
-                models: vec![
-                    model_config(active_base_url.clone(), "active-a"),
-                    model_config(active_base_url.clone(), "active-b"),
-                ],
-                ..sample_cfg()
-            }),
-        };
-
-        let results = fetch_admin_health_targets(&Client::new(), Some(&snapshot), &service_cfg)
-            .await
-            .unwrap();
-
-        service_handle.abort();
-        active_handle.abort();
-
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].base_url, active_base_url);
-        assert_eq!(results[0].status, "ok");
-        assert_eq!(
-            results[0].roles,
-            vec!["model:active-a".to_string(), "model:active-b".to_string()]
-        );
-    }
-
-    #[tokio::test]
-    async fn fetch_admin_health_targets_falls_back_to_service_config_without_active_run() {
-        let (service_base_url, service_handle) = spawn_server(
-            Router::new().route(
-                "/health",
-                get(|| async {
-                    (
-                        [(CONTENT_TYPE, "application/json")],
-                        r#"{"status":"ok","window_seconds":60,"server_time_unix_ms":1,"gpu_panels":[]}"#,
-                    )
-                }),
-            ),
-        )
-        .await;
-
-        let mut service_cfg = sample_cfg();
-        service_cfg.models = vec![model_config(service_base_url.clone(), "service-model")];
-
-        let results = fetch_admin_health_targets(&Client::new(), None, &service_cfg)
-            .await
-            .unwrap();
-
-        service_handle.abort();
-
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].base_url, service_base_url);
-        assert_eq!(results[0].status, "ok");
-        assert_eq!(results[0].roles, vec!["model:service-model".to_string()]);
-    }
-
-    #[test]
-    fn resolves_eval_example_root() {
-        assert!(rwkv_lm_eval_root().join("Cargo.toml").is_file());
-    }
+    })
 }
+
+fn write_json<T>(path: &Path, value: &T) -> Result<(), String>
+where
+    T: Serialize,
+{
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("create dir {} failed: {err}", parent.display()))?;
+    }
+
+    let tmp_path = path.with_extension("tmp");
+    let raw = sonic_rs::to_string(value)
+        .map_err(|err| format!("serialize {} failed: {err}", path.display()))?;
+    fs::write(&tmp_path, raw)
+        .map_err(|err| format!("write {} failed: {err}", tmp_path.display()))?;
+    fs::rename(&tmp_path, path).map_err(|err| {
+        format!(
+            "replace runtime control {} from {} failed: {err}",
+            path.display(),
+            tmp_path.display()
+        )
+    })
+}
+

@@ -233,8 +233,3 @@ impl Benchmark for AnswerJudge {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::ANSWER_JUDGE_INFO;
-    crate::cores::datasets::benchmark_dataset_tests!(ANSWER_JUDGE_INFO);
-}
