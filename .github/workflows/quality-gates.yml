@@ -20,6 +20,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libdbus-1-dev
+
       - name: Install mdBook
         uses: taiki-e/install-action@mdbook
 
