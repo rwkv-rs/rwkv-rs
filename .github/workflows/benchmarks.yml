@@ -2,15 +2,26 @@ name: Benchmarks
 
 on:
   pull_request:
-  push:
+    types:
+      - labeled
+  workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: benchmarks-szx-pro6000x4
+  cancel-in-progress: false
+
 jobs:
   criterion-benchmarks:
-    runs-on: self-hosted
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'run-benchmarks')
+    runs-on: [self-hosted, linux, x64, szx-pro6000x4]
 
     steps:
       - name: Checkout code
@@ -44,7 +55,7 @@ jobs:
           done
 
       - name: Publish benchmark history
-        if: github.event_name == 'push'
+        if: github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: rwkv-nn Criterion
@@ -59,7 +70,7 @@ jobs:
           comment-on-alert: true
           fail-on-alert: true
 
-      - name: Compare benchmark history on pull request
+      - name: Compare benchmark history on labeled pull request
         if: github.event_name == 'pull_request'
         uses: benchmark-action/github-action-benchmark@v1
         with:

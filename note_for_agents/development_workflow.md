@@ -29,6 +29,6 @@
 
 若修改命中了 `rwkv-nn` kernel, `rwkv-lm` 推理路径或其他热点代码, 应优先复用镜像 `src/` 的 `benches/` 基准路径; 若无现成 bench, 需要按镜像规则补充新的基准文件. 需要长期对比的微基准优先走 Criterion 与 `github-action-benchmark` 的标准接入方式, 不再在源码树中单独维护 benchmark 摘要目录.
 
-当前 CI benchmark 历史只追踪 `rwkv-nn` 的 Criterion 微基准. `examples/rwkv-lm/benches/inferring.rs` 仍是带外部模型配置的手动压测入口, 不纳入该历史曲线.
+当前 CI benchmark 历史只追踪 `rwkv-nn` 的 Criterion 微基准. 为避免默认占用 `self-hosted` runner, benchmark workflow 不再随 `push` 或普通 PR 自动运行; PR 需要显式打上 `run-benchmarks` label 才会执行一次对比, 手动触发 workflow 且目标为默认分支时才会更新历史曲线. 该 workflow 固定运行在带 GPU 的 `szx-pro6000x4` runner 上, 不应调度到无 GPU 的云主机. `examples/rwkv-lm/benches/inferring.rs` 仍是带外部模型配置的手动压测入口, 不纳入该历史曲线.
 
 涉及源码注释, 术语或异常策略变更时, 同时遵循 `note_for_agents/documentation_workflow.md`.
