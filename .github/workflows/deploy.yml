@@ -1,9 +1,9 @@
 name: Deploy
 
 on:
-  push:
-    branches:
-      - main
+  pull_request_target:
+    types:
+      - closed
   workflow_dispatch:
     inputs:
       target:
@@ -25,29 +25,111 @@ concurrency:
 
 jobs:
   deploy:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request_target' &&
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'deploy'))
     runs-on: [self-hosted, linux, x64, szx-pro6000x4]
-
-    env:
-      http_proxy: http://127.0.0.1:7890
-      https_proxy: http://127.0.0.1:7890
-      no_proxy: 127.0.0.1,localhost
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.ref }}
+
+      - name: Load proxy env (optional)
+        shell: bash
+        env:
+          CI_HTTP_PROXY: ${{ vars.HTTP_PROXY }}
+          CI_HTTPS_PROXY: ${{ vars.HTTPS_PROXY }}
+          CI_NO_PROXY: ${{ vars.NO_PROXY }}
+        run: bash scripts/ci/export_proxy_env.sh
 
       - name: Show proxy env
         run: |
           env | grep -E '^(http_proxy|https_proxy|no_proxy)=' || true
 
+      - name: Read coverage target
+        id: coverage_target
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "coverage_target=$(bash scripts/ci/read_codecov_target.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Enable llvm-tools-preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup component add llvm-tools-preview
+
+      - name: Wait for exclusive GPU access and stop rwkv services
+        id: prepare_runner
+        shell: bash
+        run: bash scripts/ci/prepare_szx_pro6000x4.sh
+
+      - name: Run workspace tests under coverage
+        id: tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo llvm-cov clean --workspace
+          cargo llvm-cov nextest --workspace --no-report
+
+      - name: Restore services after failed validation
+        if: failure() && steps.tests.outcome == 'failure'
+        shell: bash
+        env:
+          INFER_WAS_ACTIVE: ${{ steps.prepare_runner.outputs.infer_was_active }}
+          EVAL_WAS_ACTIVE: ${{ steps.prepare_runner.outputs.eval_was_active }}
+        run: bash scripts/ci/restore_szx_services.sh
+
+      - name: Generate coverage reports
+        id: coverage
+        if: steps.tests.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/coverage
+
+          cargo llvm-cov report --workspace --summary-only | tee target/coverage/summary.txt
+          cargo llvm-cov report --workspace --lcov --output-path target/coverage/lcov.info >/dev/null
+
+      - name: Upload coverage to Codecov
+        if: steps.tests.outcome == 'success' && steps.coverage.outcome == 'success'
+        continue-on-error: true
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: false
+          files: target/coverage/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: false
+
+      - name: Summarize coverage debt
+        if: always()
+        shell: bash
+        env:
+          MODE: deploy
+          COVERAGE_TARGET: ${{ steps.coverage_target.outputs.coverage_target }}
+          COVERAGE_RUN_OUTCOME: ${{ steps.tests.outcome }}
+          COVERAGE_REPORTS_OUTCOME: ${{ steps.coverage.outcome }}
+        run: bash scripts/ci/summarize_coverage_debt.sh
+
       - name: Deploy infer on szx-pro6000x4
-        if: github.event_name == 'push' || github.event.inputs.target == 'all' || github.event.inputs.target == 'infer'
+        if: steps.tests.outcome == 'success' && (github.event_name == 'pull_request_target' || github.event.inputs.target == 'all' || github.event.inputs.target == 'infer')
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           /srv/deploy/deploy_infer.sh "$GITHUB_WORKSPACE"
 
       - name: Deploy eval on szx-pro6000x4
-        if: github.event_name == 'push' || github.event.inputs.target == 'all' || github.event.inputs.target == 'eval'
+        if: steps.tests.outcome == 'success' && (github.event_name == 'pull_request_target' || github.event.inputs.target == 'all' || github.event.inputs.target == 'eval')
         run: |
           /srv/deploy/deploy_eval.sh "$GITHUB_WORKSPACE"

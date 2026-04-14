@@ -1,0 +1,141 @@
+name: Quality Gates (Coverage)
+
+on:
+  pull_request:
+    types:
+      - labeled
+      - unlabeled
+      - synchronize
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  tests-and-coverage:
+    if: contains(github.event.pull_request.labels.*.name, 'deploy')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libdbus-1-dev \
+            protobuf-compiler \
+            libcap-ng-dev \
+            libdrm-dev
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Enable llvm-tools-preview
+        run: rustup component add llvm-tools-preview
+
+      - name: Read coverage target
+        id: coverage_target
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "coverage_target=$(bash scripts/ci/read_codecov_target.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Run workspace tests under coverage
+        id: coverage_run
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo llvm-cov clean --workspace
+          cargo llvm-cov nextest --workspace --no-report
+
+      - name: Generate coverage reports
+        id: coverage_reports
+        if: steps.coverage_run.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/coverage
+          cargo llvm-cov report --workspace --summary-only | tee target/coverage/summary.txt
+          cargo llvm-cov report --workspace --lcov --output-path target/coverage/lcov.info >/dev/null
+
+      - name: Upload coverage to Codecov
+        if: steps.coverage_run.outcome == 'success' && steps.coverage_reports.outcome == 'success'
+        continue-on-error: true
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: false
+          files: target/coverage/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: false
+
+      - name: Summarize coverage debt
+        id: coverage_summary
+        if: always()
+        shell: bash
+        env:
+          COVERAGE_TARGET: ${{ steps.coverage_target.outputs.coverage_target }}
+          COVERAGE_RUN_OUTCOME: ${{ steps.coverage_run.outcome }}
+          COVERAGE_REPORTS_OUTCOME: ${{ steps.coverage_reports.outcome }}
+        run: bash scripts/ci/summarize_coverage_debt.sh
+
+      - name: Comment coverage debt on pull request
+        if: github.event_name == 'pull_request' && always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          COVERAGE_STATUS: ${{ steps.coverage_summary.outputs.coverage_status }}
+          COVERAGE_PCT: ${{ steps.coverage_summary.outputs.coverage_pct }}
+          COVERAGE_TARGET: ${{ steps.coverage_target.outputs.coverage_target }}
+        with:
+          script: |
+            const path = require("path");
+            const scriptPath = path.join(
+              process.env.GITHUB_WORKSPACE,
+              "scripts/ci/comment_coverage_debt.js",
+            );
+            await require(scriptPath)({ github, context });
+
+  cleanup-coverage-debt-comment:
+    if: github.event_name == 'pull_request' && github.event.action == 'unlabeled' && github.event.label.name == 'deploy'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Remove coverage debt comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "<!-- codex:coverage-debt -->";
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find(
+              (comment) =>
+                comment.user?.type === "Bot" && comment.body?.includes(marker),
+            );
+
+            if (!existing) {
+              return;
+            }
+
+            await github.rest.issues.deleteComment({
+              owner,
+              repo,
+              comment_id: existing.id,
+            });

@@ -1,4 +1,4 @@
-name: Quality Gates
+name: Quality Gates (Docs)
 
 on:
   pull_request:
@@ -48,125 +48,25 @@ jobs:
       - name: Summarize rustdoc missing_docs debt
         id: rustdoc_summary
         if: always()
-        run: |
-          set -euo pipefail
-
-          log_path=target/ci/rustdoc.log
-          missing_docs_log=target/ci/missing-docs.log
-          summary_path=target/ci/missing-docs-summary.md
-
-          if [ ! -f "$log_path" ]; then
-            {
-              echo "has_missing_docs=false"
-              echo "missing_docs_count=0"
-              echo "missing_docs_file_count=0"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          rg "warning: missing documentation" "$log_path" > "$missing_docs_log" || true
-
-          missing_docs_count=$(wc -l < "$missing_docs_log" | tr -d '[:space:]')
-          missing_docs_file_count=$(cut -d: -f1 "$missing_docs_log" | sort -u | wc -l | tr -d '[:space:]')
-
-          {
-            echo "has_missing_docs=$([ "$missing_docs_count" -gt 0 ] && echo true || echo false)"
-            echo "missing_docs_count=$missing_docs_count"
-            echo "missing_docs_file_count=$missing_docs_file_count"
-          } >> "$GITHUB_OUTPUT"
-
-          {
-            echo "### Rustdoc Missing Docs Debt"
-            echo
-            if [ "$missing_docs_count" -gt 0 ]; then
-              echo "- Status: non-blocking warning"
-              echo "- Warning count: $missing_docs_count"
-              echo "- Files affected: $missing_docs_file_count"
-              echo "- Policy: this workflow does not fail on \`missing_docs\`, but it should not pass silently."
-              echo
-              echo "Top files by warning count:"
-              echo
-              echo '```text'
-              cut -d: -f1 "$missing_docs_log" | sort | uniq -c | sort -nr | head -n 10 | sed 's/^ *//'
-              echo '```'
-              echo
-              echo "Sample warnings:"
-              echo
-              echo '```text'
-              head -n 20 "$missing_docs_log"
-              echo '```'
-            else
-              echo "- No \`missing_docs\` warnings were emitted in this run."
-            fi
-          } > "$summary_path"
-
-          cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          RUSTDOC_OUTCOME: ${{ steps.rustdoc.outcome }}
+        run: bash scripts/ci/summarize_rustdoc_missing_docs.sh
 
       - name: Comment rustdoc missing_docs debt on pull request
         if: github.event_name == 'pull_request' && always()
         continue-on-error: true
         uses: actions/github-script@v7
         env:
-          HAS_MISSING_DOCS: ${{ steps.rustdoc_summary.outputs.has_missing_docs }}
-          MISSING_DOCS_COUNT: ${{ steps.rustdoc_summary.outputs.missing_docs_count }}
-          MISSING_DOCS_FILE_COUNT: ${{ steps.rustdoc_summary.outputs.missing_docs_file_count }}
+          RUSTDOC_STATUS: ${{ steps.rustdoc_summary.outputs.rustdoc_status }}
           SUMMARY_PATH: target/ci/missing-docs-summary.md
         with:
           script: |
-            const fs = require("fs");
-
-            const marker = "<!-- codex:rustdoc-missing-docs-debt -->";
-            const hasMissingDocs = process.env.HAS_MISSING_DOCS === "true";
-            const summaryPath = process.env.SUMMARY_PATH;
-            const { owner, repo } = context.repo;
-            const issue_number = context.issue.number;
-
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number,
-              per_page: 100,
-            });
-
-            const existing = comments.find(
-              (comment) =>
-                comment.user?.type === "Bot" && comment.body?.includes(marker),
+            const path = require("path");
+            const scriptPath = path.join(
+              process.env.GITHUB_WORKSPACE,
+              "scripts/ci/comment_rustdoc_missing_docs_debt.js",
             );
-
-            if (!hasMissingDocs) {
-              if (existing) {
-                await github.rest.issues.deleteComment({
-                  owner,
-                  repo,
-                  comment_id: existing.id,
-                });
-              }
-              return;
-            }
-
-            const summary = fs.readFileSync(summaryPath, "utf8").trim();
-            const body = [
-              marker,
-              summary,
-              "",
-              "- This is a non-blocking reminder posted from `docs-and-quality`.",
-            ].join("\n");
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number,
-                body,
-              });
-            }
+            await require(scriptPath)({ github, context });
 
       - name: Build book
         run: mdbook build rwkv-rs-book
