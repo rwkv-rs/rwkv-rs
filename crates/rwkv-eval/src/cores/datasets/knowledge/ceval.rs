@@ -278,4 +278,3 @@ impl Benchmark for Ceval {
         }
     }
 }
-

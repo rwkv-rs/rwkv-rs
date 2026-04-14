@@ -161,4 +161,3 @@ impl Benchmark for Simpleqa {
         }
     }
 }
-

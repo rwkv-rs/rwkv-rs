@@ -225,4 +225,3 @@ impl Benchmark for MmluPro {
         }
     }
 }
-

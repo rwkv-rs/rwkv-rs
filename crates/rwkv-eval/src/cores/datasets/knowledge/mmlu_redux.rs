@@ -221,4 +221,3 @@ impl Benchmark for MmluRedux {
         }
     }
 }
-

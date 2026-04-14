@@ -348,4 +348,3 @@ fn read_array<const N: usize>(input: &[u8], offset: usize) -> IpcResult<[u8; N]>
     out.copy_from_slice(&input[offset..end]);
     Ok(out)
 }
-

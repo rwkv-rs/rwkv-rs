@@ -59,10 +59,7 @@ fn create_benchmark(info: &BenchmarkInfo, dataset_root: &Path) -> Box<dyn Benchm
     (info.create)(dataset_root.to_path_buf())
 }
 
-fn acquire_shared_benchmark_lock(
-    info: &BenchmarkInfo,
-    dataset_root: &Path,
-) -> SharedBenchmarkLock {
+fn acquire_shared_benchmark_lock(info: &BenchmarkInfo, dataset_root: &Path) -> SharedBenchmarkLock {
     let lock_dir = dataset_root.join(".locks");
     fs::create_dir_all(&lock_dir).unwrap_or_else(|err| {
         panic!(

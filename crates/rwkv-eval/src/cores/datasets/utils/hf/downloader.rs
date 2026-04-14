@@ -624,4 +624,3 @@ fn normalize_repo(repo: &str) -> (String, String, String) {
 
     (url, repo_id, repo_name)
 }
-

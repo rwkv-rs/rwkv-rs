@@ -100,4 +100,3 @@ pub enum GpuSampleStatus {
     Ok,
     Unavailable,
 }
-

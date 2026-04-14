@@ -232,4 +232,3 @@ impl Benchmark for AnswerJudge {
         }
     }
 }
-

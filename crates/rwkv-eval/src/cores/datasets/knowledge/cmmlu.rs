@@ -280,4 +280,3 @@ impl Benchmark for Cmmlu {
         }
     }
 }
-

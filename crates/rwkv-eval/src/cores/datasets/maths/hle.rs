@@ -170,4 +170,3 @@ impl Benchmark for Hle {
         }
     }
 }
-

@@ -169,4 +169,3 @@ impl Benchmark for SuperGpqa {
         }
     }
 }
-

@@ -231,4 +231,3 @@ fn parse_checker_output(content: &str) -> Result<CheckerOutput, String> {
         reason,
     })
 }
-

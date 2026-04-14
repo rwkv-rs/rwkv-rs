@@ -95,4 +95,3 @@ fn estimate_pass_at_k(n: usize, c: usize, k: u8) -> Result<f64, String> {
     }
     Ok(1.0 - fail_prob)
 }
-

@@ -6,6 +6,7 @@
 - `cargo +nightly fmt --all`: 按仓库 rustfmt 配置格式化代码.
 - `cargo clippy --workspace --all-targets -- -D warnings`: 以零告警为目标检查代码.
 - `cargo nextest run --workspace`: 优先使用的测试入口.
+- `cargo llvm-cov nextest --workspace --lcov --output-path target/coverage/lcov.info`: 运行 workspace 测试并生成覆盖率报告.
 - `cargo bench -p <crate> --bench <name>`: 执行 Criterion 基准; 需要给 `github-action-benchmark` 留存时, 追加 `-- --output-format bencher`.
 - `cargo doc --workspace --no-deps`: 生成文档并检查导出层; crate 根上的 `missing_docs` / rustdoc lint 会以 `warn` 暴露全仓文档问题.
 - `mdbook build rwkv-rs-book`: 构建书籍并检查章节结构.
@@ -23,6 +24,7 @@
 - 涉及异步逻辑时使用 `#[tokio::test]`.
 - `rwkv-eval` 的 benchmark 数据集测试位于 `crates/rwkv-eval/tests/cores/datasets/**`, 默认被忽略, 需使用 `cargo nextest -p rwkv-eval --test benchmark_datasets --run-ignored only ...` 执行.
 - `examples/rwkv-lm-eval/scripts/unit_test.sh` 展示了一个需要 `HF_TOKEN` 的测试入口.
+- CI 覆盖率使用 `cargo-llvm-cov` + `cargo nextest`; 覆盖率低于 `codecov.yml` 目标时只做 summary / PR 提示, 不阻塞通过后的部署.
 
 ## 性能相关改动
 涉及性能优化时, 不要只给出主观判断. 应结合基准测试或关键指标, 明确变更前后差异与瓶颈位置.

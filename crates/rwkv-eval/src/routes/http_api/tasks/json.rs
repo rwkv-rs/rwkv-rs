@@ -165,4 +165,3 @@ fn compute_planned_attempts(record: &TaskRecord, sampling: &SamplingSummary) -> 
             .saturating_mul(max_pass_k),
     )
 }
-

@@ -203,4 +203,3 @@ impl Benchmark for Asdiv {
         }
     }
 }
-

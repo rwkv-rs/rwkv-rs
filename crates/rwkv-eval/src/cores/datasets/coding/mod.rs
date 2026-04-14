@@ -123,4 +123,3 @@ pub fn extract_code(text: &str) -> String {
 
     block.trim().to_string()
 }
-

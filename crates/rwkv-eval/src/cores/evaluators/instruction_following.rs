@@ -721,4 +721,3 @@ fn detect_language_matches(language: &str, value: &str) -> bool {
         .map(|detected| detected == language)
         .unwrap_or(true)
 }
-

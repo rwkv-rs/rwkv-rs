@@ -160,4 +160,3 @@ impl Benchmark for Amc23 {
         }
     }
 }
-

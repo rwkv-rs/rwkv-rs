@@ -60,7 +60,10 @@ print(json.dumps({"passed": True, "fail_reason": ""}))
     if verdict.passed {
         Ok(())
     } else {
-        Err(format!("microsandbox probe failed: {}", verdict.fail_reason))
+        Err(format!(
+            "microsandbox probe failed: {}",
+            verdict.fail_reason
+        ))
     }
 }
 

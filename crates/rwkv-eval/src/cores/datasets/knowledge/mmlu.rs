@@ -193,4 +193,3 @@ impl Benchmark for Mmlu {
         }
     }
 }
-

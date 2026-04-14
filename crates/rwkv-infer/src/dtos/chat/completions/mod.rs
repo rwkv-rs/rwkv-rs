@@ -157,7 +157,6 @@ pub struct Choices {
     pub logprobs: Option<Logprobs>,
 }
 
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Logprobs {
     pub content: Vec<Content>,

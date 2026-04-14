@@ -200,4 +200,3 @@ impl Benchmark for HumanEvalCn {
         }
     }
 }
-

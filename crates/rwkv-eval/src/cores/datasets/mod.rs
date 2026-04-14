@@ -203,7 +203,9 @@ pub async fn get_completions_of_cot(
         None,
     );
 
-    let resp: CompletionResponse = create_completion_streamed(model_client, &req).await.unwrap();
+    let resp: CompletionResponse = create_completion_streamed(model_client, &req)
+        .await
+        .unwrap();
 
     resp.choices[0].text.clone()
 }

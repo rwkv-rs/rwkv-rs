@@ -188,4 +188,3 @@ impl Benchmark for GpqaMain {
         }
     }
 }
-

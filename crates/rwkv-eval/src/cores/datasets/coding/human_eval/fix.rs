@@ -103,15 +103,13 @@ impl Benchmark for HumanEvalFix {
             return true;
         }
 
-        let parse_item = |row: &Row| {
-            HumanEvalFixItem {
-                task_id: get_string(row, "task_id"),
-                prompt: get_string(row, "prompt"),
-                buggy_solution: get_string(row, "buggy_solution"),
-                entry_point: get_string(row, "entry_point"),
-                canonical_solution: get_string(row, "canonical_solution"),
-                test: get_string(row, "test"),
-            }
+        let parse_item = |row: &Row| HumanEvalFixItem {
+            task_id: get_string(row, "task_id"),
+            prompt: get_string(row, "prompt"),
+            buggy_solution: get_string(row, "buggy_solution"),
+            entry_point: get_string(row, "entry_point"),
+            canonical_solution: get_string(row, "canonical_solution"),
+            test: get_string(row, "test"),
         };
         for path in parquet_paths {
             self.test.extend(read_parquet_items(path, parse_item));
@@ -203,4 +201,3 @@ impl Benchmark for HumanEvalFix {
         }
     }
 }
-

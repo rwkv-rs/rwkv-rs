@@ -147,4 +147,3 @@ fn json_content_type(headers: &HeaderMap<HeaderValue>) -> bool {
     ty.eq_ignore_ascii_case("application")
         && (subtype.eq_ignore_ascii_case("json") || subtype.to_ascii_lowercase().ends_with("+json"))
 }
-

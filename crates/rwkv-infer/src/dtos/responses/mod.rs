@@ -34,4 +34,3 @@ pub struct DeleteResp {
     pub id: String,
     pub deleted: bool,
 }
-

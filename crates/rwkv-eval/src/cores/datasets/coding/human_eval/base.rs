@@ -172,4 +172,3 @@ impl Benchmark for HumanEval {
         }
     }
 }
-

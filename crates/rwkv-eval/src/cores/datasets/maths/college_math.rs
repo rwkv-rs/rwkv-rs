@@ -156,4 +156,3 @@ impl Benchmark for CollegeMath {
         }
     }
 }
-

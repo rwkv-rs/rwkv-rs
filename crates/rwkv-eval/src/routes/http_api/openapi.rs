@@ -125,4 +125,3 @@ use crate::dtos::{
     )
 )]
 pub(crate) struct ApiDoc;
-

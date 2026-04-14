@@ -154,4 +154,3 @@ fn truncate_has_more<T>(mut items: Vec<T>, limit: u32) -> (Vec<T>, bool) {
     }
     (items, has_more)
 }
-

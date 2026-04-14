@@ -349,4 +349,3 @@ fn detect_vendor(info: &GpuInfo) -> String {
 
     info.device_type.to_ascii_lowercase()
 }
-

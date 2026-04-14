@@ -101,8 +101,9 @@ impl Benchmark for LiveCodeBench {
         }
 
         for file_name in file_names {
-            self.test
-                .extend(read_jsonl_items::<LiveCodeBenchItem, _>(root.join(file_name)));
+            self.test.extend(read_jsonl_items::<LiveCodeBenchItem, _>(
+                root.join(file_name),
+            ));
         }
 
         self.test.is_empty()
@@ -727,4 +728,3 @@ else:
         helpers = helpers,
     )
 }
-

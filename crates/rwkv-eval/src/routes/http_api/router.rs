@@ -77,4 +77,3 @@ impl HttpApiRouterBuilder {
 pub fn build_router(state: AppState) -> Router {
     HttpApiRouterBuilder::new(state).build()
 }
-

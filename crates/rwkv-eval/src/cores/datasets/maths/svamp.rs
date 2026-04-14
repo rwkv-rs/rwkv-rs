@@ -183,4 +183,3 @@ impl Benchmark for Svamp {
         }
     }
 }
-

@@ -97,4 +97,3 @@ impl SplitMix64 {
         z ^ (z >> 31)
     }
 }
-

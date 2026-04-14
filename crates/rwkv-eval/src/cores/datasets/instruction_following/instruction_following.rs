@@ -137,11 +137,7 @@ impl Benchmark for Ifeval {
     fn get_ref_answer(&self, index: usize) -> String {
         let item = &self.test[index];
         let instructions = Self::instructions_for(item);
-        format!(
-            "key={}\n{}",
-            item.key,
-            describe_instructions(&instructions)
-        )
+        format!("key={}\n{}", item.key, describe_instructions(&instructions))
     }
 
     async fn answer_and_judge(
@@ -196,4 +192,3 @@ impl Benchmark for Ifeval {
         }
     }
 }
-

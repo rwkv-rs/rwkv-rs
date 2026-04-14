@@ -174,4 +174,3 @@ impl Benchmark for Mbpp {
         }
     }
 }
-

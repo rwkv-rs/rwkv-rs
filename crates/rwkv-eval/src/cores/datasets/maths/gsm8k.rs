@@ -210,4 +210,3 @@ impl Benchmark for Gsm8k {
         }
     }
 }
-
